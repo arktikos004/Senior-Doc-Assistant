@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>看有 高齡家庭文書輔助</title>
+  <!-- 滿版領航藍(maskable 安全區內放主圖):白色文件 + 羅盤指針,和頁面上的 logo 同一個圖形 -->
+  <rect width="512" height="512" fill="#1B4F9C"/>
+  <path d="M190 112h120l84 84v192a26 26 0 0 1-26 26H190a26 26 0 0 1-26-26V138a26 26 0 0 1 26-26z" fill="#FFFFFF"/>
+  <path d="M310 112v84h84" fill="none" stroke="#C9D8F2" stroke-width="22" stroke-linejoin="round"/>
+  <path d="M336 235 298 324 252 284z" fill="#D97706"/>
+  <path d="M214 373 252 284 298 324z" fill="#1B4F9C"/>
+</svg>

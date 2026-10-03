@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ detail }} - {{ BRAND_FULL }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div class="page-head__text">
+    <h1>{{ detail }}</h1>
+    {# 錯誤訊息要帶下一步;說明與按鈕由 web/app.py 依錯誤決定(PageError 或狀態碼的預設),這裡只排版 #}
+    <p class="lede">錯誤代碼 {{ status }}。{{ hint }}</p>
+  </div>
+</header>
+<p><a class="btn btn--primary btn--lg" href="{{ next_url }}">{{ icon(next_icon) }}{{ next_label }}</a></p>
+{% endblock %}

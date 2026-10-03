@@ -1,0 +1,18 @@
+# 看有(高齡家庭文書輔助)相依套件
+watchdog>=4.0        # 資料夾監控
+ollama>=0.4          # Ollama 本地 AI 模型串接(伺服器端需 >= 0.22 才支援 Gemma 4)
+httpx>=0.27          # Cloudflare Workers AI REST 呼叫;FastAPI TestClient 也需要
+PyYAML>=6.0          # 設定檔讀取
+pypdfium2>=4.30      # PDF 轉影像(免安裝 poppler)
+Pillow>=10.0         # 影像處理
+numpy>=1.26          # 影像前處理(歪斜偵測);opencv 也依賴它
+openpyxl>=3.1        # 對帳彙整匯出 Excel(.xlsx)
+opencv-python-headless>=4.9  # 自我驗證:電子發票 QR/條碼解碼(免安裝系統函式庫)
+qrcode[pil]>=7.4     # 合成樣本:產生符合財政部格式的電子發票 QR
+pytest>=8.0          # 單元測試
+
+# Web 介面(web/app.py)
+fastapi>=0.115       # Web 框架
+uvicorn>=0.30        # ASGI 伺服器
+python-multipart>=0.0.9  # 表單與檔案上傳(FastAPI Form/File 需要)
+jinja2>=3.1          # 網頁樣板(autoescape 防 XSS)

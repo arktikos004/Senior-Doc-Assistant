@@ -1,0 +1,29 @@
+# 看有(高齡家庭文書輔助):Cloudflare Tunnel 設定範例
+#
+# 用法(步驟見 docs/部署指南.md 第 4 節):
+#   1. cloudflared tunnel login                    # 瀏覽器登入 Cloudflare,選家裡的網域
+#   2. cloudflared tunnel create senior-doc        # 印出 Tunnel ID,並在 %USERPROFILE%\.cloudflared\ 產生 <Tunnel ID>.json 憑證
+#   3. 把這個檔複製成 %USERPROFILE%\.cloudflared\config.yml,把下面的 Tunnel ID、使用者名稱、網址換成自己的
+#   4. cloudflared tunnel route dns senior-doc app.example.com
+#   5. cloudflared tunnel --config %USERPROFILE%\.cloudflared\config.yml run
+#
+# 真的 config.yml 與 <Tunnel ID>.json 只放在 %USERPROFILE%\.cloudflared\,不要放進 repo:
+# 憑證檔等於這條通道的密碼,拿到的人可以冒充你的 GPU 電腦。
+
+tunnel: 00000000-0000-0000-0000-000000000000
+credentials-file: C:\Users\<使用者名稱>\.cloudflared\00000000-0000-0000-0000-000000000000.json
+
+# cloudflared 對外連 Cloudflare 的 7844 埠。預設先試 QUIC(UDP 7844),學校或公司網路常擋 UDP,
+# 所以這裡直接用 http2(改走 TCP 7844)。網路沒擋 UDP 的話可以刪掉這行。
+# TCP 7844 也被擋時通道開不起來,要換網路,或請網管開放對外的 7844(TCP)。
+protocol: http2
+
+# 版本更新交給人手動做(winget upgrade Cloudflare.cloudflared),避免比賽展示中途自己重啟
+no-autoupdate: true
+
+ingress:
+  # 家人用的網址:只轉到本機的網頁(uvicorn 只綁 127.0.0.1,外面連不到)
+  - hostname: app.example.com
+    service: http://127.0.0.1:8000
+  # 其他任何主機名稱一律 404,不要轉到別的服務
+  - service: http_status:404

@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.pytest_tmp/
+venv/
+.venv/
+
+# 執行期產生的資料與紀錄(保留資料夾結構,不追蹤內容)
+data/inbox/*
+data/archive/*
+data/review/*
+data/failed/*
+data/uploads/*
+logs/*
+!data/inbox/.gitkeep
+!data/archive/.gitkeep
+!data/review/.gitkeep
+!data/failed/.gitkeep
+!data/uploads/.gitkeep
+!logs/.gitkeep
+
+# 測試樣本可能含個資(真實發票/收據),預設不追蹤;僅保留合成範例
+data/samples/*
+!data/samples/.gitkeep
+!data/samples/合成發票範例.png
+!data/samples/labels.example.csv
+# 注意:實際的 labels.csv 含個資,維持忽略,只提交 .example 範本
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code 平行開發的 worktree(每張票各一個,整合後刪除)
+.claude/worktrees/
+
+# 展示伺服器的隔離資料(tools/demo_server.py)
+data/demo_run/

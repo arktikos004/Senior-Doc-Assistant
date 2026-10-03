@@ -1,0 +1,19 @@
+{
+  "name": "看有 高齡家庭文書輔助",
+  "short_name": "看有",
+  "description": "拍下帳單、藥袋、公文、發票,用大字與朗讀告訴您這是什麼、要做什麼。",
+  "lang": "zh-Hant-TW",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#F6F8FB",
+  "icons": [
+    {
+      "src": "/static/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{# 文件清單(首頁「最近看過的文件」與文件櫃共用):rows 是 render.doc_row 的結果,每列連到結果頁。
+   電腦版有欄名列(aria-hidden,只給眼睛看);手機版改成兩行,見 app.css 的 .tbl #}
+{% macro doc_table(rows) %}
+<div class="tbl">
+  <div class="tbl__row tbl__row--head" aria-hidden="true"><span></span><span>文件</span><span>上傳時間</span><span>狀態</span><span></span></div>
+  <ul class="tbl__list">
+    {% for d in rows %}
+    <li><a class="tbl__row" href="/doc/{{ d.id }}">
+      <span class="type-icon">{{ icon(d.icon) }}</span>
+      <span class="tbl__main"><span class="tbl__title">{{ d.title }}</span>{% if d.subtitle %}<span class="tbl__sub tbl__sub--clamp">{{ d.subtitle }}</span>{% endif %}</span>
+      <span class="tbl__meta"><span class="tbl__when">{{ d.when }}</span>
+        <span class="tbl__status"><span class="pill pill--{{ d.state_class }}">{{ icon(d.state_icon) }}{{ d.state_text }}</span></span></span>
+      {{ icon("chevron-right", "tbl__chev") }}
+    </a></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endmacro %}

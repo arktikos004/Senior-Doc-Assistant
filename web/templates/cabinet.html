@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% from "_doc_table.html" import doc_table %}
+{% block title %}文件櫃 - {{ BRAND_FULL }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div class="page-head__text">
+    <h1>文件櫃</h1>
+    <p class="lede">所有文件依四大類整理。點一類就只看那一類;公文依上傳時選的類別放進去,沒選的放在「未分類」,由家人在「更正讀值」指定。</p>
+  </div>
+</header>
+
+{# 四大類卡片:點一類只看那一類(一般連結,沒有 JS 也能用);份數含讀不出來與等待複核的文件 #}
+<nav class="cats" aria-label="文件類別">
+  {% for c in v.cards %}
+  <a class="cat" href="{{ c.href }}"{% if c.current %} aria-current="true"{% endif %}>
+    <span class="type-icon">{{ icon(c.icon) }}</span><b>{{ c.name }}</b><small>{{ c.examples }}</small>
+    <span class="n">{{ c.count }}<small> 份</small></span>
+  </a>
+  {% endfor %}
+</nav>
+
+{% for s in v.sections %}
+<section class="section" aria-labelledby="cat-title-{{ loop.index }}">
+  <div class="section__head"><h2 id="cat-title-{{ loop.index }}">{{ s.name }}</h2><span class="muted">{{ s.count }} 份</span></div>
+  {% if s.rows %}{{ doc_table(s.rows) }}{% else %}<p class="empty">{{ s.empty }}</p>{% endif %}
+  {% if loop.last and v.id_note %}<p class="section__note">{{ v.id_note }}</p>{% endif %}
+</section>
+{% else %}
+<section class="section" aria-label="文件">
+  <p class="empty">還沒有文件。拍下第一張,結果會出現在這裡。</p>
+  {% if v.id_note %}<p class="section__note">{{ v.id_note }}</p>{% endif %}
+</section>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% from "_doc_table.html" import doc_table %}
+{% block title %}拍照上傳 - {{ BRAND_FULL }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div class="page-head__text">
+    <h1>首頁</h1>
+    <p class="lede">拍下帳單、藥袋、公文或發票,「{{ BRAND_NAME }}」幫您讀懂、核對,並提醒要做的事。</p>
+  </div>
+</header>
+
+<section class="panel upload" aria-labelledby="upload-title">
+  <form method="post" action="/upload" enctype="multipart/form-data"
+        data-upload-form data-max-bytes="{{ max_bytes }}" novalidate>
+    {{ csrf_input() }}
+    <div class="drop">
+      <span class="drop__icon">{{ icon("camera") }}</span>
+      <div class="drop__text">
+        <h2 id="upload-title">拍照或選一張照片</h2>
+        <p class="muted" id="file-hint">手機會打開相機;電腦請選照片或 PDF,15MB 以內。</p>
+      </div>
+      <div class="drop__btns">
+        <input class="visually-hidden capture__input" id="file" name="file" type="file"
+               accept="image/*,application/pdf" capture="environment"
+               aria-describedby="file-hint{% if error %} file-error{% endif %}"{% if error %} aria-invalid="true"{% endif %}>
+        <label class="btn btn--primary btn--lg source" for="file">{{ icon("camera") }}拍照</label>
+        <input class="visually-hidden pick__input" id="file-pick" name="file_pick" type="file"
+               accept="image/*,application/pdf" aria-describedby="file-hint">
+        <label class="btn btn--secondary btn--lg source" for="file-pick">{{ icon("image") }}選照片</label>
+      </div>
+    </div>
+    <div class="chosen" data-file-chosen hidden>
+      <p class="chosen__name">{{ icon("check") }}<span>已選好:<span data-file-name></span></span></p>
+    </div>
+    <p class="field-error" id="file-error" role="alert" data-file-error{% if not error %} hidden{% endif %}>
+      {{ icon("alert") }}<span data-file-error-text>{{ error or "" }}</span>
+    </p>
+
+    <div class="upload__row">
+      <fieldset class="kinds">
+        <legend>這是哪一類?<span>不確定可以不選,AI 會自己判斷</span></legend>
+        <div class="chips">
+          {% for c in category_choices %}
+          <label class="chip"><input class="chip__input" type="radio" name="category" value="{{ c.value }}"{% if c.value == selected_category %} checked{% endif %} data-kinds="{{ c.kinds }}" data-kinds-legend="{{ c.legend }}">{{ icon(c.icon) }}<span>{{ c.value }}</span></label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      {# 第二列:沒有 JS 時只看得到五種類型(各類的常見文件先藏著);app.js 依第一列只留這一類的名稱 #}
+      <fieldset class="kinds" data-kinds-group>
+        <legend data-kinds-title>{{ kinds_legend }}</legend>
+        <div class="chips">
+          {% for k in kind_choices %}
+          <label class="chip"{% if k.hidden %} hidden{% endif %}><input class="chip__input" type="radio" name="doc_type" value="{{ k.value }}"{% if k.value == selected_type %} checked{% endif %}{% if k.unsure %} data-kinds-unsure{% endif %}><span>{{ k.label }}</span></label>
+          {% endfor %}
+        </div>
+      </fieldset>
+      <div class="submit">
+        <button class="btn btn--primary btn--lg submit__btn" type="submit" data-submit>
+          <span data-submit-label>開始辨識</span>
+        </button>
+      </div>
+    </div>
+    {% if local_only %}
+    <p class="upload__note">{{ icon("lock") }}<span>醫療與保險、身分證明兩類只在這台電腦處理,不會送到雲端。</span></p>
+    {% endif %}
+    <div class="progress" data-progress role="progressbar" aria-label="辨識進度" hidden><span class="progress__bar"></span></div>
+    <p class="status-line" role="status" aria-live="polite" data-upload-status></p>
+    <p class="wait" data-wait hidden>已等候 <span data-wait-seconds>0</span> 秒</p>
+  </form>
+</section>
+
+<section class="section" aria-labelledby="remind-title">
+  <div class="section__head"><h2 id="remind-title">要記得的事</h2></div>
+  {% if reminders %}
+  <div class="tbl">
+    <div class="tbl__row tbl__row--head" aria-hidden="true"><span></span><span>事項</span><span class="tbl__num">金額</span><span>狀態</span><span></span></div>
+    <ul class="tbl__list">
+      {% for r in reminders %}
+      <li><a class="tbl__row" href="{{ r.href }}">
+        {% if r.month %}<span class="cal" aria-hidden="true"><b>{{ r.month }}</b><span>{{ r.day }}</span></span>
+        {% else %}<span class="type-icon{% if r.alert %} type-icon--alert{% endif %}">{{ icon(r.icon) }}</span>{% endif %}
+        <span class="tbl__main"><span class="tbl__title">{{ r.title }}</span>{% if r.sub %}<span class="tbl__sub">{{ r.sub }}</span>{% endif %}</span>
+        <span class="tbl__meta"><span class="tbl__num">{{ r.amount or "" }}</span>
+          <span class="tbl__status"><span class="pill pill--{{ r.state_class }}">{{ icon(r.state_icon) }}{{ r.state }}</span></span></span>
+        {{ icon("chevron-right", "tbl__chev") }}
+      </a></li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% else %}
+  <p class="empty">還沒有要記得的事。拍下帳單或藥袋,期限和服藥時間會列在這裡。</p>
+  {% endif %}
+</section>
+
+<section class="section" aria-labelledby="recent-title">
+  <div class="section__head"><h2 id="recent-title">最近看過的文件</h2></div>
+  {% if recent %}
+  {{ doc_table(recent) }}
+  {% else %}
+  <p class="empty">還沒有文件。拍下第一張,結果會出現在這裡。</p>
+  {% endif %}
+</section>
+{% endblock %}

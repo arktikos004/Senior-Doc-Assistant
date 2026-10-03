@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "_medication.html" import medication %}
+{% block title %}家人確認 - {{ BRAND_FULL }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div class="page-head__text">
+    <h1>家人確認</h1>
+    <p class="lede">系統依固定規則,把需要您點頭的事列在這裡,一件一張。請對照原件,沒問題就按「確認」,不對就按「退回」。</p>
+  </div>
+</header>
+{% if items %}
+<ul class="confirm-list">
+  {% for a in items %}
+  <li class="panel confirm">
+    <div class="confirm__head">
+      <span class="type-icon">{{ icon(a.kind_icon) }}</span>
+      <div class="confirm__title">
+        <h2>{{ a.kind_label }}</h2>
+        <p class="muted">{{ a.doc_title }},{{ a.doc_when }} 上傳</p>
+      </div>
+      <a class="confirm__link" href="/doc/{{ a.document_id }}#original">看原件與全文{{ icon("chevron-right") }}</a>
+    </div>
+    {# 寬螢幕:左邊是要確認的內容,右邊直接放原件照片,方便逐項對照 #}
+    <div class="confirm__body{% if a.thumb_url %} confirm__body--photo{% endif %}">
+      <div class="confirm__content">
+        {% if a.medication %}
+        {{ medication(a.medication, on_card=true) }}
+        {% elif a.kind == "calendar" %}
+        <div class="confirm__event">
+          {% if a.month %}<span class="cal" aria-hidden="true"><b>{{ a.month }}</b><span>{{ a.day }}</span></span>{% endif %}
+          <div><p class="confirm__what">{{ a.title }}</p>{% if a.date_text %}<p class="confirm__date">{{ a.date_text }}</p>{% endif %}</div>
+        </div>
+        {% else %}
+        <p class="confirm__what">{{ a.title }}</p>
+        {% for line in a.lines %}<p class="todo-item__line">{{ line }}</p>{% endfor %}
+        {% endif %}
+      </div>
+      {% if a.thumb_url %}
+      <a class="confirm__photo" href="/doc/{{ a.document_id }}#original"><img src="{{ a.thumb_url }}" alt="{{ a.doc_title }}的原件" loading="lazy" decoding="async"
+        {%- if a.thumb_size %} width="{{ a.thumb_size[0] }}" height="{{ a.thumb_size[1] }}"{% endif %}></a>
+      {% endif %}
+    </div>
+    <form class="confirm__actions" method="post" action="/confirm/{{ a.id }}">
+      {{ csrf_input() }}
+      <button class="btn btn--primary btn--lg" type="submit" name="decision" value="done">{{ icon("check") }}確認<span class="visually-hidden">:{{ a.kind_label }}({{ a.doc_title }})</span></button>
+      {# 退回在系統內沒有復原,按下前先用確認框問一次(app.js 的 button[data-confirm];框在 base.html) #}
+      <button class="btn btn--secondary btn--lg" type="submit" name="decision" value="rejected"
+              data-confirm-title="確定要退回「{{ a.kind_label }}」嗎?" data-confirm="退回後就不會生效。"
+              data-confirm-ok="確定退回">{{ icon("x") }}退回<span class="visually-hidden">:{{ a.kind_label }}({{ a.doc_title }})</span></button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="empty">目前沒有要確認的事項。拍了藥袋或有期限的文件後,需要您點頭的會列在這裡。</p>
+{% endif %}
+{% if nav.review %}
+<p class="more"><a href="/review">另有 {{ nav.review }} 份文件等待複核</a></p>
+{% endif %}
+{% endblock %}

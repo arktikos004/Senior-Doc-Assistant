@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}待複核 - {{ BRAND_FULL }}{% endblock %}
+{% block content %}
+<header class="page-head">
+  <div class="page-head__text">
+    <h1>待複核({{ items|length }})</h1>
+    <p class="lede">核對不符、缺少必要欄位或讀值沒把握的文件會放在這裡。點進去對照原件更正讀值,存檔後會重新核對。</p>
+  </div>
+</header>
+{% if not items %}
+<p class="empty">目前沒有待複核的文件。</p>
+{% else %}
+<div class="tbl tbl--review">
+  <div class="tbl__row tbl__row--head" aria-hidden="true"><span></span><span>文件與原因</span><span>驗證信心</span><span></span></div>
+  <ul class="tbl__list">
+    {% for it in items %}
+    <li><a class="tbl__row" href="{{ it.href }}">
+      <span class="type-icon">{{ icon(it.icon) }}</span>
+      <span class="tbl__main">
+        <span class="tbl__title">{{ it.title }}</span>
+        {# 原因用白話(看核對結果組句);沒有讀值時才用原始理由 #}
+        <span class="tbl__sub">{{ it.reason }}</span>
+        <span class="tbl__sub">{{ it.when }} 上傳</span>
+      </span>
+      {# 顯示依核對結果算的驗證信心,不把 AI 自評當成可信度(原則 1) #}
+      <span class="tbl__meta"><span class="tbl__when">{% if it.confidence is not none %}<span class="tbl__cell-label">驗證信心 </span><span class="conf {{ conf_class(it.confidence) }}">{{ fmt_pct(it.confidence) }}</span>{% else %}沒有可核對的項目{% endif %}</span></span>
+      {{ icon("chevron-right", "tbl__chev") }}
+    </a></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}

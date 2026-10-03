@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% from "_medication.html" import medication %}
+{% from "_original.html" import original %}
+{% block title %}{{ v.title }} - {{ BRAND_FULL }}{% endblock %}
+{% block head %}<script src="/static/speech.js" defer></script>{% endblock %}
+{% block content %}
+{% set vv = v.verification %}
+<nav class="crumbs" aria-label="位置"><a href="/">首頁</a><span aria-hidden="true">/</span><a href="{{ v.category_href }}">{{ v.category }}</a><span aria-hidden="true">/</span><span>{{ v.heading }}</span></nav>
+<header class="page-head">
+  <div class="page-head__text">
+    <h1>{{ v.heading }}</h1>
+    <p class="page-head__meta">
+      <span>{{ v.when }} 上傳</span>
+      <span class="pill pill--{{ v.state_class }}">{{ icon(v.state_icon) }}{{ v.state_text }}</span>
+      {% if v.file_url %}<a class="page-head__jump" href="#original">看原件</a>{% endif %}
+    </p>
+    {% if v.review_reason %}
+    {# 待複核:原因旁就是主要動作「更正讀值」 #}
+    <div class="page-head__reason">
+      <p class="hint">{{ v.review_reason }}</p>
+      {% if v.correct_url %}<a class="btn btn--primary" href="{{ v.correct_url }}">{{ icon("pencil") }}更正讀值</a>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+  {% if not v.failed %}
+  <div class="page-head__actions">
+    <button class="btn btn--primary btn--lg" type="button" data-speak hidden>
+      {{ icon("speaker") }}<span data-speak-label>唸給我聽</span>
+    </button>
+  </div>
+  {% endif %}
+</header>
+{% if not v.failed %}
+<div class="speak-msgs">
+  <p class="speak__status" role="status" aria-live="polite" data-speak-status></p>
+  <p class="hint" data-speak-unsupported hidden>這個瀏覽器不能朗讀。請改用手機或電腦上的 Chrome、Safari 或 Edge。</p>
+  <noscript><p class="hint">要開啟 JavaScript 才能朗讀。</p></noscript>
+</div>
+{% endif %}
+
+<div class="doc-grid">
+  <div class="doc-main">
+    {% if v.failed %}
+    <section class="panel retry" aria-labelledby="retry-title">
+      <h2 id="retry-title">這張讀不出來</h2>
+      <p>請在光線充足的地方,把文件放平、整張拍進畫面,再試一次。</p>
+      <a class="btn btn--primary btn--lg" href="/">{{ icon("camera") }}重新拍一張</a>
+    </section>
+    {% else %}
+    {% set a = v.answer %}
+    {# 重點格子:要做什麼、什麼時候前、多少錢;朗讀從這裡開始 #}
+    <section class="answer answer--{{ a.tone }}" aria-labelledby="answer-title">
+      <div class="section__head"><h2 id="answer-title">{{ a.header }}</h2></div>
+      {% if a.alert %}<p class="alert" data-speak-part>{{ icon("alert") }}<span>{{ a.alert }}</span></p>{% endif %}
+      {% if a.rows %}
+      <div class="facts">
+        {% for r in a.rows %}
+        {% if r.kind == "task" %}
+        <div class="fact fact--wide" data-speak-part><span class="fact__label">{{ r.label }}</span><span class="fact__value">{{ r.value }}</span></div>
+        {% elif r.kind == "fact" %}
+        <div class="fact{% if r.wide %} fact--wide{% endif %}" data-speak-part><span class="fact__label">{{ r.label }}</span><span class="fact__value{% if r.tone %} fact__value--{{ r.tone }}{% else %} fact__value--text{% endif %}">{{ r.value }}</span></div>
+        {% elif r.kind == "todos" %}
+        <div class="fact fact--wide" data-speak-part><span class="fact__label">{{ r.label }}</span>
+          <ul class="todo-checks">{% for t in r.entries %}<li>{{ icon("circle") }}<span>{{ t }}</span></li>{% endfor %}</ul></div>
+        {% else %}
+        <div class="fact fact--wide" data-speak-part><span class="fact__label">{{ r.label }}</span><span class="fact__text">{{ r.text }}</span></div>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+      {% if a.medication %}<div class="facts facts--med">{{ medication(a.medication) }}</div>{% endif %}
+      {% if a.status %}
+      <div class="facts__status">
+        <p class="facts__note facts__note--{{ a.status.class }}" data-speak-part>{{ icon(a.status.icon) }}<span>{{ a.status.text }}{% if a.status.sub %},{{ a.status.sub }}{% endif %}。</span></p>
+        {# 自動提醒在這裡取消/恢復:不跳確認框,按錯可以馬上恢復 #}
+        {% if a.status.toggle %}{% set t = a.status.toggle %}
+        <form method="post" action="/reminder/{{ t.id }}">
+          {{ csrf_input() }}
+          <button class="btn btn--secondary" type="submit" name="decision" value="{{ t.decision }}">{{ icon(t.icon) }}{{ t.label }}</button>
+        </form>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% if a.footer %}<p class="section__note">{{ a.footer }}</p>{% endif %}
+    </section>
+
+    {% if v.is_medication %}
+    <p class="disclaimer" role="note">{{ icon("info") }}<span data-speak-part>{{ MEDICATION_DISCLAIMER }}</span></p>
+    {% endif %}
+
+    <section class="section" id="summary" aria-labelledby="summary-title">
+      <div class="section__head">
+        <h2 id="summary-title">{{ "AI 白話解說" if v.summary_is_ai else "重點整理" }}</h2>
+        {% if v.summary_is_ai %}<span class="pill pill--info">{{ icon("sparkles") }}AI 產生</span>{% endif %}
+      </div>
+      <p class="prose" data-speak-part>{{ v.summary }}</p>
+      <p class="section__note">{{ v.summary_note }}</p>
+    </section>
+
+    <section class="section verify" aria-labelledby="verify-title">
+      <div class="section__head">
+        <h2 id="verify-title">核對結果</h2>
+        {% if vv.checks %}<span class="pill pill--{{ {'pass': 'auto', 'fail': 'manual'}.get(vv.overall, 'off') }}">{{ icon(vv.overall_icon) }}{{ vv.overall_text }}</span>{% endif %}
+      </div>
+      {% if vv.checks %}
+      <ul class="checks">
+        {% for c in vv.checks %}
+        <li class="check check--{{ c.status }}">
+          <span class="check__icon">{{ icon(c.icon) }}</span>
+          <span class="check__main"><b>{{ c.label }}</b>{% if c.detail %}<span>{{ c.detail }}</span>{% endif %}</span>
+          <span class="check__status">{{ c.status_text }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      <p class="section__note">{{ vv.note }}{{ vv.confidence_text }}</p>
+      {% else %}
+      <p class="empty-line">{{ icon("dash") }}<span><b>尚未驗證</b>:這份文件還沒有能自動核對的項目,請對照原件。</span></p>
+      {% endif %}
+    </section>
+
+    {% if actions %}
+    <details class="section fold">
+      <summary class="fold__head"><h2>提醒與待辦</h2><span class="muted">{{ actions|length }} 項</span>{{ icon("chevron-right", "fold__chev") }}</summary>
+      <ul class="todo-list">
+        {% for a in actions %}
+        <li class="todo-item todo-item--{{ a.state_class }}">
+          <span class="type-icon">{{ icon(a.kind_icon) }}</span>
+          <div class="todo-item__main">
+            <p class="todo-item__head"><span class="todo-item__title">{{ a.title }}</span><span class="pill pill--{{ a.state_class }}">{{ icon(a.state_icon) }}{{ a.state_text }}</span></p>
+            {% for line in a.lines %}<p class="todo-item__line">{{ line }}</p>{% endfor %}
+            {% if a.medication %}<p class="todo-item__line">各時段的藥列在上面的服藥時間表。</p>{% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if actions|selectattr("state_class", "equalto", "wait")|list %}
+      <p class="section__note"><a href="/confirm">到「家人確認」處理等待中的事項</a></p>
+      {% endif %}
+    </details>
+    {% endif %}
+
+    <section class="section" id="fields" aria-labelledby="fields-title">
+      <div class="section__head"><h2 id="fields-title">讀到的內容</h2>
+        {%- if v.correct_url %}<a class="btn btn--secondary" href="{{ v.correct_url }}">{{ icon("pencil") }}更正讀值</a>{% endif %}
+        {%- if v.fields or v.med_items %}<span class="muted">{{ v.fields|length + v.med_items|length }} 項</span>{% endif %}</div>
+      {% if v.fields %}
+      <dl class="kv">
+        {% for r in v.fields %}
+        <dt>{{ r.label }}</dt>
+        <dd>
+          {% if r.missing %}<span class="missing">{{ icon("alert") }}{{ r.missing }}</span>
+          {% elif r.value_list %}<ul class="plain-list">{% for x in r.value_list %}<li>{{ x }}</li>{% endfor %}</ul>
+          {% else %}<span class="value">{{ r.value }}</span>{% endif %}
+          {% if r.check %}<span class="field-check field-check--{{ r.check }}">{{ icon("check" if r.check == "pass" else "x") }}{{ r.check_text }}</span>{% endif %}
+        </dd>
+        {% endfor %}
+      </dl>
+      {% endif %}
+      {% if v.med_items %}
+      <h3 class="subhead">藥品(照藥袋上的字抄錄)</h3>
+      <ul class="med-list">
+        {% for it in v.med_items %}
+        <li>
+          <p class="med__name">{{ it.name }}</p>
+          {% if it.dose_text or it.frequency_text %}<p>用法:{{ [it.dose_text, it.frequency_text]|select|join(",") }}</p>{% endif %}
+          {% if it.timing %}<p>時段:{{ it.timing|join("、") }}</p>{% endif %}
+          {% if it.prn %}<p><span class="pill pill--wait">{{ icon("clock") }}需要時</span></p>{% endif %}
+          {% if it.days %}<p>天數:{{ it.days }}</p>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if not v.fields and not v.med_items %}<p class="muted">沒有讀到任何欄位。</p>{% endif %}
+      {% if v.source_model %}<p class="section__note">辨識來源:{{ v.source_model }}</p>{% endif %}
+    </section>
+    {% endif %}
+  </div>
+
+  {{ original(v.file_url, v.is_pdf, v.file_size, "您上傳的" ~ v.title ~ "原件") }}
+</div>
+{% endblock %}

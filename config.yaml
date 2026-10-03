@@ -1,0 +1,53 @@
+# ============================================
+# 看有(高齡家庭文書輔助)- 設定檔
+# ============================================
+
+# 模型一律使用非中資的開源模型(競賽切結書第 6 點);目前預設 Google Gemma 4(Apache 2.0)
+model:
+  provider: "ollama"               # ollama(本機)/ workers_ai(Cloudflare 雲端)/ mock
+  local_only_doc_types:            # 隱私分流:這些類型永遠只在本機推論,不送雲端
+    - 藥袋
+
+ollama:
+  host: "http://localhost:11434"   # Ollama 服務位址(需 Ollama >= 0.22 才支援 Gemma 4)
+  model: "gemma4:12b"              # 約 8GB,可完整放進 16GB VRAM;需先 ollama pull gemma4:12b
+  timeout: 180                     # 單張辨識逾時秒數
+
+workers_ai:
+  model: "@cf/google/gemma-4-26b-a4b-it"   # Cloudflare Workers AI 上的 Gemma 4 26B(MoE)
+  account_id_env: "CF_ACCOUNT_ID"          # 帳號 ID 從環境變數讀,不寫進設定檔
+  api_token_env: "CF_API_TOKEN"            # API Token 從環境變數讀,不寫進設定檔
+  timeout: 60
+
+paths:
+  inbox: "data/inbox"              # 掃描文件放入此資料夾即自動處理
+  archive: "data/archive"          # 高信心文件自動歸檔至此
+  review: "data/review"            # 低信心文件移至此,等待人工確認
+  failed: "data/failed"            # 無法處理的文件(格式錯誤、AI 回應異常)
+  logs: "logs"                     # 處理紀錄與系統 log
+
+confidence:
+  auto_threshold: 0.80             # 信心分數 >= 此值才自動歸檔,否則進待確認
+
+archive:
+  group_by_month: true             # 歸檔時依「年-月」建立子資料夾
+  filename_template: "{date}_{doc_type}_{vendor}_{amount}"
+
+# 支援的文件格式
+supported_extensions:
+  - .jpg
+  - .jpeg
+  - .png
+  - .webp
+  - .bmp
+  - .tif
+  - .tiff
+  - .pdf
+
+# 目標文件類型(其餘類型一律進待確認資料夾);各類型的必要欄位見 src/models.py REQUIRED_FIELDS
+target_doc_types:
+  - 發票
+  - 收據
+  - 帳單
+  - 公文
+  - 藥袋

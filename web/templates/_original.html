@@ -1,0 +1,20 @@
+{# 「原件」欄(結果頁與待複核共用):照片直接顯示,先佔好寬高(size),延遲載入時版面不跳;
+   PDF 沒辦法在頁面裡預覽,只給另開連結;url 是空的表示原件已經不在。alt 是照片的替代文字。 #}
+{% macro original(url, is_pdf, size, alt) %}
+<aside class="doc-side" id="original" aria-labelledby="original-title">
+  <h2 id="original-title">原件</h2>
+  {% if url and is_pdf %}
+  <div class="original pdf-note">
+    {{ icon("file", "pdf-note__icon") }}
+    <p>PDF 檔無法在這裡預覽。</p>
+    <a class="btn btn--secondary" href="{{ url }}" target="_blank" rel="noopener">{{ icon("external") }}另開原檔</a>
+  </div>
+  {% elif url %}
+  <figure class="original"><img src="{{ url }}" alt="{{ alt }}" loading="lazy" decoding="async"
+    {%- if size %} width="{{ size[0] }}" height="{{ size[1] }}"{% endif %}></figure>
+  <a class="btn btn--secondary btn--block" href="{{ url }}" target="_blank" rel="noopener">{{ icon("external") }}放大看原件(另開新頁)</a>
+  {% else %}
+  <p class="empty">原件已經移走或不存在(例如複核後已改名存檔)。</p>
+  {% endif %}
+</aside>
+{% endmacro %}

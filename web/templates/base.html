@@ -1,0 +1,61 @@
+<!doctype html>
+{# data-font:這台裝置的字級(設定頁;app.js 依瀏覽器存的偏好改寫,沒有 JS 時是標準) #}
+<html lang="zh-Hant-TW" data-font="standard">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#F6F8FB" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101A2C" media="(prefers-color-scheme: dark)">
+  <title>{% block title %}{{ BRAND_FULL }}{% endblock %}</title>
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要內容</a>
+  <div class="shell">
+    {# 電腦:左邊固定選單(品牌、導覽、安心說明);手機與平板:頂部品牌列 + 「選單」按鈕 #}
+    {% macro nav_links(cls) %}
+        <a class="{{ cls }}" href="/"{% if active == "home" %} aria-current="page"{% endif %}>{{ icon("home") }}<span>首頁</span></a>
+        <a class="{{ cls }}" href="/cabinet"{% if active == "cabinet" %} aria-current="page"{% endif %}>{{ icon("folder") }}<span>文件櫃</span></a>
+        <a class="{{ cls }}" href="/confirm"{% if active == "confirm" %} aria-current="page"{% endif %}>{{ icon("family") }}<span>家人確認</span>{% if nav and nav.confirm %}<span class="count">{{ nav.confirm }}<span class="visually-hidden"> 件待確認</span></span>{% endif %}</a>
+        <a class="{{ cls }}" href="/review"{% if active == "review" %} aria-current="page"{% endif %}>{{ icon("tray") }}<span>待複核</span>{% if nav and nav.review %}<span class="count">{{ nav.review }}<span class="visually-hidden"> 份待複核</span></span>{% endif %}</a>
+        <a class="{{ cls }}" href="/settings"{% if active == "settings" %} aria-current="page"{% endif %}>{{ icon("gear") }}<span>設定</span></a>
+    {% endmacro %}
+    <aside class="side">
+      <a class="wordmark" href="/"><img class="wordmark__logo" src="/static/logo.svg" alt="" width="38" height="38"><span translate="no"><b>{{ BRAND_NAME }}</b><small>{{ BRAND_SUB }}</small></span></a>
+      <nav class="side__nav" aria-label="主要">{{ nav_links("side__link") }}</nav>
+      {# 手機與平板:分頁收進「選單」(<details>,沒有 JS 也能開);按鈕上放待處理總數,家人才不會漏看 #}
+      {% set pending = ((nav or {}).get("confirm") or 0) + ((nav or {}).get("review") or 0) %}
+      <details class="menu">
+        <summary class="menu__btn">{{ icon("menu") }}<span>選單</span>{% if pending %}<span class="count">{{ pending }}<span class="visually-hidden"> 件待處理</span></span>{% endif %}</summary>
+        <nav class="menu__panel" aria-label="主要">{{ nav_links("menu__link") }}</nav>
+      </details>
+      {% if trust %}
+      <div class="trust side__trust">{% for ic, text in trust %}<p>{{ icon(ic) }}<span>{{ text }}</span></p>{% endfor %}</div>
+      {% endif %}
+    </aside>
+    <main id="main" class="main" tabindex="-1">
+      {% if msg %}<p class="msg" role="status">{{ icon("check") }}<span>{{ msg }}</span></p>{% endif %}
+      {% block content %}{% endblock %}
+      {% if trust %}
+      <footer class="trust foot-trust">{% for ic, text in trust %}<p>{{ icon(ic) }}<span>{{ text }}</span></p>{% endfor %}</footer>
+      {% endif %}
+    </main>
+  </div>
+  {# 共用確認框:不可逆的動作(退回)按下前先問一次,取代瀏覽器內建的確認視窗。
+     app.js 依按鈕或表單的 data-confirm-title(標題)、data-confirm(說明)、data-confirm-ok(確定鍵)填字,用 showModal() 打開。
+     「先不要」放前面、預設焦點(手一滑按到 Enter 也不會誤退回);不寫「取消」,免得和「取消提醒」撞字、長輩按反 #}
+  <dialog class="dialog" role="alertdialog" data-confirm-dialog aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-msg">
+    <span class="dialog__icon">{{ icon("alert") }}</span>
+    <h2 class="dialog__title" id="confirm-dialog-title" data-dialog-title></h2>
+    <p class="dialog__msg" id="confirm-dialog-msg" data-dialog-msg></p>
+    <div class="dialog__actions">
+      <button class="btn btn--secondary btn--lg" type="button" autofocus data-dialog-no>先不要</button>
+      <button class="btn btn--danger btn--lg" type="button" data-dialog-ok>{{ icon("x") }}<span data-dialog-ok-label>確定</span></button>
+    </div>
+  </dialog>
+</body>
+</html>

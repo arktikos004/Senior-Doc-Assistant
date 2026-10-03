@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <title>看有 高齡家庭文書輔助</title>
+  <!-- 領航藍圓角方塊 + 白色文件 + 羅盤指針(琥珀指向右上,代表「領航」) -->
+  <rect width="32" height="32" rx="8" fill="#1B4F9C"/>
+  <path d="M10.6 6.5h7.6l5.3 5.3v12.2a1.6 1.6 0 0 1-1.6 1.6H10.6A1.6 1.6 0 0 1 9 24V8.1a1.6 1.6 0 0 1 1.6-1.6z" fill="#FFFFFF"/>
+  <path d="M18.2 6.5v5.3h5.3" fill="none" stroke="#C9D8F2" stroke-width="1.4" stroke-linejoin="round"/>
+  <path d="M19.8 14.2 17.42 19.76 14.58 17.24z" fill="#D97706"/>
+  <path d="M12.2 22.8 14.58 17.24 17.42 19.76z" fill="#1B4F9C"/>
+</svg>
