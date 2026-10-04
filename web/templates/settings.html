@@ -75,11 +75,12 @@
       <div class="form-actions">
         <button class="btn btn--primary btn--lg" type="submit" data-save>{{ icon("check") }}儲存設定</button>
         {% if not v.demo %}
-        {# 從本機切到雲端要先問一次:app.js 依選的辨識模式換成這顆(另一顆藏起來並停用,按 Enter 也繞不過確認框);
-           沒有 JS 時一直藏著 #}
+        {# 從本機切到雲端要先問一次:app.js 依選的辨識模式換成這顆(另一顆藏起來並停用,按 Enter 也繞不過確認框),
+           按了「確定開啟」才補上確認欄位(data-confirm-field)。沒有 JS 時一直藏著:伺服器沒收到確認欄位
+           不會切換,改回一頁確認頁再問 #}
         <button class="btn btn--primary btn--lg" type="submit" data-save-confirm hidden disabled
                 data-confirm-title="{{ v.cloud_confirm.title }}" data-confirm="{{ v.cloud_confirm.message }}"
-                data-confirm-ok="{{ v.cloud_confirm.ok }}">{{ icon("check") }}儲存設定</button>
+                data-confirm-ok="{{ v.cloud_confirm.ok }}" data-confirm-field="{{ v.cloud_confirm.field }}">{{ icon("check") }}儲存設定</button>
         {% endif %}
       </div>
     </form>
@@ -101,13 +102,14 @@
     <p class="field-hint">匯出的檔案含有文件內容,請存在安全的地方。刪除後無法復原。</p>
     <form class="set-form" method="post" action="/settings/delete">
       {{ csrf_input() }}
-      {# 沒有 JS 就沒有確認框:改成要先勾選才送得出去(瀏覽器內建的必填檢查,不用 JS) #}
-      <noscript><label class="check-line"><input type="checkbox" name="understood" value="1" required><span>我知道刪除後無法復原</span></label></noscript>
+      {# 沒有 JS 就沒有確認框:改成要先勾選才送得出去(瀏覽器內建的必填檢查,不用 JS)。
+         伺服器也看這個欄位:有 JS 時按了「確定刪除」app.js 才補上;沒收到就不刪,改回一頁確認頁再問 #}
+      <noscript><label class="check-line"><input type="checkbox" name="{{ v.purge_confirm.field }}" value="1" required><span>我知道刪除後無法復原</span></label></noscript>
       <div class="form-actions">
         <a class="btn btn--secondary btn--lg" href="/settings/export" download>{{ icon("download") }}匯出全部紀錄</a>
         <button class="btn btn--danger btn--lg" type="submit"
                 data-confirm-title="{{ v.purge_confirm.title }}" data-confirm="{{ v.purge_confirm.message }}"
-                data-confirm-ok="{{ v.purge_confirm.ok }}">{{ icon("x") }}刪除全部資料</button>
+                data-confirm-ok="{{ v.purge_confirm.ok }}" data-confirm-field="{{ v.purge_confirm.field }}">{{ icon("x") }}刪除全部資料</button>
       </div>
     </form>
   </section>

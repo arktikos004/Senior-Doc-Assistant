@@ -43,10 +43,11 @@
     <form class="confirm__actions" method="post" action="/confirm/{{ a.id }}">
       {{ csrf_input() }}
       <button class="btn btn--primary btn--lg" type="submit" name="decision" value="done">{{ icon("check") }}確認<span class="visually-hidden">:{{ a.kind_label }}({{ a.doc_title }})</span></button>
-      {# 退回在系統內沒有復原,按下前先用確認框問一次(app.js 的 button[data-confirm];框在 base.html) #}
+      {# 退回在系統內沒有復原,按下前先用確認框問一次(app.js 的 button[data-confirm];框在 base.html)。
+         按了「確定退回」app.js 才補上確認欄位(data-confirm-field);伺服器沒收到就不退回,改回一頁確認頁再問 #}
       <button class="btn btn--secondary btn--lg" type="submit" name="decision" value="rejected"
-              data-confirm-title="確定要退回「{{ a.kind_label }}」嗎?" data-confirm="退回後就不會生效。"
-              data-confirm-ok="確定退回">{{ icon("x") }}退回<span class="visually-hidden">:{{ a.kind_label }}({{ a.doc_title }})</span></button>
+              data-confirm-title="{{ a.reject_ask.title }}" data-confirm="{{ a.reject_ask.message }}"
+              data-confirm-ok="{{ a.reject_ask.ok }}" data-confirm-field="{{ a.reject_ask.field }}">{{ icon("x") }}退回<span class="visually-hidden">:{{ a.kind_label }}({{ a.doc_title }})</span></button>
     </form>
   </li>
   {% endfor %}

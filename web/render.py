@@ -104,6 +104,7 @@ _ICON_PATHS: dict[str, str] = {
                 '<path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/>',
     "download": '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>',
     "lock": '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    "eye": '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     "pill": '<path d="m10.5 20.5 10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7z"/>'
             '<path d="m8.5 8.5 7 7"/>',
     "file": '<path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M14 2v6h6"/>',
@@ -884,6 +885,9 @@ def reminder_rows(docs: list[dict[str, Any]], actions: list[dict[str, Any]], tod
     by_id = {d["id"]: d for d in docs}
     waiting, upcoming, alerts, done = [], [], [], []
     for raw in actions:
+        # 被家人更正取代的舊行動不列(和結果頁同一條規則),不管它現在的狀態:只看狀態的話,舊期限可能和新的一起冒出來
+        if raw.get("superseded"):
+            continue
         v = action_view(raw)
         if v["state_class"] == "off":
             continue
@@ -1413,6 +1417,7 @@ def correct_view(doc: dict[str, Any], values: dict[str, Any] | None = None,
         "error_count": len(errors),
         "focus": focus,
         "can_reject": review,
+        "reject_ask": REJECT_DOC_ASK,   # 退回前先問的話(確認框與沒有 JS 時的確認頁同一份)
         "file_url": file_url,
         "file_size": file_size,
         "is_pdf": is_pdf(doc.get("target_path")),
@@ -1436,6 +1441,22 @@ CLOUD_CONFIRM_TITLE, CLOUD_CONFIRM_OK = "確定要開啟雲端備援嗎?", "確�
 PURGE_CONFIRM_TITLE, PURGE_CONFIRM_OK = "確定要刪除全部資料嗎?", "確定刪除"
 PURGE_CONFIRM = "所有文件的照片、讀值、提醒與更正紀錄都會刪除,無法復原;設定與設定變更紀錄會保留。"
 
+# ---- 要先確認的動作 ----
+# 切到雲端備援、刪除全部資料、兩處「退回」,按下前先問一次:標題、說明、確定鍵,加上確認欄位的名稱。
+# 有 JS 時用 base.html 的確認框,按了「確定…」app.js 才把確認欄位(值是 "1")補進表單;伺服器沒收到這個欄位
+# 就不做(沒有 JS、或 app.js 沒跑起來),改回一頁確認頁(ask.html)問同樣的字
+CONFIRM_CLOUD_FIELD, CONFIRM_PURGE_FIELD, CONFIRM_REJECT_FIELD = "confirm_cloud", "understood", "confirm_reject"
+PURGE_ASK = {"title": PURGE_CONFIRM_TITLE, "message": PURGE_CONFIRM, "ok": PURGE_CONFIRM_OK,
+             "field": CONFIRM_PURGE_FIELD}
+REJECT_DOC_ASK = {"title": "確定要退回這份文件嗎?", "message": "這份文件會改成「讀不出來」,請長輩重新拍一張。",
+                  "ok": "確定退回", "field": CONFIRM_REJECT_FIELD}
+
+
+def reject_action_ask(kind_label: str) -> dict[str, str]:
+    """家人確認頁退回一個事項前要問的話(kind_label:服藥時間表、期限提醒…)。"""
+    return {"title": f"確定要退回「{kind_label}」嗎?", "message": "退回後就不會生效。", "ok": "確定退回",
+            "field": CONFIRM_REJECT_FIELD}
+
 
 def local_only_scope(local_only: tuple[str, ...] | list[str]) -> list[str]:
     """一律只在本機處理的文件類型與大類(畫面文字用):本機限定的類型(藥袋…)在前,再接敏感大類,
@@ -1444,6 +1465,13 @@ def local_only_scope(local_only: tuple[str, ...] | list[str]) -> list[str]:
     categories = sorted(SENSITIVE_CATEGORIES,
                         key=lambda c: (not set(CATEGORY_TYPES.get(c, ())) & set(types), CATEGORIES.index(c)))
     return types + categories
+
+
+def cloud_ask(local_only: tuple[str, ...] | list[str]) -> dict[str, str]:
+    """切到雲端備援前要問的話;哪些文件仍只在這台電腦處理,依目前的設定寫。"""
+    scope = "、".join(local_only_scope(local_only))
+    return {"title": CLOUD_CONFIRM_TITLE, "ok": CLOUD_CONFIRM_OK, "field": CONFIRM_CLOUD_FIELD,
+            "message": f"開啟後,{scope},以及沒選類型的文件仍只在這台電腦處理;其他文件會交給雲端模型讀取。"}
 
 
 def _model_pill(provider: str, ollama: str) -> dict[str, str] | None:
@@ -1531,9 +1559,8 @@ def settings_view(current: AppConfig, *, default_threshold: float, models: dict[
                                          None if THRESHOLD in errors else values.get(THRESHOLD)),
         "threshold_error": THRESHOLD in errors,
         "errors": list(errors.values()),
-        "cloud_confirm": {"title": CLOUD_CONFIRM_TITLE, "ok": CLOUD_CONFIRM_OK,
-                          "message": f"開啟後,{scope},以及沒選類型的文件仍只在這台電腦處理;其他文件會交給雲端模型讀取。"},
-        "purge_confirm": {"title": PURGE_CONFIRM_TITLE, "ok": PURGE_CONFIRM_OK, "message": PURGE_CONFIRM},
+        "cloud_confirm": cloud_ask(current.local_only_doc_types),
+        "purge_confirm": PURGE_ASK,
         "changes": [{"when": fmt_when(c.get("created_at")), "text": setting_change_text(c),
                      "actor": c.get("actor") or ""} for c in changes],
     }

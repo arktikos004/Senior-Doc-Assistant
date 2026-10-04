@@ -7,7 +7,8 @@
   // ---- data-confirm:不可逆動作前先問一次(取代舊樣板的 onsubmit) ----
   // 用 base.html 的確認框(<dialog> + showModal():焦點留在框內、Esc 關閉、有遮罩),不用瀏覽器內建的確認視窗
   // (樣子和網頁不一樣,按鈕還寫「取消」,和「取消提醒」撞字)。按鈕或表單帶 data-confirm-title(標題)、
-  // data-confirm(說明)、data-confirm-ok(確定鍵,沒寫就用框裡原本的「確定」)。
+  // data-confirm(說明)、data-confirm-ok(確定鍵,沒寫就用框裡原本的「確定」)、
+  // data-confirm-field(伺服器要看到才做的確認欄位,按「確定」後才補進表單)。
   // 按「確定」才重新送出;「先不要」、Esc、點遮罩都是不做,焦點回到原本的按鈕。
   // 不支援 <dialog> 或 requestSubmit 的舊瀏覽器(例如 iOS 15 的 Safari)退回用 window.confirm,功能不壞。
   var dialog = document.querySelector("[data-confirm-dialog]");
@@ -21,12 +22,25 @@
   var asking = null;      // 框開著時:{ back: 關掉後焦點回去的元素, send: 按「確定」後怎麼重新送出, at: 打開的時間 }
   var approved = false;   // 按「確定」後重新送出的那一次放行,不再攔
 
-  function confirmFirst(event, trigger, back, send) {
+  // 伺服器也要看到「確認過了」才做:按了「確定…」才把 data-confirm-field 指定的欄位(值是 1)補進表單。
+  // 沒有 JS、或這支程式沒跑起來時表單裡沒有這個欄位,伺服器不會直接生效,改用一頁確認頁再問一次
+  function markConfirmed(trigger, form) {
+    var name = trigger.getAttribute("data-confirm-field");
+    if (!name || !form || form.querySelector('input[name="' + name + '"]')) return;
+    var field = document.createElement("input");
+    field.type = "hidden";
+    field.name = name;
+    field.value = "1";
+    form.appendChild(field);
+  }
+
+  function confirmFirst(event, trigger, form, back, send) {
     if (approved) return;
     var title = trigger.getAttribute("data-confirm-title") || "";
     var text = trigger.getAttribute("data-confirm") || "";
     if (!useDialog) {
-      if (!window.confirm(title && text ? title + "\n" + text : title || text)) event.preventDefault();
+      if (window.confirm(title && text ? title + "\n" + text : title || text)) markConfirmed(trigger, form);
+      else event.preventDefault();
       return;
     }
     event.preventDefault();
@@ -34,7 +48,7 @@
     dialogMsg.textContent = title ? text : "";
     dialogMsg.hidden = !dialogMsg.textContent;
     okLabel.textContent = trigger.getAttribute("data-confirm-ok") || okDefault;
-    asking = { back: back, send: send, at: Date.now() };
+    asking = { back: back, at: Date.now(), send: function () { markConfirmed(trigger, form); send(); } };
     dialog.showModal();   // 焦點落在「先不要」(autofocus)
   }
 
@@ -73,7 +87,7 @@
   document.querySelectorAll("form[data-confirm]").forEach(function (form) {
     form.addEventListener("submit", function (event) {
       var submitter = event.submitter;
-      confirmFirst(event, form, submitter || document.activeElement, function () {
+      confirmFirst(event, form, form, submitter || document.activeElement, function () {
         if (submitter) form.requestSubmit(submitter); else form.requestSubmit();
       });
     });
@@ -82,7 +96,50 @@
   // 重新送出要指定這顆按鈕,它的 name/value(decision=rejected)才會一起送出
   document.querySelectorAll("button[data-confirm]").forEach(function (button) {
     button.addEventListener("click", function (event) {
-      confirmFirst(event, button, button, function () { button.form.requestSubmit(button); });
+      confirmFirst(event, button, button.form, button, function () { button.form.requestSubmit(button); });
+    });
+  });
+
+  // ---- data-send-once:一張表單只送出一次(更正頁的「存檔並重新核對」) ----
+  // 存檔要重新核對(發票要解 QR Code),等的時候常會再按一下;兩個請求並行會各搬一次原件,所以第一次送出後,
+  // 後面的一律擋下。按鈕要等這次送出的資料收好(下一輪)才停用:停用的按鈕不會被送出,當場停用的話
+  // 「再加一種藥」的 add_item 會不見,伺服器就當成存檔了。帶 data-send-quiet 的按鈕(再加一種藥)
+  // 只是多一欄、馬上回同一頁,不寫「存檔中…」
+  document.querySelectorAll("form[data-send-once]").forEach(function (form) {
+    var buttons = Array.prototype.slice.call(form.querySelectorAll('button[type="submit"]'));
+    var label = form.querySelector("[data-submit-label]");
+    var status = form.querySelector("[data-send-status]");
+    var labelText = label ? label.textContent : "";
+    var sent = false;
+
+    function ready() {
+      sent = false;
+      buttons.forEach(function (button) { button.disabled = false; });
+      form.removeAttribute("aria-busy");
+      if (label) label.textContent = labelText;
+      if (status) status.textContent = "";
+    }
+
+    form.addEventListener("submit", function (event) {
+      if (event.defaultPrevented) return;   // 被別的檢查擋下的不算送出
+      if (sent) { event.preventDefault(); return; }
+      sent = true;
+      var quiet = Boolean(event.submitter && event.submitter.hasAttribute("data-send-quiet"));
+      window.setTimeout(function () {
+        if (!sent) return;
+        buttons.forEach(function (button) { button.disabled = true; });
+        form.setAttribute("aria-busy", "true");
+        if (quiet) return;
+        if (label) label.textContent = label.getAttribute("data-busy-label") || labelText;
+        if (status) status.textContent = status.getAttribute("data-send-status") || "";
+      }, 0);
+    });
+
+    // 重新整理或按「上一頁」回來時,有的瀏覽器會把按鈕「停用」的狀態一起還原:一載入就恢復成可以送出;
+    // 整頁從 bfcache 回來(pageshow)也一樣
+    ready();
+    window.addEventListener("pageshow", function (event) {
+      if (event.persisted) ready();
     });
   });
 
@@ -307,6 +364,22 @@
       applyAll();
       syncInputs();
     }
+  });
+
+  // ---- 加密 PDF 的密碼欄:「顯示密碼」(沒有 JS 時按鈕藏著,密碼一律遮住) ----
+  // 長輩對著通知信一個字一個字打,打完想看一眼有沒有打錯:按一下顯示、再按一下遮回去
+  document.querySelectorAll("[data-show-password]").forEach(function (button) {
+    var input = document.getElementById(button.getAttribute("data-show-password"));
+    var label = button.querySelector("span");
+    if (!input || !label) return;
+    button.hidden = false;
+    button.addEventListener("click", function () {
+      var show = input.type === "password";
+      input.type = show ? "text" : "password";
+      button.setAttribute("aria-pressed", show ? "true" : "false");
+      label.textContent = show ? "隱藏密碼" : "顯示密碼";
+      input.focus();
+    });
   });
 
   // ---- 設定頁「系統設定」:從本機切到雲端備援要先問一次 ----

@@ -30,6 +30,7 @@ from ..models import REQUIRED_FIELDS, ExtractionResult
 from . import checks as c
 from . import einvoice
 from .einvoice import INDEPENDENT_CHECKS
+from .logname import log_label, logged_as
 
 log = logging.getLogger(__name__)
 
@@ -55,18 +56,21 @@ def verify_result(result: ExtractionResult, file_path: Path) -> None:
 VERIFY_ERROR_SUMMARY = "核對程式發生錯誤,沒有完成核對"
 
 
-def verify_or_flag(result: ExtractionResult, file_path: Path) -> None:
+def verify_or_flag(result: ExtractionResult, file_path: Path, *, log_name: str | None = None) -> None:
     """跑 verify_result;核對程式本身出錯時不丟例外,而是把驗證信心設成 0,讓決策轉人工(fail-closed)。
 
     若出錯時退回模型自評,等於「沒核對反而比較容易自動接受」(原則 1、5,使用者 10/2 決定)。
     Pipeline 與評測都走這裡,兩邊對「核對壞掉」的處理才會一致。
+    錯誤紀錄用 log_name 稱呼這份文件(沒給就用檔名),例外只寫種類:家人更正時原檔已經依欄位改名,
+    檔名有商家與金額(藥袋是醫療院所),例外訊息還可能帶完整路徑。
     """
-    try:
-        verify_result(result, file_path)
-    except Exception as exc:
-        log.error("核對失敗:%s(%s)", file_path.name, exc)
-        result.verification = {"_summary": VERIFY_ERROR_SUMMARY}
-        result.verified_confidence = 0.0
+    with logged_as(log_name):
+        try:
+            verify_result(result, file_path)
+        except Exception as exc:
+            log.error("核對失敗:%s(%s)", log_label(file_path), type(exc).__name__)
+            result.verification = {"_summary": VERIFY_ERROR_SUMMARY}
+            result.verified_confidence = 0.0
 
 
 def run_verification(result: ExtractionResult, file_path: Path, today: date) -> None:
@@ -91,7 +95,7 @@ def collect_checks(result: ExtractionResult, file_path: Path, today: date) -> di
         try:
             found.update(einvoice.verify_einvoice(result, file_path))
         except Exception as exc:  # 解碼器壞掉只是少一項證據,不能讓其他檢查跟著失敗
-            log.error("QR 驗證失敗:%s(%s)", file_path.name, exc)
+            log.error("QR 驗證失敗:%s(%s)", log_label(file_path), type(exc).__name__)
             found[einvoice.CHECK_QR] = c.entry("skip", f"QR 解碼發生錯誤:{type(exc).__name__}", [])
         found[einvoice.CHECK_CODE39] = einvoice.code39_entry()
         found[c.CHECK_INVOICE_FORMAT] = c.check_invoice_number_format(result.invoice_number)

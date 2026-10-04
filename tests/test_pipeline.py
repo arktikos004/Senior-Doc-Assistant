@@ -225,6 +225,115 @@ def test_move_failure_drops_planned_actions(tmp_path, monkeypatch):
     assert Store(cfg.paths.db_path).list_actions(record["文件ID"]) == []
 
 
+# ---- 處理紀錄的錯誤與原因不帶這台電腦的完整路徑 --------------------------------------------------
+
+def _spellings(path: Path) -> set[str]:
+    """同一個位置在文字裡的寫法:原樣、斜線、例外訊息 repr 出來的雙反斜線。"""
+    text = str(path)
+    return {text, path.as_posix(), text.replace("\\", "\\\\")}
+
+
+def test_error_does_not_carry_local_paths(tmp_path):
+    """辨識失敗的例外訊息常帶完整路徑(開檔失敗、影像解不開):錯誤會進資料庫與匯出,只留資料夾裡的相對位置。"""
+    from src.providers import OllamaAnalyzer
+    from src.store import Store
+
+    cfg = _make_cfg(tmp_path)
+
+    class LockedAnalyzer:
+        def analyze(self, file_path: Path, doc_type_hint=None, *, local_only=False):
+            raise PermissionError(13, "Permission denied", str(file_path))
+
+    class NeverCalledClient:
+        def chat(self, **kwargs):
+            raise AssertionError("解不開的影像不該送到模型")
+
+    locked = Pipeline(cfg, LockedAnalyzer()).process_file(_drop(cfg, "鎖住.png"))
+    broken = Pipeline(cfg, OllamaAnalyzer(cfg, client=NeverCalledClient())).process_file(_drop(cfg, "壞掉.jpg"))
+
+    for record in (locked, broken):
+        assert not any(s in record["錯誤"] for s in _spellings(tmp_path)), record["錯誤"]
+        assert tmp_path.name not in record["錯誤"]                # 上層資料夾的名稱一段都不留
+    assert locked["錯誤"].startswith("PermissionError: ") and "'inbox" in locked["錯誤"] and "鎖住.png" in locked["錯誤"]
+    assert "UnreadableImageError" in broken["錯誤"] and "壞掉.jpg" in broken["錯誤"]
+    assert Store(cfg.paths.db_path).get_document(locked["文件ID"])["error"] == locked["錯誤"]
+
+
+def test_move_failure_reason_has_no_paths_or_archive_name(tmp_path, monkeypatch):
+    """搬檔失敗的 OSError 訊息帶來源與目的地的完整路徑(目的地檔名有商家與金額):原因只寫例外的種類。"""
+    from src import archiver
+
+    cfg = _make_cfg(tmp_path)
+
+    def locked(file_path, result, cfg):
+        target = cfg.paths.archive / "發票" / "20261001_發票_範例商店_1250.png"
+        raise PermissionError(13, "檔案正由另一個程序使用", str(file_path), 32, str(target))
+
+    monkeypatch.setattr(archiver, "archive_file", locked)
+    record = Pipeline(cfg, MockAnalyzer(cfg)).process_file(_drop(cfg, "清晰發票.png"))
+
+    assert record["動作"] == "failed"
+    assert "搬移失敗" in record["原因"] and "PermissionError" in record["原因"]
+    assert not any(s in record["原因"] for s in _spellings(tmp_path)), record["原因"]
+    assert "範例商店" not in record["原因"] and "清晰發票.png" not in record["原因"]
+
+
+# ---- 錯誤紀錄不寫已歸檔的檔名與例外訊息 ------------------------------------------------------------
+
+def _logged(caplog) -> str:
+    return "\n".join(record.getMessage() for record in caplog.records if record.levelno >= logging.WARNING)
+
+
+def test_move_failure_log_has_no_archive_name_or_paths(tmp_path, monkeypatch, caplog):
+    """搬檔失敗的紀錄只寫上傳檔名與例外種類:OSError 的訊息帶目的地檔名(日期、商家、金額)與完整路徑。"""
+    from src import archiver
+
+    cfg = _make_cfg(tmp_path)
+
+    def locked(file_path, result, cfg):
+        target = cfg.paths.archive / "發票" / "20261001_發票_範例商店_1250.png"
+        raise PermissionError(13, "檔案正由另一個程序使用", str(file_path), 32, str(target))
+
+    monkeypatch.setattr(archiver, "archive_file", locked)
+    with caplog.at_level(logging.INFO):
+        Pipeline(cfg, MockAnalyzer(cfg)).process_file(_drop(cfg, "upload-1.png"))
+    text = _logged(caplog)
+    assert "upload-1.png" in text and "PermissionError" in text
+    assert "範例商店" not in text and "檔案正由另一個程序使用" not in text
+    assert not any(s in text for s in _spellings(tmp_path)), text
+
+
+def test_planning_failure_log_uses_the_callers_name_and_no_message(tmp_path, monkeypatch, caplog):
+    """行動規劃出錯的紀錄:用呼叫端給的名字指這份文件(家人更正時是「文件 N」,不是已歸檔的檔名),不寫例外訊息。"""
+    from datetime import date
+
+    from src import pipeline as pipeline_mod
+
+    cfg = _make_cfg(tmp_path)
+
+    def boom(result, decision, cfg, received_on):
+        raise RuntimeError(f"排不出 {result.vendor} 的服藥時間表")
+
+    monkeypatch.setattr(pipeline_mod, "plan_actions", boom)
+    archived = cfg.paths.archive / "藥袋" / "20261001_藥袋_範例診所_未知金額.png"
+
+    def bag() -> ExtractionResult:
+        return ExtractionResult(doc_type="藥袋", vendor="範例診所", confidence=0.9)
+
+    with caplog.at_level(logging.INFO):
+        result = bag()
+        pipeline_mod.verify_decide_plan(result, archived, cfg, received_on=date.today(), log_name="文件 7")
+    text = _logged(caplog)
+    assert result.actions == []
+    assert "文件 7" in text and "RuntimeError" in text
+    assert "範例診所" not in text and "服藥時間表" not in text
+
+    caplog.clear()                                              # 沒給名字(上傳):用上傳檔名
+    with caplog.at_level(logging.INFO):
+        pipeline_mod.verify_decide_plan(bag(), cfg.paths.inbox / "upload-2.png", cfg, received_on=date.today())
+    assert "upload-2.png" in _logged(caplog) and "範例診所" not in _logged(caplog)
+
+
 # ---- 文件四大類:隱私分流跟著大類走、歸類寫進處理紀錄 -----------------------------------------
 
 class _RecordingAnalyzer(MockAnalyzer):

@@ -46,6 +46,13 @@ class UnreadableImageError(ValueError):
     """影像解不開或無法重新編碼(檔案損毀、不是支援的影像格式)。"""
 
 
+class EncryptedPdfError(UnreadableImageError):
+    """PDF 有密碼、沒給密碼打不開。網頁上傳會先請家人輸入密碼(decrypt_pdf);其他入口照讀不出來處理。"""
+
+
+MSG_PDF_LOCKED = "這份 PDF 有密碼,要先輸入密碼才能讀"
+
+
 def prepare_image(file_path: Path, deskew: bool = True) -> PreparedImage:
     """讀取文件並做前處理;PDF 渲染第一頁為 PNG。
 
@@ -68,8 +75,10 @@ def prepare_image(file_path: Path, deskew: bool = True) -> PreparedImage:
     except Image.DecompressionBombError:
         raise  # 惡意或異常巨大的影像:原樣往外丟,訊息本身已說明原因
     except Exception as exc:
+        # 只寫檔名與例外種類,不接 PIL 的原文:原文帶完整路徑(這台電腦的資料夾位置),
+        # 而這個訊息會進處理紀錄、資料庫與匯出;原始例外仍掛在 __cause__
         raise UnreadableImageError(
-            f"無法讀取影像 {file_path.name}(檔案可能損毀或不是支援的影像格式):{exc}"
+            f"無法讀取影像 {file_path.name}(檔案可能損毀或不是支援的影像格式;{type(exc).__name__})"
         ) from exc
 
 
@@ -78,10 +87,55 @@ def load_image_bytes(file_path: Path) -> bytes:
     return prepare_image(file_path).data
 
 
+def _is_password_error(exc: Exception) -> bool:
+    import pypdfium2.raw as pdfium_c
+
+    return getattr(exc, "err_code", None) == pdfium_c.FPDF_ERR_PASSWORD
+
+
+def pdf_needs_password(file_path: Path) -> bool:
+    """這份 PDF 要密碼才打得開嗎?不是 PDF、或壞掉打不開的都回 False(後面照讀不出來處理)。"""
+    if file_path.suffix.lower() != ".pdf":
+        return False
+    import pypdfium2 as pdfium
+
+    try:
+        pdfium.PdfDocument(str(file_path)).close()
+    except pdfium.PdfiumError as exc:
+        return _is_password_error(exc)
+    return False
+
+
+def decrypt_pdf(file_path: Path, password: str, dest: Path) -> bool:
+    """用 password 打開加密的 PDF,在 dest 存一份解除密碼的副本;密碼不對回 False、不寫 dest。
+
+    密碼(常是身分證字號或生日)只在這裡用一次:不寫紀錄、不放進例外訊息、不存檔。file_path 不動。
+    """
+    import pypdfium2 as pdfium
+    import pypdfium2.raw as pdfium_c
+
+    try:
+        pdf = pdfium.PdfDocument(str(file_path), password=password)
+    except pdfium.PdfiumError as exc:
+        if _is_password_error(exc):
+            return False
+        raise
+    try:
+        pdf.save(str(dest), flags=pdfium_c.FPDF_REMOVE_SECURITY)
+    finally:
+        pdf.close()
+    return True
+
+
 def _render_pdf(file_path: Path) -> Image.Image:
     import pypdfium2 as pdfium
 
-    pdf = pdfium.PdfDocument(str(file_path))
+    try:
+        pdf = pdfium.PdfDocument(str(file_path))
+    except pdfium.PdfiumError as exc:
+        if _is_password_error(exc):
+            raise EncryptedPdfError(MSG_PDF_LOCKED) from None   # 不帶原始訊息與路徑
+        raise
     try:
         page = pdf[0]
         bitmap = page.render(scale=2.0)  # 約 144 DPI,兼顧清晰度與大小

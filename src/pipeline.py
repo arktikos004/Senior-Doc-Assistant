@@ -18,10 +18,27 @@ from .config import AppConfig
 from .decision import decide, decide_manual
 from .models import IDENTITY_CATEGORY, SENSITIVE_CATEGORIES, Decision, ExtractionResult, catalog_entry, category_for
 from .record_log import append_record, timestamp
+from .settings import hide_local_paths
 from .store import Store
 from .verify import verify_or_flag
 
 log = logging.getLogger(__name__)
+
+
+def error_kind(exc: BaseException) -> str:
+    """例外的種類(不含訊息):類別名稱,作業系統的錯誤再加錯誤碼,例 "PermissionError,WinError 32"。
+
+    給處理紀錄的原因與錯誤 log 用。OSError 的訊息帶完整路徑,歸檔檔名裡有日期、商家與金額
+    (藥袋的商家是醫療院所),所以這些地方只寫種類,不寫 str(exc)。
+    """
+    name = type(exc).__name__
+    if isinstance(exc, OSError):
+        winerror = getattr(exc, "winerror", None)
+        if winerror is not None:
+            return f"{name},WinError {winerror}"
+        if exc.errno is not None:
+            return f"{name},errno {exc.errno}"
+    return name
 
 
 def verify_decide_plan(
@@ -30,6 +47,8 @@ def verify_decide_plan(
     cfg: AppConfig,
     received_on: date,
     decide_fn: Callable[[ExtractionResult, AppConfig], Decision] = decide,
+    *,
+    log_name: str | None = None,
 ) -> Decision:
     """核對 → 決策 → 規劃行動;上傳(Pipeline.process_file)與家人更正(src/review.py)共用這一條。
 
@@ -37,13 +56,15 @@ def verify_decide_plan(
     - 決策預設是 decision.decide;家人更正改用自己的規則(review.decide_corrected),其餘步驟相同。
     - 行動寫進 result.actions,期限從 received_on(上傳日;更正時也是原本的上傳日)起算;
       規劃出錯時不產生行動,不讓文件跟著失敗。行動的種類與分級只看 doc_type 與決策(原則 3)。
+    - 錯誤紀錄用 log_name 指這份文件,沒給就用 file_path 的檔名(上傳時是上傳檔名)。家人更正時原檔已經
+      依欄位改名(日期、商家、金額;藥袋的商家是醫療院所),由呼叫端改給「文件 N」。例外只寫種類,不寫訊息。
     """
-    verify_or_flag(result, file_path)
+    verify_or_flag(result, file_path, log_name=log_name)
     decision = decide_fn(result, cfg)
     try:
         result.actions = plan_actions(result, decision, cfg, received_on=received_on)
     except Exception as exc:
-        log.error("行動規劃失敗:%s(%s)", file_path.name, exc)
+        log.error("行動規劃失敗:%s(%s)", log_name or file_path.name, error_kind(exc))
         result.actions = []
     return decision
 
@@ -89,7 +110,8 @@ class Pipeline:
                 result.doc_type, result.confidence, result.source_model or "-",
             )
         except Exception as exc:  # 模型逾時、影像損毀、JSON 解析失敗等
-            error = f"{type(exc).__name__}: {exc}"
+            # 例外訊息可能帶這台電腦的完整路徑(例如開檔失敗);錯誤會進處理紀錄、資料庫與匯出,只留相對位置
+            error = f"{type(exc).__name__}: {hide_local_paths(str(exc), self.cfg)}"
             log.error("辨識失敗:%s(%s)", file_path.name, error)
 
         # 步驟 2–4:核對(要在搬檔前做,才讀得到原檔)→ 決策 → 規劃行動(提醒、服藥時間表…);
@@ -113,10 +135,11 @@ class Pipeline:
             else:
                 target = archiver.move_to_failed(file_path, self.cfg)
         except Exception as exc:
-            # 搬移失敗(檔案被占用等):留在原地,記為 failed 但不搬移
-            log.error("搬移檔案失敗:%s(%s)", file_path.name, exc)
+            # 搬移失敗(檔案被占用等):留在原地,記為 failed 但不搬移。
+            # log 與原因都只寫例外的種類:OSError 的訊息帶來源與目的地的完整路徑,目的地檔名有日期、商家與金額
+            log.error("搬移檔案失敗:%s(%s)", file_path.name, error_kind(exc))
             decision.action = "failed"
-            decision.reason += f";搬移失敗:{exc}"
+            decision.reason += f";搬移失敗({error_kind(exc)})"
             target = file_path
             if result is not None:
                 result.actions = []   # 失敗的文件不產生行動

@@ -6,15 +6,22 @@
 import html as html_lib
 import io
 import re
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
+from pathlib import Path
 
 import pytest
 import qrcode
 from PIL import Image
 from starlette.datastructures import FormData
 
+from src import review
+from src.store import Store
 from src.verify import einvoice
 from test_web_static import _problems
+from web.app import CSRF_FIELD
 from web.render import correction_values, parse_correction
 
 ISSUED = date.today() - timedelta(days=2)
@@ -331,6 +338,22 @@ def test_letter_and_bag_forms(client, review_doc):
     assert bag.index('class="visually-hidden" type="submit"') < bag.index('name="add_item"')   # Enter = 存檔
 
 
+def test_correction_form_can_only_be_sent_once(client, review_doc):
+    """更正表單送出後不能再送第二次(app.js 的 form[data-send-once],SEC-01):存檔鈕換成「存檔中…」、下面寫說明;
+    「再加一種藥」只是多一欄,不寫存檔中。退回那張表單有自己的確認框,不在這裡。"""
+    doc_id = review_doc(_bag())
+    page = client.get(f"/doc/{doc_id}/correct").text
+    form = re.search(rf'<form\b[^>]*action="/doc/{doc_id}/correct"[^>]*>(.*?)</form>', page, re.S)
+    assert "data-send-once" in form.group(0).split(">")[0]
+    body = form.group(1)
+    assert '<span data-submit-label data-busy-label="存檔中…">存檔並重新核對</span>' in body
+    assert ('<p class="status-line" role="status" aria-live="polite" '
+            'data-send-status="正在存檔並重新核對,請不要關閉這個畫面。"></p>') in body
+    assert re.search(r'<button\b[^>]*name="add_item"[^>]*data-send-quiet', body)
+    assert body.count("data-send-quiet") == 1 and page.count("data-send-once") == 1
+    assert _problems(page) == []
+
+
 def test_review_document_page_offers_reject(client, review_doc):
     doc_id = review_doc(INVOICE)
     page = client.get(f"/doc/{doc_id}/correct").text
@@ -340,6 +363,7 @@ def test_review_document_page_offers_reject(client, review_doc):
     assert 'data-confirm-title="確定要退回這份文件嗎?"' in reject
     assert 'data-confirm="這份文件會改成「讀不出來」,請長輩重新拍一張。"' in reject
     assert 'data-confirm-ok="確定退回"' in reject and "onsubmit" not in page
+    assert 'data-confirm-field="confirm_reject"' in reject           # 確認後 app.js 補上伺服器要看的欄位
     assert "還有問題的話,文件會留在「待複核」" in page
     assert '<p class="hint">AI 對這份文件的讀值沒有把握,請對照原件確認。</p>' in page   # 為什麼要複核,用白話
     assert _problems(page) == []                                      # 沒有行內 JS(嚴格 CSP)
@@ -382,7 +406,14 @@ def test_review_queue_reads_the_database(client, cfg, store, review_doc, add_doc
 def test_reject_by_document_id(client, cfg, store, review_doc, flash_text):
     doc_id = review_doc(INVOICE, name="blur.png")
     waiting = store.add_action(doc_id, "calendar", "confirm", {"title": "期限", "date": DUE.isoformat()})
-    r = client.post(f"/doc/{doc_id}/reject", data={}, follow_redirects=False)
+    asked = client.post(f"/doc/{doc_id}/reject", data={})           # 還沒確認:不退回,回一頁確認頁(SEC-02)
+    assert asked.status_code == 400 and "<h1>確定要退回這份文件嗎?</h1>" in asked.text
+    assert "這份文件會改成「讀不出來」,請長輩重新拍一張。" in asked.text and "確定退回</button>" in asked.text
+    assert f'<a class="btn btn--secondary btn--lg" href="/doc/{doc_id}/correct">先不要</a>' in asked.text
+    assert store.get_document(doc_id)["action"] == "review" and (cfg.paths.review / "blur.png").exists()
+    form = browser_form(asked.text, f"/doc/{doc_id}/reject")
+    assert {k: v for k, v in form.items() if k != CSRF_FIELD} == {"confirm_reject": "1"}
+    r = client.post(f"/doc/{doc_id}/reject", data=form, follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"].startswith("/review?msg=")
     assert flash_text(client.get(r.headers["location"]).text) == "已退回"
     doc = store.get_document(doc_id)
@@ -392,6 +423,87 @@ def test_reject_by_document_id(client, cfg, store, review_doc, flash_text):
     assert "目前沒有要確認的事項" in client.get("/confirm").text
     again = client.post(f"/doc/{doc_id}/reject", data={})
     assert again.status_code == 409 and "這份文件不在待複核" in again.text
+
+
+# ---- 同時送出(SEC-01):改同一份文件的請求一次只做一個 ------------------------------------
+_WAIT = 1.0     # 等另一個請求的秒數;有鎖時另一個進不來,等到這麼久就自己往下走
+
+
+def test_double_submit_keeps_the_original_attached(cfg, app, form_client, store, review_doc, monkeypatch):
+    """連按兩下「存檔並重新核對」:兩個請求並行,不能都拿同一個舊的原件位置去搬。
+
+    在重新核對的地方放一道關卡,重現「兩個請求都已經讀完文件」:沒有鎖時兩個都會到,後寫的那個搬不到原件,
+    卻把已經不存在的 review/ 路徑寫回資料庫(原件與文件脫鉤)。有鎖時第二個要等第一個做完才讀文件。
+    """
+    doc_id = review_doc(_bill())
+    clients = [form_client(app), form_client(app)]
+    page_form = browser_form(clients[0].get(f"/doc/{doc_id}/correct").text, f"/doc/{doc_id}/correct")
+    forms = [{**page_form, "amount": "1290", CSRF_FIELD: c.csrf_token()} for c in clients]
+    gate, real = threading.Barrier(2), review.verify_decide_plan
+
+    def gated(*args, **kwargs):
+        try:
+            late = gate.wait(timeout=_WAIT)     # 兩個都到了才放行;每個執行緒拿到不同的號碼(0、1)
+        except threading.BrokenBarrierError:
+            late = 0
+        decision = real(*args, **kwargs)
+        time.sleep(0.3 * late)                  # 其中一個晚一點才搬原件、寫資料庫
+        return decision
+
+    monkeypatch.setattr(review, "verify_decide_plan", gated)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        sent = list(pool.map(lambda pair: pair[0].post(f"/doc/{doc_id}/correct", data=pair[1], follow_redirects=False),
+                             zip(clients, forms)))
+    assert [r.status_code for r in sent] == [303, 303]
+    doc = store.get_document(doc_id)
+    target = Path(doc["target_path"])
+    assert doc["action"] == "archive" and doc["result"]["amount"] == 1290.0
+    assert target.is_file() and cfg.paths.archive in target.parents          # 原件位置指到真的存在的檔
+    page = clients[0].get(f"/doc/{doc_id}").text
+    assert f'src="/doc/{doc_id}/file"' in page and "原件已經移走" not in page
+    assert len(store.list_corrections(document_id=doc_id, verified_only=False)) == 1   # 更正紀錄不重複
+
+
+def test_restore_racing_with_a_correction_cannot_revive_the_replaced_reminder(
+        app, form_client, store, archived_doc, action_status, monkeypatch):
+    """「恢復提醒」和同一份文件的更正同時送出:恢復已經讀到「還沒被取代」,更正換掉提醒之後它才寫入。
+
+    沒有鎖時,被取代的舊提醒會被改回生效(首頁冒出舊期限);有鎖時更正要等恢復做完,再把它一起換掉。
+    """
+    doc_id = archived_doc(_bill())
+    old = store.add_action(doc_id, "calendar", "auto", {"title": "繳電費", "date": DUE.isoformat()},
+                           status="rejected")
+    restoring, correcting = form_client(app), form_client(app)
+    token = restoring.csrf_token()
+    read_done, corrected, real = threading.Event(), threading.Event(), Store.set_action_status
+
+    def slow_write(self, action_id, status):
+        read_done.set()                 # 走到這裡,「是不是已被取代」已經檢查過了
+        corrected.wait(timeout=_WAIT)   # 沒有鎖:等更正做完才寫;有鎖:更正進不來,等不到就寫
+        return real(self, action_id, status)
+
+    monkeypatch.setattr(Store, "set_action_status", slow_write)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        restore = pool.submit(restoring.post, f"/reminder/{old}", data={"decision": "restore", CSRF_FIELD: token},
+                              follow_redirects=False)
+        assert read_done.wait(timeout=10)
+        saved = _correct(correcting, doc_id, **{"fields.due_date": NEW_DUE.isoformat()})
+        corrected.set()
+        assert restore.result(timeout=10).status_code == 303 and saved.status_code == 303
+    assert action_status(store, old) == "rejected"
+    home = _remind_section(correcting.get("/").text)
+    assert _md(NEW_DUE) in home and _md(DUE) not in home
+
+
+def test_home_skips_reminders_replaced_by_a_correction(client, store, archived_doc):
+    """被更正取代的舊提醒(superseded)就算狀態是生效中,首頁「要記得的事」也不列:只有新的期限。"""
+    doc_id = archived_doc(_bill())
+    old = store.add_action(doc_id, "calendar", "auto", {"title": "繳電費", "date": DUE.isoformat()})
+    store.replace_actions(doc_id, [{"kind": "calendar", "tier": "auto",
+                                    "payload": {"title": "繳電費", "date": NEW_DUE.isoformat()}}])
+    store.set_action_status(old, "pending")     # 競態留下的狀態:已被取代,卻又被改回生效
+    home = _remind_section(client.get("/").text)
+    assert _md(NEW_DUE) in home and _md(DUE) not in home
 
 
 # ---- 表單解析(render.parse_correction) -----------------------------------------------

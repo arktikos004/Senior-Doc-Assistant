@@ -5,20 +5,22 @@
 - 自動存檔門檻(auto_threshold):驗證信心達到才自動存檔。
 安全底線寫死在這裡,設定改不掉:門檻只能在 0.80–0.98(不能比預設鬆);雲端備援要這台電腦設好帳號與
 金鑰的環境變數才能開;展示模式(mock)不換辨識模式;藥袋一律只在本機辨識。存的值每次讀出來都重新
-驗證(effective_config),被直接改資料庫的不合規則值不會生效。每次改動都由 Store.set_setting 留紀錄。
+驗證(effective_config),被直接改資料庫的不合規則值不會生效;config.yaml 把門檻寫得比 0.80 低也不生效
+(以 0.80 計)。每次改動都由 Store.set_setting 留紀錄。
 """
 from __future__ import annotations
 
 import logging
 import math
 import os
+import re
 import unicodedata
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
-from .config import AppConfig
+from .config import BASE_DIR, AppConfig
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -83,9 +85,12 @@ def effective_config(cfg: AppConfig, store: Store) -> AppConfig:
 
     存的值每次都重新驗證,不合規則就沿用 config.yaml:門檻要在 0.80–0.98、雲端備援要有帳號與金鑰、
     展示模式不換辨識模式。藥袋一律在 local_only_doc_types 裡(config.yaml 漏寫也補上)。
+    config.yaml 的門檻也守同一條底線:寫得比 0.80 低(或不是數字)就以 0.80 生效;比 0.80 嚴的照它寫的。
     """
     stored = store.get_settings()
     changes: dict[str, Any] = {}
+    if not cfg.auto_threshold >= THRESHOLD_MIN:   # 寫成 not >=:nan 也算不合規則
+        changes["auto_threshold"] = THRESHOLD_MIN
     if PROVIDER in stored:
         try:
             changes["provider"] = check_provider(stored[PROVIDER], cfg)
@@ -167,6 +172,11 @@ def _within(path: Path, root: Path) -> bool:
     return resolved is not None and resolved != root and resolved.is_relative_to(root)
 
 
+def _is_link(path: Path) -> bool:
+    """符號連結,或 Windows 的 junction(資料夾連結:is_symlink() 對它是 False,一般帳號就能建)。"""
+    return path.is_symlink() or os.path.isjunction(path)
+
+
 def _shown_path(target: Any, folders: dict[str, Path]) -> str | None:
     """匯出用的原件位置:四個資料夾內寫相對位置(例 archive/帳單/2026-10/…png),不寫這台電腦的完整路徑。"""
     if not target:
@@ -179,10 +189,63 @@ def _shown_path(target: Any, folders: dict[str, Path]) -> str | None:
     return path.name
 
 
+def _spellings(path: Path) -> set[str]:
+    """同一個位置的完整路徑在文字裡可能的寫法:設定的與展開後的,各有反斜線、斜線、例外訊息 repr 出來的雙反斜線。
+
+    只收絕對路徑;磁碟根目錄不收(拿它比對,每個路徑都會中)。
+    """
+    candidates = {p for p in (path, _resolved(path)) if p is not None and p.is_absolute() and len(p.parts) > 1}
+    return {form for text in map(str, candidates)
+            for form in (text, text.replace("\\", "/"), text.replace("\\", "\\\\"))}
+
+
+def path_hider(cfg: AppConfig) -> Callable[[Any], Any]:
+    """回傳一個函式:把文字裡這台電腦的完整路徑換成相對名稱(不是字串的值原樣回傳)。
+
+    例外訊息常帶完整路徑(例:cannot identify image file '<家目錄>/…/data/uploads/a.jpg'),裡面有 Windows 的
+    帳號名稱;處理紀錄的錯誤與原因、匯出檔都不該帶著它。認得的位置由長到短比對:四個資料夾、inbox、logs
+    換成資料夾名稱(同 _shown_path,上例變成 'uploads/a.jpg'),專案資料夾換成 ".",使用者的家目錄換成 "~"。
+    只認完整的資料夾名稱(archive2 不算 archive),大小寫不分(Windows 的路徑不分)。
+    """
+    places = [*data_folders(cfg).items(), ("inbox", cfg.paths.inbox), ("logs", cfg.paths.logs), (".", BASE_DIR)]
+    try:
+        places.append(("~", Path.home()))
+    except RuntimeError:
+        pass   # 找不到家目錄(沒有相關環境變數的服務帳號):少比對一項
+    names: dict[str, str] = {}
+    for name, path in places:
+        for spelling in _spellings(path):
+            names.setdefault(spelling, name)
+    spellings = sorted(names, key=len, reverse=True)
+    # 前後都要是路徑的邊界:前面不接英數(相對路徑中段的 /app 不算專案資料夾),後面不接檔名字元
+    pattern = re.compile(
+        r"(?<![A-Za-z0-9_.\-])(?:%s)(?![A-Za-z0-9_\-]|\.[A-Za-z0-9_])" % "|".join(
+            f"({re.escape(spelling)})" for spelling in spellings),
+        re.IGNORECASE)
+
+    def hide(text: Any) -> Any:
+        if not isinstance(text, str) or not spellings:
+            return text
+        return pattern.sub(lambda match: names[spellings[match.lastindex - 1]], text)
+
+    return hide
+
+
+def hide_local_paths(text: Any, cfg: AppConfig) -> Any:
+    """把一段文字裡這台電腦的完整路徑換成相對名稱(規則見 path_hider);不是字串的值原樣回傳。"""
+    return path_hider(cfg)(text)
+
+
 def export_records(store: Store, cfg: AppConfig, *, version: str) -> dict[str, Any]:
-    """「匯出全部紀錄」的內容:文件(含讀值)、行動(提醒、服藥時間表)、更正、設定變更;不含影像。"""
+    """「匯出全部紀錄」的內容:文件(含讀值)、行動(提醒、服藥時間表)、更正、設定變更;不含影像。
+
+    不寫這台電腦的完整路徑:原件位置改成資料夾裡的相對位置;錯誤與原因是例外訊息組成的文字,
+    新的紀錄在寫入時就已經改寫(src/pipeline.py),這裡對舊紀錄再擋一次。
+    """
     folders = _resolved_folders(cfg)
-    documents = [{**doc, "target_path": _shown_path(doc.get("target_path"), folders)}
+    hide = path_hider(cfg)
+    documents = [{**doc, "target_path": _shown_path(doc.get("target_path"), folders),
+                  "error": hide(doc.get("error")), "reason": hide(doc.get("reason"))}
                  for doc in store.list_documents(limit=None)]
     return {
         "exported_at": datetime.now().isoformat(timespec="seconds"),
@@ -199,9 +262,11 @@ def delete_data_files(cfg: AppConfig) -> tuple[int, int]:
     """刪除全部資料的檔案部分,回傳 (刪掉幾個檔案, 刪不掉幾個)。
 
     只刪四個資料夾「裡面」的檔案,再收掉變空的子資料夾(資料夾名稱有類型與月份);四個資料夾本身留著。
-    每個要刪的路徑都 resolve() 後確認還在該資料夾內:指到外面的符號連結不跟過去、也不刪,
-    連結到別處的資料夾不進去。資料庫與 logs/ 就算被設定在這些資料夾裡也不碰(設定與設定紀錄要保留)。
-    刪不掉的(例如檔案正被開著)跳過、計數,不讓整個刪除中斷。
+    每個要刪的路徑都 resolve() 後確認還在該資料夾內:指到外面的符號連結不跟過去、也不刪。
+    資料夾的連結(符號連結、Windows 的 junction)一律不走進去、也不刪:指到外面的不能碰,指到大資料夾的
+    不必走完整棵樹,繞回自己的不會把同一個檔走很多次。資料庫與 logs/ 就算被設定在這些資料夾裡也不碰
+    (設定與設定紀錄要保留)。
+    刪不掉的(例如檔案正被開著)跳過、計數,不讓整個刪除中斷;輪到它之前就已經不在的檔不算刪不掉。
     """
     keep = [p for p in (_resolved(cfg.paths.db_path), _resolved(cfg.paths.logs)) if p is not None]
 
@@ -212,9 +277,12 @@ def delete_data_files(cfg: AppConfig) -> tuple[int, int]:
     deleted = failed = 0
     roots = {root for root in _resolved_folders(cfg).values() if root.is_dir()}
     for root in roots:
-        # 由下往上走,子資料夾的檔案刪完才輪到它自己;os.walk 預設不跟進資料夾的符號連結
-        for dirpath, dirnames, filenames in os.walk(root, topdown=False):
+        folders: list[Path] = []   # 走過的子資料夾,上層在前
+        for dirpath, dirnames, filenames in os.walk(root):
             here = Path(dirpath)
+            # 往下走之前先把資料夾的連結拿掉:os.walk 只不跟符號連結,junction 它會走進去
+            dirnames[:] = [name for name in dirnames if not _is_link(here / name)]
+            folders.extend(here / name for name in dirnames)
             for name in filenames:
                 path = here / name
                 if name == _KEEP_FILE or not _within(path, root) or protected(path):
@@ -222,17 +290,18 @@ def delete_data_files(cfg: AppConfig) -> tuple[int, int]:
                 try:
                     path.unlink()
                     deleted += 1
+                except FileNotFoundError:
+                    pass   # 輪到它之前就不見了(例如另一次刪除先刪掉):已經不在,不算刪不掉
                 except OSError:
                     failed += 1
-            for name in dirnames:
-                sub = here / name
-                # 另一個資料夾被設在這個裡面時,它本身也要留著
-                if sub.is_symlink() or not _within(sub, root) or protected(sub) or _resolved(sub) in roots:
-                    continue
-                try:
-                    sub.rmdir()   # 只收空的;還有刪不掉的檔案就留著
-                except OSError:
-                    pass
+        for sub in reversed(folders):   # 由下往上:子資料夾收掉了,才輪到它的上層
+            # 另一個資料夾被設在這個裡面時,它本身也要留著
+            if _is_link(sub) or not _within(sub, root) or protected(sub) or _resolved(sub) in roots:
+                continue
+            try:
+                sub.rmdir()   # 只收空的;還有刪不掉的檔案就留著
+            except OSError:
+                pass
     # log 只記數量:檔名含日期、商家與金額
     log.info("刪除全部資料:刪掉 %d 個檔案,%d 個刪不掉", deleted, failed)
     return deleted, failed

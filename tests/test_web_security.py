@@ -1,4 +1,5 @@
 """上線基本防護(W2-B)的測試:安全標頭、CSRF(資料夾隔離在 tmp_path,不連網、不呼叫模型)。"""
+import asyncio
 import re
 
 import pytest
@@ -198,6 +199,19 @@ def test_every_post_form_on_the_pages_carries_the_token(plain_client, seeded):
     assert all(hidden in body for body in forms)
 
 
+def test_confirmation_page_is_an_ordinary_page(client, seeded):
+    """還沒確認時伺服器回的確認頁(SEC-02):安全標頭、不快取、表單帶這個瀏覽器的 token、沒有行內 JS,
+    也只有共用的那一個確認框(確認頁自己的表單不再跳確認框)。"""
+    r = client.post(f"/doc/{seeded['review']}/reject")
+    assert r.status_code == 400 and r.headers["content-type"].startswith("text/html")
+    assert_security_headers(r)
+    assert r.headers["cache-control"] == "no-store"
+    (body,) = _POST_FORMS.findall(r.text)
+    assert f'<input type="hidden" name="{CSRF_FIELD}" value="{client.cookies.get(CSRF_COOKIE)}">' in body
+    assert "data-confirm" not in body and r.text.count("<dialog") == 1
+    assert not re.search(r"<script(?![^>]*\bsrc=)|\son[a-z]+\s*=|\sstyle\s*=|javascript:", r.text, re.I)
+
+
 @pytest.mark.parametrize("template", sorted(p.name for p in TEMPLATES_DIR.glob("*.html")))
 def test_post_forms_in_templates_include_csrf_input(template):
     """新表單(例如 F7 的更正頁)忘了放 {{ csrf_input() }},這裡就會抓到。"""
@@ -241,3 +255,93 @@ def test_oversize_upload_is_413_before_token_check_and_keeps_token(plain_client,
     r = client.post("/upload", files={"file": ("a.png", b"\0" * (web_app._MULTIPART_SLACK + 100), "image/png")})
     assert r.status_code == 413 and "15MB" in r.text
     assert _TOKEN_FIELD.search(r.text).group(1) == client.cookies.get(CSRF_COOKIE)
+
+
+# ---- 每個 POST 的 body 都有大小上限(SEC-10) ---------------------------------------------------
+# 原本只有 /upload 有:其他 POST 的 body(含沒有上限的檔案部分)會先整份收下、寫進暫存檔,才檢查 CSRF
+
+_FORM_POSTS = {"confirm": "/confirm/{confirm}", "reminder": "/reminder/{auto}", "correct": "/doc/{review}/correct",
+               "reject": "/doc/{review}/reject", "settings": "/settings", "delete": "/settings/delete"}
+
+
+@pytest.mark.parametrize("route", sorted(_FORM_POSTS))
+@pytest.mark.parametrize("with_token", [False, True])
+def test_oversize_form_post_is_413_and_changes_nothing(cfg, store, app, seeded, form_client, route, with_token):
+    """Content-Length 超過上限就回 413 的中文頁:不看有沒有 token(還沒讀 body),帶了合法的 token 與欄位也不做。"""
+    client = form_client(app) if with_token else TestClient(app)
+    data = {"decision": "done", "understood": "1", "confirm_reject": "1", "auto_threshold": "0.95", "amount": "20"}
+    junk = {"junk": ("junk.bin", b"\0" * (web_app.MAX_FORM_BYTES + 1), "application/octet-stream")}
+    r = client.post(_FORM_POSTS[route].format(**seeded), data=data, files=junk)
+    assert r.status_code == 413 and r.headers["content-type"].startswith("text/html")
+    assert "<h1>送出的資料太多了</h1>" in r.text and "錯誤代碼 413" in r.text and 'href="/"' in r.text
+    assert_security_headers(r)
+    assert r.headers["cache-control"] == "no-store"
+    assert_nothing_changed(cfg, store, seeded)
+    assert store.get_settings() == {} and store.list_setting_changes() == []
+
+
+def test_the_largest_valid_form_fits_under_the_limit(client, store, review_doc):
+    """更正表單收得下的最大內容(30 種藥,藥名與用法各 500 個中文字,網址編碼後一個字 9 個位元組)不會被上限擋下。"""
+    from web.render import MAX_FORM_TEXT, MAX_MED_ITEMS
+    doc_id = review_doc({"doc_type": "藥袋", "vendor": "範例診所", "date": "2026-10-01", "fields": {"items": []}},
+                        name="bag.png")
+    data = {"vendor": "範例診所", "date": "2026-10-01"}
+    for i in range(MAX_MED_ITEMS):
+        data.update({f"items-{i}-name": "藥" * MAX_FORM_TEXT, f"items-{i}-usage": "用" * MAX_FORM_TEXT,
+                     f"items-{i}-timing": "早", f"items-{i}-days": "7"})
+    r = client.post(f"/doc/{doc_id}/correct", data=data, follow_redirects=False)
+    assert int(r.request.headers["content-length"]) > 256 * 1024       # 比 256KB 還大的合法表單
+    assert r.status_code == 303
+    items = store.get_document(doc_id)["result"]["fields"]["items"]
+    assert len(items) == MAX_MED_ITEMS and all(len(it["name"]) == MAX_FORM_TEXT for it in items)
+
+
+def _asgi_post(app, path: str, headers: dict[str, str], chunks) -> tuple[int, int]:
+    """不經 TestClient,直接用 ASGI 送一個 POST:body 一塊一塊給。回傳(狀態碼, 伺服器實際收了幾塊)。"""
+    scope = {"type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST", "scheme": "http",
+             "path": path, "raw_path": path.encode(), "query_string": b"", "root_path": "",
+             "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+             "client": ("testclient", 50000), "server": ("testserver", 80)}
+    pulled, sent, source = [], [], iter(chunks)
+
+    async def receive():
+        chunk = next(source, None)
+        if chunk is None:
+            return {"type": "http.disconnect"}
+        pulled.append(len(chunk))
+        return {"type": "http.request", "body": chunk, "more_body": True}
+
+    async def send(message):
+        sent.append(message)
+
+    asyncio.run(app(scope, receive, send))
+    return next(m["status"] for m in sent if m["type"] == "http.response.start"), len(pulled)
+
+
+@pytest.mark.parametrize("path", ["/settings/delete", "/doc/1/correct", "/upload"])
+def test_body_without_content_length_is_cut_off_at_the_limit(app, monkeypatch, path):
+    """沒有 Content-Length(分塊傳送)的請求邊收邊數,超過上限就停、回 413,不把整份收完;
+    不用 411 拒收:中間的代理改用分塊傳送時,表單還是送得出去。"""
+    monkeypatch.setattr(web_app, "MAX_UPLOAD_BYTES", web_app.MAX_FORM_BYTES - web_app._MULTIPART_SLACK)   # 兩種上限一樣大
+    chunk = b"a" * (64 * 1024)
+    status, pulled = _asgi_post(app, path, {"content-type": "application/x-www-form-urlencoded"}, [chunk] * 100)
+    assert status == 413
+    assert pulled == web_app.MAX_FORM_BYTES // len(chunk) + 1        # 超過上限的那一塊之後就不再收
+
+
+def test_oversize_content_length_is_refused_before_reading_anything(app):
+    status, pulled = _asgi_post(app, "/settings/delete", {"content-type": "application/x-www-form-urlencoded",
+                                                         "content-length": str(web_app.MAX_FORM_BYTES + 1)},
+                                [b"a" * 1024] * 300)
+    assert (status, pulled) == (413, 0)
+
+
+def test_chunked_form_within_the_limit_still_works(store, plain_client, seeded):
+    """沒有 Content-Length 但大小正常的表單照常處理(回 411 的話,這種請求會全部被拒)。"""
+    client = plain_client
+    token = _TOKEN_FIELD.search(client.get("/confirm").text).group(1)
+    body = f"decision=done&{CSRF_FIELD}={token}".encode()
+    r = client.post(f"/confirm/{seeded['confirm']}", content=iter([body]),
+                    headers={"content-type": "application/x-www-form-urlencoded"}, follow_redirects=False)
+    assert "content-length" not in r.request.headers and r.status_code == 303
+    assert {a["id"]: a["status"] for a in store.list_actions()}[seeded["confirm"]] == "done"

@@ -417,6 +417,9 @@ a.tbl__row:hover { background: var(--bg-subtle); }
 .review-form { display: grid; gap: var(--s4); padding: var(--s6); }
 .review-form h2 { font-size: 1.2rem; font-weight: 700; }
 .field-row { display: grid; gap: var(--s1); }
+/* 加密 PDF 的密碼欄:密碼不長,電腦上不必拉滿整張卡片;「顯示密碼」照文字寬度(手機上本來就比 28rem 窄) */
+.field-row--short { max-width: 28rem; }
+.field-row--short > .btn { justify-self: start; }
 .field-label { font-weight: 600; }
 .req { margin-left: var(--s2); color: var(--red); font-size: .85rem; font-weight: 600; }   /* 必填:字 + 顏色 */
 .field-hint { color: var(--ink-3); font-size: .9rem; }

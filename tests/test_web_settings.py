@@ -4,14 +4,21 @@
 analyzer 一律是 MockAnalyzer(不連網、不呼叫模型)。
 """
 import re
+import sqlite3
+import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import pytest
 
 import web.app as web_app
+from src import review
 from src.providers import MockAnalyzer
 from src.settings import PROVIDER, THRESHOLD
-from web.app import create_app
+from src.store import Store
+from test_web_correct import browser_form
+from web.app import CSRF_FIELD, create_app
 
 
 @pytest.fixture
@@ -97,6 +104,38 @@ def test_switching_mode_rebuilds_the_analyzer(cfg, store, form_client, monkeypat
     store.set_setting(PROVIDER, "workers_ai")
     upload(client, png_bytes(), "c.png")
     assert built == [("ollama", ("藥袋",)), ("workers_ai", ("藥袋",))]
+
+
+def test_concurrent_uploads_build_the_analyzer_once(cfg, form_client, monkeypatch, png_bytes):
+    """兩份上傳同時進來、還沒有 analyzer:「比較 → 建立 → 寫入」整段鎖住,同一個模式只建一次,兩份用同一個(SEC-08)。
+    沒有鎖時兩邊都看到「還沒建」,各建一個;鍵與 analyzer 分兩次寫,切換模式的那一瞬間也可能對不上。"""
+    cfg.provider = "ollama"
+    built, used, gate = [], [], threading.Barrier(2)
+
+    def slow_create(current):
+        built.append(current.provider)
+        try:
+            gate.wait(timeout=1.0)      # 沒有鎖:兩份上傳都進得來;有鎖:另一份在外面等,這邊等不到就往下走
+        except threading.BrokenBarrierError:
+            pass
+        return MockAnalyzer(current)
+
+    class RecordingPipeline:            # 只看上傳拿到哪一個 analyzer,不真的跑辨識
+        def __init__(self, current, analyzer, store):
+            used.append(analyzer)
+
+        def process_file(self, path, hint, category=None, label=None):
+            return {"文件ID": 1}
+
+    monkeypatch.setattr(web_app, "create_analyzer", slow_create)
+    monkeypatch.setattr(web_app, "Pipeline", RecordingPipeline)
+    clients = [form_client(create_app(cfg))]
+    clients.append(form_client(clients[0].app))
+    assert all(c.get("/").status_code == 200 for c in clients) and built == []   # 開頁面不建立
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        sent = list(pool.map(lambda pair: upload(pair[0], png_bytes(), pair[1]), zip(clients, ["a.png", "b.png"])))
+    assert [r.status_code for r in sent] == [303, 303]
+    assert built == ["ollama"] and len(used) == 2 and used[0] is used[1]
 
 
 def test_injected_analyzer_is_always_used(cfg, store, form_client, monkeypatch, cloud_keys, png_bytes):
@@ -244,6 +283,7 @@ def test_switching_to_cloud_asks_first(local_client, cloud_keys):
     assert " hidden disabled" in button
     assert 'data-confirm-title="確定要開啟雲端備援嗎?"' in button and 'data-confirm-ok="確定開啟"' in button
     assert 'data-confirm="開啟後,藥袋、醫療與保險、身分證明,以及沒選類型的文件仍只在這台電腦處理;' in button
+    assert 'data-confirm-field="confirm_cloud"' in button      # 按了「確定開啟」,app.js 才補上伺服器要看的確認欄位
     assert "data-confirm" not in re.search(r"<button[^>]*data-save>", html).group(0)
 
 
@@ -298,17 +338,50 @@ def test_cloud_mode_needs_keys(local_client, store, no_cloud_keys):
     inputs = dict(_PROVIDER_INPUT.findall(r.text))
     assert '<option value="0.90" selected>' in r.text           # 剛剛的選擇留著,改好再送
     assert "checked" in inputs["ollama"]
+    assert "確定要開啟雲端備援嗎?</h1>" not in r.text             # 不能開的不必問要不要開
 
 
 def test_switching_to_cloud_with_keys(local_client, store, cloud_keys):
-    r = save(local_client, provider="workers_ai", auto_threshold="0.80")
+    """確認過(有 JS 時 app.js 在確認框按「確定開啟」後補上 confirm_cloud)才切到雲端;切回本機不必確認。"""
+    r = save(local_client, provider="workers_ai", auto_threshold="0.80", confirm_cloud="1")
     assert r.status_code == 303 and store.get_settings() == {PROVIDER: "workers_ai"}
     html = local_client.get("/settings").text
     assert "辨識模式改成「可以用雲端備援」" in html
     assert "其他文件會交給雲端模型讀取" in html                     # 安心說明跟著改
     r = save(local_client, provider="ollama", auto_threshold="0.80")    # 切回本機不必確認
-    assert store.get_settings() == {PROVIDER: "ollama"}
+    assert r.status_code == 303 and store.get_settings() == {PROVIDER: "ollama"}
     assert "辨識模式改成「只用這台電腦」" in local_client.get("/settings").text
+
+
+def test_switching_to_cloud_without_confirmation_asks_on_a_page(local_client, store, cloud_keys):
+    """沒有 JS(或 app.js 沒跑起來)就沒有確認框:伺服器沒收到確認欄位不會切換(SEC-02),回一頁確認頁再問一次,
+    字和確認框一樣;按「確定開啟」才生效,「先不要」回設定頁。門檻和辨識模式同一張表單,也等確認後一起存。"""
+    r = save(local_client, provider="workers_ai", auto_threshold="0.90")
+    assert r.status_code == 400 and store.get_settings() == {} and store.list_setting_changes() == []
+    assert "<h1>確定要開啟雲端備援嗎?</h1>" in r.text
+    assert "開啟後,藥袋、醫療與保險、身分證明,以及沒選類型的文件仍只在這台電腦處理;其他文件會交給雲端模型讀取。" in r.text
+    assert '<a class="btn btn--secondary btn--lg" href="/settings">先不要</a>' in r.text
+    assert "確定開啟</button>" in r.text and "取消" not in _text(r.text)
+    assert r.text.index(">先不要</a>") < r.text.index("確定開啟</button>")      # 不做的那一顆在前面
+    form = browser_form(r.text, "/settings")
+    assert {k: v for k, v in form.items() if k != CSRF_FIELD} == {
+        "provider": "workers_ai", "auto_threshold": "0.90", "confirm_cloud": "1"}
+    r = local_client.post("/settings", data=form, follow_redirects=False)
+    assert r.status_code == 303 and store.get_settings() == {PROVIDER: "workers_ai", THRESHOLD: "0.90"}
+
+
+@pytest.mark.parametrize("value", ["", "0", "yes", "on"])
+def test_cloud_confirmation_field_must_be_the_expected_value(local_client, store, cloud_keys, value):
+    r = save(local_client, provider="workers_ai", confirm_cloud=value)
+    assert r.status_code == 400 and "<h1>確定要開啟雲端備援嗎?</h1>" in r.text and store.get_settings() == {}
+
+
+def test_only_switching_to_cloud_needs_confirmation(local_client, store, cloud_keys):
+    """只改門檻、或已經在雲端備援時再存一次,都不問。"""
+    assert save(local_client, provider="ollama", auto_threshold="0.85").status_code == 303
+    store.set_setting(PROVIDER, "workers_ai")
+    assert save(local_client, provider="workers_ai", auto_threshold="0.90").status_code == 303
+    assert store.get_settings() == {PROVIDER: "workers_ai", THRESHOLD: "0.90"}
 
 
 def test_demo_mode_cannot_switch(client, store, cloud_keys):
@@ -390,13 +463,37 @@ def test_export_link_and_delete_button_on_the_page(client):
     assert '<a class="btn btn--secondary btn--lg" href="/settings/export" download>' in html
     button = re.search(r'<button class="btn btn--danger btn--lg"[^>]*>', html).group(0)
     assert 'data-confirm-title="確定要刪除全部資料嗎?"' in button and 'data-confirm-ok="確定刪除"' in button
-    assert "無法復原" in button
+    assert "無法復原" in button and 'data-confirm-field="understood"' in button   # 確認後 app.js 補上的欄位
     # 沒有 JS 就沒有確認框:要先勾「我知道刪除後無法復原」才送得出去
     assert re.search(r'<noscript><label class="check-line"><input type="checkbox" name="understood" value="1" '
                      r'required>', html)
 
 
 # ---- 資料管理:刪除全部資料 --------------------------------------------------------------------
+
+def delete_all(client, **kwargs):
+    """按「刪除全部資料」而且確認過了:有 JS 時 app.js 在確認框按「確定刪除」後補上 understood,
+    沒有 JS 時是表單裡必勾的「我知道刪除後無法復原」。"""
+    return client.post("/settings/delete", data={"understood": "1"}, **kwargs)
+
+
+def test_delete_without_confirmation_asks_on_a_page(cfg, client, store, filled):
+    """伺服器沒收到確認欄位就不刪(SEC-02;原本只有瀏覽器檢查必勾):回一頁確認頁,字和確認框一樣,
+    按「確定刪除」才刪,「先不要」回設定頁。"""
+    records = cfg.paths.logs / "records.jsonl"
+    records.write_text("{}\n", encoding="utf-8")
+    r = client.post("/settings/delete")
+    assert r.status_code == 400 and "<h1>確定要刪除全部資料嗎?</h1>" in r.text
+    assert "所有文件的照片、讀值、提醒與更正紀錄都會刪除,無法復原;設定與設定變更紀錄會保留。" in r.text
+    assert '<a class="btn btn--secondary btn--lg" href="/settings">先不要</a>' in r.text
+    assert "確定刪除</button>" in r.text and "取消" not in _text(r.text)
+    assert len(store.list_documents()) == 1 and filled.exists() and records.exists()
+    assert not _purge_logged(store)
+    form = browser_form(r.text, "/settings/delete")
+    assert {k: v for k, v in form.items() if k != CSRF_FIELD} == {"understood": "1"}
+    r = client.post("/settings/delete", data=form, follow_redirects=False)
+    assert r.status_code == 303 and store.list_documents() == [] and not filled.exists() and not records.exists()
+
 
 def test_delete_all_data(cfg, client, store, filled, tmp_path, flash_text):
     outside = tmp_path / "keep-me.png"
@@ -407,8 +504,8 @@ def test_delete_all_data(cfg, client, store, filled, tmp_path, flash_text):
     review_file.write_bytes(b"synthetic")
     records = cfg.paths.logs / "records.jsonl"
     records.write_text('{"AI辨識結果": {"vendor": "示範電力公司"}}\n', encoding="utf-8")   # 處理紀錄也含讀值
-    r = client.post("/settings/delete", headers={"Cf-Access-Authenticated-User-Email": "family@example.com"},
-                    follow_redirects=False)
+    r = delete_all(client, headers={"Cf-Access-Authenticated-User-Email": "family@example.com"},
+                   follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"].startswith("/?msg=")
     assert not records.exists()                                 # 確認框說「讀值都會刪除」,這份也要刪
     assert flash_text(client.get(r.headers["location"]).text) == "已刪除全部資料"
@@ -426,8 +523,108 @@ def test_delete_all_data(cfg, client, store, filled, tmp_path, flash_text):
 
 def test_delete_says_when_some_files_are_stuck(client, cfg, store, filled, monkeypatch, flash_text):
     monkeypatch.setattr(web_app, "delete_data_files", lambda c: (0, 1))
-    r = client.post("/settings/delete", follow_redirects=False)
+    r = delete_all(client, follow_redirects=False)
     assert flash_text(client.get(r.headers["location"]).text) == "資料已刪除,但有些照片檔刪不掉,請管理者檢查資料夾。"
+
+
+def _refuse(*args, **kwargs):
+    raise PermissionError(13, "synthetic: file is in use")
+
+
+def _purge_logged(store) -> bool:
+    changes = store.list_setting_changes()
+    return bool(changes) and changes[0]["key"] == "purged"
+
+
+def test_delete_goes_on_when_the_processing_log_is_stuck(client, cfg, store, filled, monkeypatch, caplog):
+    """records.jsonl 被別的程式開著(Windows 不能刪開著的檔):原本是「系統出了點問題」,資料庫清空了、
+    原件與含讀值的處理紀錄還在,也沒記一筆(SEC-04)。現在其餘步驟照做、刪除照樣記一筆,
+    畫面照實說哪些已刪、哪一樣刪不掉,下一步是回設定頁再按一次。"""
+    monkeypatch.setattr(web_app, "clear_records", _refuse)
+    r = delete_all(client)
+    assert r.status_code == 500 and "<h1>有些資料還沒刪掉</h1>" in r.text and "系統出了點問題" not in r.text
+    assert "文件、提醒、更正紀錄與照片都已經刪除,但處理紀錄檔(裡面有讀值)刪不掉" in r.text
+    assert "再按一次「刪除全部資料」" in r.text and 'href="/settings"' in r.text and "回設定</a>" in r.text
+    assert store.list_documents() == [] and not filled.exists()     # 資料庫與原件照樣刪掉
+    assert _purge_logged(store)
+    assert "PermissionError" in caplog.text and "synthetic" not in caplog.text   # 紀錄只寫例外類型,不寫訊息原文
+
+
+def test_delete_says_when_both_photos_and_the_processing_log_are_stuck(client, store, filled, monkeypatch):
+    monkeypatch.setattr(web_app, "clear_records", _refuse)
+    monkeypatch.setattr(web_app, "delete_data_files", lambda c: (0, 2))
+    r = delete_all(client)
+    assert r.status_code == 500 and "<h1>有些資料還沒刪掉</h1>" in r.text
+    assert "文件、提醒與更正紀錄已經刪除,但處理紀錄檔(裡面有讀值)和有些照片檔刪不掉" in r.text
+    assert "照片都已經刪除" not in r.text                         # 沒刪掉的不寫成刪了
+    assert store.list_documents() == [] and _purge_logged(store)
+
+
+def test_delete_survives_an_error_while_removing_photos(client, cfg, store, filled, monkeypatch, flash_text):
+    """刪照片檔整個出錯(例如資料夾讀不了):當成有照片檔刪不掉,處理紀錄照樣清、刪除照樣記一筆。"""
+    records = cfg.paths.logs / "records.jsonl"
+    records.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(web_app, "delete_data_files", _refuse)
+    r = delete_all(client, follow_redirects=False)
+    assert flash_text(client.get(r.headers["location"]).text) == "資料已刪除,但有些照片檔刪不掉,請管理者檢查資料夾。"
+    assert store.list_documents() == [] and not records.exists() and _purge_logged(store)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="只有 Windows 不能刪開著的檔")
+def test_delete_with_the_processing_log_really_open(client, cfg, store, filled, flash_text):
+    records = cfg.paths.logs / "records.jsonl"
+    records.write_text('{"AI辨識結果": {"vendor": "示範電力公司"}}\n', encoding="utf-8")
+    with records.open("rb"):
+        r = delete_all(client)
+    assert r.status_code == 500 and "處理紀錄檔(裡面有讀值)刪不掉" in r.text
+    assert records.exists() and not filled.exists() and _purge_logged(store)
+    again = delete_all(client, follow_redirects=False)     # 關掉那個程式後再按一次就補刪
+    assert flash_text(client.get(again.headers["location"]).text) == "已刪除全部資料" and not records.exists()
+
+
+def test_delete_stops_when_the_database_cannot_be_cleared(client, cfg, store, filled, monkeypatch, caplog):
+    """資料庫刪不了(例如正被占用):後面都不做——先刪照片的話,畫面上會留著指不到原件的文件。
+    照實說什麼都沒刪、可以再試;不是「系統出了點問題」,也不記成刪過。"""
+    records = cfg.paths.logs / "records.jsonl"
+    records.write_text("{}\n", encoding="utf-8")
+
+    def locked(self):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(Store, "purge_all", locked)
+    r = delete_all(client)
+    assert r.status_code == 503 and "資料沒有刪除" in r.text and "系統出了點問題" not in r.text
+    assert "文件、照片與紀錄都還在" in r.text and 'href="/settings"' in r.text and "回設定</a>" in r.text
+    assert len(store.list_documents()) == 1 and filled.exists() and records.exists()
+    assert not _purge_logged(store)
+    assert "OperationalError" in caplog.text
+
+
+def test_delete_waits_for_a_correction_in_progress(cfg, app, form_client, store, filled, monkeypatch):
+    """更正做到一半時按「刪除全部資料」:等它做完才刪(和改文件的路由同一把鎖,SEC-01)。
+    不等的話,更正會在刪完之後把讀值寫回更正紀錄與 records.jsonl,畫面卻說已經全部刪除。"""
+    doc_id = store.list_documents()[0]["id"]
+    correcting, deleting = form_client(app), form_client(app)
+    form = browser_form(correcting.get(f"/doc/{doc_id}/correct").text, f"/doc/{doc_id}/correct")
+    form.update({"amount": "1900", CSRF_FIELD: correcting.csrf_token()})
+    inside, purged, real = threading.Event(), threading.Event(), review.verify_decide_plan
+
+    def gated(*args, **kwargs):
+        inside.set()                    # 更正已經讀完文件,正在重新核對
+        purged.wait(timeout=1.0)        # 沒有鎖:刪除在這時候做完;有鎖:刪除進不來,等不到就往下走
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(review, "verify_decide_plan", gated)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        saving = pool.submit(correcting.post, f"/doc/{doc_id}/correct", data=form, follow_redirects=False)
+        assert inside.wait(timeout=10)
+        r = delete_all(deleting, follow_redirects=False)
+        purged.set()
+        assert saving.result(timeout=10).status_code == 303 and r.status_code == 303
+    assert store.list_documents() == [] and store.list_actions() == []
+    assert store.list_corrections(verified_only=False) == []
+    assert not (cfg.paths.logs / "records.jsonl").exists()
+    assert [p for p in cfg.paths.archive.rglob("*") if p.is_file()] == []
 
 
 def test_delete_needs_post(client, store, filled):

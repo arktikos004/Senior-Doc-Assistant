@@ -242,10 +242,14 @@ class Store:
             return [_action(r) for r in conn.execute(sql, args).fetchall()]
 
     def set_action_status(self, action_id: int, status: str) -> None:
+        """改一筆行動的狀態;已被取代(superseded)的不改:它不再生效,也不能恢復。
+
+        web 層改之前會先檢查,這裡在同一句 UPDATE 再擋一次:檢查和寫入之間就算有更正插進來,舊行動也不會被改回來。
+        """
         if status not in ACTION_STATUSES:
             raise ValueError(f"未知的行動狀態:{status!r}")
         with self._conn() as conn:
-            conn.execute("UPDATE actions SET status = ? WHERE id = ?", (status, action_id))
+            conn.execute("UPDATE actions SET status = ? WHERE id = ? AND superseded = 0", (status, action_id))
 
     # ---- settings(全家共用的設定;驗證規則在 src/settings.py) ---------------
 

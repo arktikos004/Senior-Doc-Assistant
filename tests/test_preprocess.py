@@ -158,6 +158,20 @@ def test_undecodable_image_is_never_sent_raw(tmp_path):
         prepare_image(path)
 
 
+def test_unreadable_image_error_does_not_carry_the_full_path(tmp_path):
+    # PIL 的原文帶完整路徑(這台電腦的資料夾位置);這個例外訊息會進處理紀錄、資料庫與匯出,只留檔名與例外種類
+    path = tmp_path / "broken.jpg"
+    path.write_bytes(b"not really a jpeg")
+
+    with pytest.raises(UnreadableImageError) as err:
+        prepare_image(path)
+
+    message = str(err.value)
+    assert "broken.jpg" in message and "UnidentifiedImageError" in message
+    assert tmp_path.name not in message and str(tmp_path) not in message
+    assert "cannot identify" in str(err.value.__cause__)  # 原始例外仍掛在 __cause__,除錯時看得到
+
+
 def test_image_that_cannot_be_reencoded_is_never_sent_raw(tmp_path, monkeypatch):
     # 打得開但重新編碼失敗,同樣不能退回原檔(原檔帶著中繼資料)
     path = tmp_path / "photo.jpg"
@@ -227,3 +241,56 @@ def test_prepare_image_deskews_tilted_scan(tmp_path):
     out = _decode(prepare_image(path).data)
 
     assert abs(estimate_skew(out)) < 1.0
+
+
+# ---- 加密 PDF(PDF-PW):偵測、用密碼解開 --------------------------------------------
+
+def test_encrypted_pdf_is_detected(tmp_path):
+    from samples import encrypted_pdf, plain_pdf
+
+    locked, plain, photo = tmp_path / "locked.pdf", tmp_path / "plain.pdf", tmp_path / "photo.png"
+    locked.write_bytes(encrypted_pdf())
+    plain.write_bytes(plain_pdf())
+    Image.new("RGB", (8, 8), "white").save(photo)
+    (tmp_path / "broken.pdf").write_bytes(b"%PDF-1.3 not really a pdf")
+
+    assert preprocess.pdf_needs_password(locked) is True
+    assert preprocess.pdf_needs_password(plain) is False
+    assert preprocess.pdf_needs_password(photo) is False                     # 不是 PDF
+    assert preprocess.pdf_needs_password(tmp_path / "broken.pdf") is False   # 壞掉的交給後面當成讀不出來
+
+
+def test_decrypt_pdf_writes_a_copy_that_opens_without_a_password(tmp_path):
+    from samples import PDF_PASSWORD, encrypted_pdf
+
+    locked, opened = tmp_path / "locked.pdf", tmp_path / "opened.pdf"
+    locked.write_bytes(encrypted_pdf())
+
+    assert preprocess.decrypt_pdf(locked, PDF_PASSWORD, opened) is True
+    assert preprocess.pdf_needs_password(opened) is False
+    assert _decode(load_image_bytes(opened)).size == (240, 320)   # 原本 120×160 的頁面,照常以 2 倍渲染
+    assert preprocess.pdf_needs_password(locked) is True          # 原檔不動
+
+
+@pytest.mark.parametrize("wrong", ["", "sample-123", "SAMPLE-1234", "密碼"])
+def test_decrypt_pdf_with_wrong_password_writes_nothing(tmp_path, wrong):
+    from samples import encrypted_pdf
+
+    locked, opened = tmp_path / "locked.pdf", tmp_path / "opened.pdf"
+    locked.write_bytes(encrypted_pdf())
+
+    assert preprocess.decrypt_pdf(locked, wrong, opened) is False
+    assert not opened.exists()
+
+
+def test_encrypted_pdf_without_password_is_a_clear_error(tmp_path):
+    """沒有經過輸入密碼那一頁的入口(資料夾監控、命令列):讀不出來,原因寫 PDF 有密碼,不帶完整路徑。"""
+    from samples import encrypted_pdf
+
+    locked = tmp_path / "locked.pdf"
+    locked.write_bytes(encrypted_pdf())
+
+    with pytest.raises(preprocess.EncryptedPdfError) as caught:
+        prepare_image(locked)
+    assert isinstance(caught.value, UnreadableImageError)
+    assert "密碼" in str(caught.value) and str(tmp_path) not in str(caught.value)

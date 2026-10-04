@@ -359,7 +359,7 @@ def test_kinds_follow_the_chosen_category_in_app_js(client):
     }
     script = (_KINDS_FLOW.replace("__APP_JS__", json.dumps(str(STATIC_DIR / "app.js")))
               .replace("__DATA__", json.dumps(data, ensure_ascii=False)))
-    r = json.loads(subprocess.run([_NODE, "-e", script], capture_output=True, text=True, timeout=30, check=True).stdout)
+    r = json.loads(subprocess.run([_NODE, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=30, check=True).stdout)
     five = ["藥袋", "帳單", "發票", "收據", "公文", "不確定"]
     assert r["initial"] == {"title": "是哪一種文件?", "shown": five, "checked": "不確定"}
     assert r["health"] == {"title": "醫療與保險裡的哪一種?", "checked": "不確定",

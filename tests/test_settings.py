@@ -4,10 +4,12 @@
 """
 import json
 import os
+import subprocess
+from pathlib import Path
 
 import pytest
 
-from src.config import AppConfig, PathsConfig
+from src.config import BASE_DIR, AppConfig, PathsConfig
 from src.settings import (
     MSG_DEMO,
     MSG_NO_CLOUD_KEY,
@@ -23,6 +25,7 @@ from src.settings import (
     effective_config,
     export_records,
     form_changes,
+    hide_local_paths,
     parse_threshold,
 )
 from src.store import Store
@@ -132,6 +135,23 @@ def test_invalid_stored_threshold_never_takes_effect(base, store, bad):
     """不合規則的值(例如被直接改資料庫)不生效,沿用 config.yaml。"""
     store.set_setting(THRESHOLD, bad)
     assert effective_config(base, store).auto_threshold == 0.80
+
+
+@pytest.mark.parametrize("low", [0.5, 0.79, 0.0, -1.0, float("nan")])
+def test_config_yaml_threshold_below_080_takes_effect_as_080(base, store, low):
+    """config.yaml 的門檻也守設定頁那條底線:寫得比 0.80 低(或不是數字)就以 0.80 生效。"""
+    base.auto_threshold = low
+    assert effective_config(base, store).auto_threshold == 0.80
+    store.set_setting(THRESHOLD, "0.90")                        # 設定頁存的值照樣蓋過去
+    assert effective_config(base, store).auto_threshold == 0.90
+    store.set_setting(THRESHOLD, "0.5")                         # 存的值不合規則:回到底線,不是 config.yaml 的低值
+    assert effective_config(base, store).auto_threshold == 0.80
+
+
+@pytest.mark.parametrize("strict", [0.80, 0.9, 0.99])
+def test_config_yaml_threshold_at_or_above_080_is_kept(base, store, strict):
+    base.auto_threshold = strict                                # 比底線嚴的照 config.yaml
+    assert effective_config(base, store).auto_threshold == strict
 
 
 def test_stored_cloud_mode_needs_keys_at_use_time(base, store, cloud_keys, monkeypatch):
@@ -266,6 +286,79 @@ def test_symlinks_never_lead_outside(base, tmp_path):
     assert not inner.exists() and not (base.paths.failed / "inner-link.png").is_symlink()
 
 
+@pytest.fixture
+def link_dir():
+    """建資料夾連結的函式 link_dir(連結, 目標):Windows 用 junction(一般帳號就能建;is_symlink() 對它是
+    False,os.walk 照樣走進去),其他系統用符號連結。測試結束時只把連結本身拿掉,不動它指到的資料夾。"""
+    made = []
+
+    def make(link, target):
+        if os.name == "nt":
+            subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], check=True, capture_output=True)
+        else:
+            try:
+                link.symlink_to(target, target_is_directory=True)
+            except OSError:
+                pytest.skip("這個系統不讓一般使用者建符號連結")
+        made.append(link)
+        return link
+
+    yield make
+    for link in made:
+        if os.path.lexists(link):
+            (os.rmdir if os.name == "nt" else os.unlink)(link)
+
+
+@pytest.fixture
+def walked(monkeypatch):
+    """記下 os.walk 走過的每個資料夾。"""
+    seen = []
+    real_walk = os.walk
+
+    def walk(top, *args, **kwargs):
+        for item in real_walk(top, *args, **kwargs):
+            seen.append(Path(item[0]))
+            yield item
+
+    monkeypatch.setattr(os, "walk", walk)
+    return seen
+
+
+def test_folder_links_are_not_entered(base, tmp_path, link_dir, walked):
+    """資料夾連結不走進去:指到外面的,外面的檔案一個都不少、連結本身留著;指到大資料夾也不會走完整棵樹。"""
+    canary = _write(tmp_path / "outside" / "canary.png")
+    deep = _write(tmp_path / "outside" / "sub" / "deep.png")
+    link = link_dir(base.paths.uploads_path / "j-out", canary.parent)
+    inside = [_write(base.paths.uploads_path / "u.jpg"), _write(base.paths.uploads_path / "2026-10" / "n.jpg")]
+    assert delete_data_files(base) == (2, 0)
+    assert canary.exists() and deep.exists() and os.path.lexists(link)
+    assert not any(p.exists() for p in inside) and not (base.paths.uploads_path / "2026-10").exists()
+    assert not [p for p in walked if p == link or link in p.parents]
+
+
+def test_folder_link_looping_back_is_not_walked_or_counted_as_stuck(base, link_dir, walked):
+    """連結繞回資料夾自己:不沿著迴圈一路走下去,同一個檔不會被算成很多個「刪不掉」。"""
+    uploads = base.paths.uploads_path
+    inside = [_write(uploads / "u.jpg"), _write(uploads / "2026-10" / "n.jpg")]
+    link = link_dir(uploads / "loop", uploads)
+    assert delete_data_files(base) == (2, 0)
+    assert not any(p.exists() for p in inside) and not (uploads / "2026-10").exists()
+    assert os.path.lexists(link) and uploads.is_dir()
+    assert not [p for p in walked if p == link or link in p.parents]
+
+
+def test_folder_link_to_another_data_subfolder_is_left_alone(base, link_dir, walked):
+    """指到同一個資料夾裡別處的連結:裡面的檔案照實際位置刪一次,連結本身不刪、也不走進去。"""
+    bill = _write(base.paths.archive / "帳單" / "2026-10" / "b.png")
+    link = link_dir(base.paths.archive / "alias", bill.parent.parent)
+    assert delete_data_files(base) == (1, 0)
+    assert not bill.exists() and os.path.lexists(link)
+    assert not [p for p in walked if p == link or link in p.parents]
+    # 它指到的資料夾空了、被收掉之後,連結變成指到不存在的位置:再刪一次也還是不動它
+    assert not bill.parent.parent.exists()
+    assert delete_data_files(base) == (0, 0) and os.path.lexists(link)
+
+
 def test_database_and_logs_are_never_deleted_even_if_configured_inside(tmp_path):
     """設定寫錯(logs 放進 archive 裡)也不能把資料庫刪掉:設定與設定紀錄要保留。"""
     archive = tmp_path / "data"
@@ -297,6 +390,22 @@ def test_files_that_cannot_be_deleted_are_counted(base, monkeypatch):
     assert stuck.exists()
 
 
+def test_file_that_is_already_gone_is_not_counted_as_stuck(base, monkeypatch):
+    """輪到它之前就不見的檔(例如兩次刪除同時跑,另一邊先刪了):已經不在,不算刪不掉,也不算這次刪掉的。"""
+    gone = _write(base.paths.review / "gone.png")
+    _write(base.paths.review / "free.png")
+    real_unlink = type(gone).unlink
+
+    def unlink(self, *args, **kwargs):
+        if self.name == "gone.png":
+            real_unlink(self)                                   # 另一邊先刪掉了
+        return real_unlink(self, *args, **kwargs)               # 這裡才刪:FileNotFoundError
+
+    monkeypatch.setattr(type(gone), "unlink", unlink)
+    assert delete_data_files(base) == (1, 0)
+    assert not gone.exists()
+
+
 # ---- 匯出全部紀錄 ----------------------------------------------------------------------
 
 def test_export_has_every_table_but_no_images(base, store):
@@ -318,3 +427,55 @@ def test_export_has_every_table_but_no_images(base, store):
     assert data["actions"][0]["payload"]["title"] == "繳電費"
     text = json.dumps(data, ensure_ascii=False)
     assert "SYNTHETIC-IMAGE" not in text and str(base.paths.archive) not in text   # 不含影像,也不含完整路徑
+
+
+# ---- 匯出的 error、reason 不帶這台電腦的完整路徑 -----------------------------------------
+
+def _spellings(path) -> set[str]:
+    """同一個位置在文字裡的寫法:原樣、斜線、例外訊息 repr 出來的雙反斜線。"""
+    text = str(path)
+    return {text, path.as_posix(), text.replace("\\", "\\\\")}
+
+
+def test_export_error_and_reason_carry_no_local_paths(base, store, tmp_path):
+    """處理失敗的文件,error、reason 裡可能有完整路徑(含帳號資料夾):匯出換成資料夾裡的相對位置。"""
+    upload = base.paths.uploads_path / "20261001-101500-abcd1234.jpg"
+    target = base.paths.archive / "帳單" / "2026-10" / "20261001_帳單_範例電力公司_1286.jpg"
+    as_repr = store.add_document({
+        "原始檔案": upload.name, "動作": "failed", "目標路徑": str(upload),
+        "原因": f"自動存檔;搬移失敗:[WinError 32] 檔案正由另一個程序使用。: {str(upload)!r} -> {str(target)!r}",
+        "錯誤": f"UnreadableImageError: 無法讀取影像 {upload.name}:cannot identify image file {str(upload)!r}"})
+    plain = store.add_document({
+        "原始檔案": "b.pdf", "動作": "failed", "原因": f"找不到 {base.paths.review / 'b.pdf'}",
+        "錯誤": f"FileNotFoundError: {(base.paths.failed / 'b.pdf').as_posix()}"})
+    untouched = store.add_document({"原始檔案": "c.png", "動作": "failed", "原因": "AI 辨識失敗", "錯誤": None})
+
+    docs = {d["id"]: d for d in export_records(store, base, version="2026.10.03")["documents"]}
+
+    for doc_id in (as_repr, plain):
+        for key in ("error", "reason"):
+            value = docs[doc_id][key]
+            assert not any(s in value for s in _spellings(tmp_path)), value
+            assert tmp_path.name not in value                    # 上層資料夾的名稱一段都不留
+    assert "'uploads" in docs[as_repr]["error"] and upload.name in docs[as_repr]["error"]
+    assert "'uploads" in docs[as_repr]["reason"] and "-> 'archive" in docs[as_repr]["reason"]
+    assert docs[plain]["reason"].startswith("找不到 review") and docs[plain]["reason"].endswith("b.pdf")
+    assert docs[plain]["error"] == "FileNotFoundError: failed/b.pdf"
+    assert (docs[untouched]["reason"], docs[untouched]["error"]) == ("AI 辨識失敗", None)
+    # 資料庫裡的原值不動:只有匯出的內容改寫
+    assert repr(str(upload)) in store.get_document(as_repr)["reason"]
+
+
+def test_hide_local_paths_knows_the_data_folders_project_and_home(base):
+    archive = base.paths.archive
+    sep = os.sep
+    assert hide_local_paths(f"讀不到 {archive}{sep}a.png。", base) == f"讀不到 archive{sep}a.png。"
+    assert hide_local_paths(f"'{archive.as_posix()}/a.png'", base) == "'archive/a.png'"
+    assert hide_local_paths(str(archive).upper(), base) == "archive"          # Windows 的路徑不分大小寫
+    assert hide_local_paths(str(base.paths.logs / "app.db"), base) == f"logs{sep}app.db"
+    assert hide_local_paths(str(base.paths.inbox), base) == "inbox"
+    assert hide_local_paths(str(BASE_DIR / "config.yaml"), base) == f".{sep}config.yaml"
+    assert hide_local_paths(str(Path.home() / "x.png"), base) == f"~{sep}x.png"
+    # 只是開頭相同的另一個資料夾不算 archive;不是字串的值、沒有路徑的文字原樣回傳
+    assert not hide_local_paths(f"{archive}2{sep}a.png", base).startswith("archive2")
+    assert hide_local_paths(None, base) is None and hide_local_paths("模型逾時", base) == "模型逾時"

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ ask.title }} - {{ BRAND_FULL }}{% endblock %}
+{# 確認頁:要先確認的動作(切到雲端備援、刪除全部資料、退回)送來時沒帶確認欄位——沒有 JS,或 app.js 沒跑起來,
+   base.html 的確認框沒問到——伺服器不做,改用這一頁問同樣的字。「先不要」放前面,回原本的頁面;
+   「確定…」把剛剛那張表單的欄位連同確認欄位再送一次。字與按鈕由 web/app.py 給,這裡只排版 #}
+{% block content %}
+<header class="page-head">
+  <div class="page-head__text">
+    <h1>{{ ask.title }}</h1>
+    <p class="lede">{{ ask.message }}</p>
+  </div>
+</header>
+<form method="post" action="{{ ask.action }}">
+  {{ csrf_input() }}
+  {% for name, value in ask.fields.items() %}
+  <input type="hidden" name="{{ name }}" value="{{ value }}">
+  {% endfor %}
+  <div class="form-actions">
+    <a class="btn btn--secondary btn--lg" href="{{ ask.back_url }}">先不要</a>
+    <button class="btn btn--danger btn--lg" type="submit">{{ icon("x") }}{{ ask.ok }}</button>
+  </div>
+</form>
+{% endblock %}

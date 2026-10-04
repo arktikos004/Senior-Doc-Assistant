@@ -1,5 +1,6 @@
 """結果頁、原件路由與網頁提醒測試(資料直接寫進 tmp 的 SQLite,不呼叫模型)。"""
 import os
+import sys
 
 import pytest
 
@@ -33,6 +34,16 @@ def test_malformed_doc_id_is_chinese_page_not_json(client):
     assert r.status_code == 422 and r.headers["content-type"].startswith("text/html")
     assert "送出的資料不完整" in r.text and "上一頁" in r.text
     assert '"detail"' not in r.text and "int_parsing" not in r.text
+
+
+@pytest.mark.parametrize("doc_id", ["99999999999999999999", "-99999999999999999999", str(2 ** 63), "0"])
+def test_doc_id_beyond_sqlite_range_is_404_not_500(client, doc_id):
+    """超出 SQLite 整數範圍的編號當成找不到這份文件:不是 500,伺服器紀錄也不留 traceback(SEC-11)。"""
+    for url in (f"/doc/{doc_id}", f"/doc/{doc_id}/file", f"/doc/{doc_id}/correct"):
+        r = client.get(url)
+        assert r.status_code == 404 and "找不到這份文件" in r.text, url
+    assert client.post(f"/doc/{doc_id}/correct", data={"amount": "1"}).status_code == 404
+    assert client.post(f"/doc/{doc_id}/reject").status_code == 404
 
 
 def test_result_page_shows_summary_fields_and_speak_button(client, add_doc):
@@ -197,6 +208,30 @@ def test_file_served_from_archive(cfg, client, add_doc):
     assert f'src="/doc/{doc_id}/file"' in client.get(f"/doc/{doc_id}").text
 
 
+# 每種收得下的副檔名該回的型別(.WEBP:歸檔沿用原檔的副檔名,大小寫不一定)
+_ORIGINAL_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",
+                   ".WEBP": "image/webp", ".bmp": "image/bmp", ".tif": "image/tiff", ".tiff": "image/tiff",
+                   ".pdf": "application/pdf"}
+
+
+@pytest.mark.parametrize("ext, expected", sorted(_ORIGINAL_TYPES.items()))
+def test_original_content_type_does_not_depend_on_the_host(cfg, client, add_doc, monkeypatch, ext, expected):
+    """原件的 Content-Type 由程式裡的固定對照表決定(SEC-06):主機的 mimetypes 不認得時(這台 Windows 沒有 .webp),
+    不會變成 application/octet-stream,讓「放大看原件(另開新頁)」變成下載、在裝置留下一份照片。"""
+    monkeypatch.setattr("starlette.responses.guess_type", lambda *args, **kwargs: (None, None))
+    target = cfg.paths.archive / f"a{ext}"
+    target.write_bytes(b"fake")
+    r = client.get(f"/doc/{add_doc(BILL, target=target)}/file")
+    assert r.status_code == 200 and r.headers["content-type"] == expected
+    assert r.headers["content-disposition"] == "inline"          # 明寫在瀏覽器裡看,不是下載
+    assert "no-store" in r.headers["cache-control"] and r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_every_supported_extension_has_a_fixed_content_type(cfg):
+    """上傳白名單多收一種格式時,這裡會提醒對照表也要補(漏了就退回靠主機猜)。"""
+    assert set(cfg.supported_extensions) == {ext.lower() for ext in _ORIGINAL_TYPES}
+
+
 @pytest.mark.parametrize("folder", ["review", "failed", "uploads"])
 def test_file_served_from_other_allowed_folders(cfg, client, add_doc, folder):
     base = cfg.paths.uploads_path if folder == "uploads" else getattr(cfg.paths, folder)
@@ -229,6 +264,55 @@ def test_file_symlink_escaping_archive_is_404(cfg, client, add_doc, tmp_path):
     except (OSError, NotImplementedError):
         pytest.skip("此平台不能建立符號連結")
     assert client.get(f"/doc/{add_doc(BILL, target=link)}/file").status_code == 404
+
+
+def _link_folder(link, target) -> None:
+    """建一個指到 target 的資料夾連結。Windows 用 junction:一般帳號就能建(符號連結要管理員權限,
+    上面那個測試在這種電腦會被跳過),而且 junction 的 is_symlink() 是 False,只擋符號連結的程式擋不到它。
+    其他平台用資料夾的符號連結;真的建不起來才跳過。"""
+    try:
+        if sys.platform == "win32":
+            import _winapi
+            _winapi.CreateJunction(str(target), str(link))
+        else:
+            os.symlink(target, link, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pytest.skip("此平台不能建立資料夾連結")
+
+
+def test_file_through_a_folder_link_escaping_archive_is_404(cfg, client, add_doc, tmp_path):
+    """archive/ 裡有一個指到外面的資料夾連結(Windows 的 junction):原件路由不經過它送出外面的檔,
+    結果頁也不放原件;連結指到的若還在允許的資料夾裡(例如 archive 的子資料夾),照常送。"""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.png").write_bytes(b"top secret")
+    _link_folder(cfg.paths.archive / "j-out", outside)
+    if sys.platform == "win32":
+        assert not (cfg.paths.archive / "j-out").is_symlink()         # junction 不算符號連結
+    assert (cfg.paths.archive / "j-out" / "secret.png").read_bytes() == b"top secret"   # 連結是通的
+    doc_id = add_doc(BILL, target=cfg.paths.archive / "j-out" / "secret.png")
+    assert client.get(f"/doc/{doc_id}/file").status_code == 404
+    html = client.get(f"/doc/{doc_id}").text
+    assert f"/doc/{doc_id}/file" not in html and "原件已經移走" in html
+
+    inside = cfg.paths.archive / "帳單"
+    inside.mkdir()
+    (inside / "a.png").write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    _link_folder(cfg.paths.archive / "j-in", inside)
+    assert client.get(f"/doc/{add_doc(BILL, target=cfg.paths.archive / 'j-in' / 'a.png')}/file").status_code == 200
+
+
+def test_reject_does_not_move_a_file_reached_through_a_folder_link(cfg, client, store, add_doc, tmp_path):
+    """待複核文件的原件位置經過指到外面的資料夾連結:退回時不把外面的檔搬進 failed/(原件當作不在)。"""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret.png"
+    secret.write_bytes(b"top secret")
+    _link_folder(cfg.paths.review / "j-out", outside)
+    doc_id = add_doc(BILL, action="review", target=cfg.paths.review / "j-out" / "secret.png")
+    r = client.post(f"/doc/{doc_id}/reject", data={"confirm_reject": "1"}, follow_redirects=False)
+    assert r.status_code == 303 and store.get_document(doc_id)["action"] == "failed"
+    assert secret.read_bytes() == b"top secret" and not any(cfg.paths.failed.iterdir())
 
 
 def test_file_in_logs_or_unsupported_type_is_404(cfg, client, add_doc):

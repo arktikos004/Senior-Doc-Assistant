@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import logging
 import re
+import threading
 import unicodedata
 from datetime import date, datetime
 from pathlib import Path
@@ -20,7 +21,7 @@ from . import archiver
 from .archiver import SIDECAR_SUFFIX
 from .config import AppConfig
 from .models import COMMON_FIELDS, FIELD_LABELS, REQUIRED_FIELDS, Decision, ExtractionResult
-from .pipeline import verify_decide_plan
+from .pipeline import error_kind, verify_decide_plan
 from .prompts import TYPE_FIELDS
 from .record_log import append_record, timestamp
 from .store import Store
@@ -41,6 +42,9 @@ _READING_KEYS = ("doc_type", "date", "vendor", "amount", "currency", "invoice_nu
 _DERIVED_FIELDS = ("deadline",)
 # 原件不見時給核對用的檔名(本系統不會產生這種檔):讀不到影像,QR 一律「無法核對」
 _NO_ORIGINAL = "(原件不存在)"
+# 更正與退回都是「讀文件 → 核對 → 搬原檔 → 寫回」一整段,同一個行程裡一次只做一份:連按兩下時
+# 第二個請求等第一個做完才開始,讀到的是更新後的文件(部署是單一 uvicorn 行程)
+_LOCK = threading.Lock()
 
 
 def correctable(doc: dict[str, Any] | None) -> bool:
@@ -171,27 +175,73 @@ def _archived_as(path: Path, result: ExtractionResult, cfg: AppConfig) -> bool:
     return path.parent.resolve() == folder.resolve() and re.fullmatch(pattern, path.name) is not None
 
 
-def _relocate(cfg: AppConfig, original: Path | None, result: ExtractionResult, decision: Decision) -> Path | None:
-    """依更正後的決策搬原檔,回傳原檔現在的位置(沒有原檔回 None)。
+def _recorded_original(cfg: AppConfig, doc: dict[str, Any]) -> Path | None:
+    """資料庫現在記的原件位置;條件同結果頁送原件(在本系統的四個資料夾內、是支援的格式、檔案存在),不符合回 None。"""
+    recorded = doc.get("target_path")
+    if not recorded:
+        return None
+    try:
+        path = Path(recorded).resolve()
+        folders = [folder.resolve() for folder in (cfg.paths.archive, cfg.paths.review,
+                                                   cfg.paths.failed, cfg.paths.uploads_path)]
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not any(path != folder and path.is_relative_to(folder) for folder in folders):
+        return None
+    return path if path.suffix.lower() in cfg.supported_extensions and path.is_file() else None
+
+
+def _original_now(cfg: AppConfig, doc: dict[str, Any], original: Path | None) -> Path | None:
+    """原件現在的位置。original 是 web 層稍早讀文件時算的,可能已經過期(連按兩下「存檔並重新核對」時,
+    前一個請求剛把原件改名搬走;那個檔名之後還可能被另一份文件用掉):資料庫現在記的是別的位置就以它為準。
+    資料庫記的位置不能用,才看 original 還有沒有檔;也沒有就回 None(當作原件不存在)——不拿過期的位置
+    去核對,也不把它寫回資料庫。web 層說原件不存在(None)就照樣是 None,這裡不自己去找。
+    """
+    if original is None:
+        return None
+    recorded = _recorded_original(cfg, doc)
+    if recorded is not None:
+        try:
+            moved = original.resolve() != recorded
+        except (OSError, RuntimeError, ValueError):
+            moved = True
+        if moved:
+            return recorded
+    return original if original.is_file() else None
+
+
+def _drop_sidecar(original: Path, doc_id: int) -> None:
+    """刪掉待複核原件旁的辨識結果檔。刪不掉(例如被別的程式開著)只記 log:原件已經搬好,新位置照樣要寫回。"""
+    try:
+        original.with_suffix(original.suffix + SIDECAR_SUFFIX).unlink(missing_ok=True)
+    except OSError as exc:
+        log.warning("刪不掉待複核的辨識結果檔:文件 %s(%s)", doc_id, error_kind(exc))
+
+
+def _relocate(cfg: AppConfig, doc_id: int, original: Path | None, result: ExtractionResult,
+              decision: Decision) -> Path | None:
+    """依更正後的決策搬原檔,回傳原檔現在的位置(沒有原檔、或搬不動而且原檔已經不在原位,回 None)。
 
     存檔:原檔在 review/ → 依更正後的欄位命名、移到 archive/,刪掉 sidecar;已在 archive/ → 檔名跟著
     更正後的欄位改。待複核:原檔在 archive/ → 移回 review/(附 sidecar);已在 review/ 就不動。
     原檔位置是衍生紀錄(原則 8):搬不動(例如檔案被占用)只記 log,文件照樣更新。
+    回傳的位置會寫回資料庫,所以只回傳檔案真的在的位置;回 None 時資料庫記的位置不變。
     """
     if original is None:
         return None
     try:
         if decision.action == "archive" and _inside(original, cfg.paths.review):
             target = archiver.archive_file(original, result, cfg)
-            original.with_suffix(original.suffix + SIDECAR_SUFFIX).unlink(missing_ok=True)
+            _drop_sidecar(original, doc_id)
             return target
         if decision.action == "archive" and _inside(original, cfg.paths.archive):
             return original if _archived_as(original, result, cfg) else archiver.archive_file(original, result, cfg)
         if decision.action == "review" and _inside(original, cfg.paths.archive):
             return archiver.move_to_review(original, result, decision.reason, cfg)
     except OSError as exc:
-        log.error("更正後搬移原檔失敗:%s(%s)", original.name, exc)
-    return original
+        # 只寫文件編號與例外種類:已存檔的檔名有日期、商家與金額(藥袋的商家是醫療院所),例外訊息還帶完整路徑
+        log.error("更正後搬移原檔失敗:文件 %s(%s)", doc_id, error_kind(exc))
+    return original if original.exists() else None
 
 
 def _record(doc: dict[str, Any], action: str, reason: str, target: Path | None,
@@ -217,29 +267,33 @@ def correct_document(cfg: AppConfig, store: Store, doc_id: int, changes: dict[st
     original 是原檔目前的位置(web 層已確認它在本系統的資料夾內;原件不見了是 None)。核對一律讀原檔:
     原件不在就沒有影像可讀,QR 一律「無法核對」,規則檢查照跑;不拿檔名去 review/ 猜,同名的檔
     可能是另一份文件。找不到文件丟 LookupError,讀不出來的文件(沒有讀值)丟 ValueError。
+    original 可能已經過期(web 層讀完文件之後,同一份文件剛被另一個請求更正、原件搬走了):整段在鎖裡做,
+    文件重新讀,資料庫現在記的是別的位置就以它為準(_original_now)。
     """
-    doc = store.get_document(doc_id)
-    if doc is None:
-        raise LookupError(f"找不到文件 {doc_id}")
-    if not correctable(doc):
-        raise ValueError("這份文件沒有可以更正的讀值")
-    before = ExtractionResult.from_dict(doc["result"])
-    result = apply_changes(before, changes)
-    check_path = original if original is not None else cfg.paths.review / _NO_ORIGINAL
-    decision = verify_decide_plan(result, check_path, cfg, received_on=_received_on(doc),
-                                  decide_fn=decide_corrected)
-    target = _relocate(cfg, original, result, decision)
-    record = _record(doc, decision.action, decision.reason, target, result.to_dict(), SOURCE_CORRECT)
-    store.update_document(doc_id, record)
-    store.replace_actions(doc_id, result.actions)
-    # 驗證閘門(之後的越用越準只收 verified):沒有任何檢查不通過、核對有完成、必要欄位齊全,也就是能存檔
-    store.add_correction(reading(before), reading(result), document_id=doc_id, doc_type=result.doc_type,
-                         vendor_key=vendor_key(result), verified=decision.action == "archive",
-                         source=SOURCE_CORRECT)
-    append_record(cfg.paths.logs, record)
-    # log 不記文件內容(藥袋的院所與藥名屬健康資料),內容以 SQLite 為準
-    log.info("家人更正:文件 %s → [%s]", doc_id, decision.action)
-    return decision
+    with _LOCK:
+        doc = store.get_document(doc_id)
+        if doc is None:
+            raise LookupError(f"找不到文件 {doc_id}")
+        if not correctable(doc):
+            raise ValueError("這份文件沒有可以更正的讀值")
+        original = _original_now(cfg, doc, original)
+        before = ExtractionResult.from_dict(doc["result"])
+        result = apply_changes(before, changes)
+        check_path = original if original is not None else cfg.paths.review / _NO_ORIGINAL
+        decision = verify_decide_plan(result, check_path, cfg, received_on=_received_on(doc),
+                                      decide_fn=decide_corrected, log_name=f"文件 {doc_id}")
+        target = _relocate(cfg, doc_id, original, result, decision)
+        record = _record(doc, decision.action, decision.reason, target, result.to_dict(), SOURCE_CORRECT)
+        store.update_document(doc_id, record)
+        store.replace_actions(doc_id, result.actions)
+        # 驗證閘門(之後的越用越準只收 verified):沒有任何檢查不通過、核對有完成、必要欄位齊全,也就是能存檔
+        store.add_correction(reading(before), reading(result), document_id=doc_id, doc_type=result.doc_type,
+                             vendor_key=vendor_key(result), verified=decision.action == "archive",
+                             source=SOURCE_CORRECT)
+        append_record(cfg.paths.logs, record)
+        # log 不記文件內容(藥袋的院所與藥名屬健康資料),內容以 SQLite 為準
+        log.info("家人更正:文件 %s → [%s]", doc_id, decision.action)
+        return decision
 
 
 def reject_document(cfg: AppConfig, store: Store, doc_id: int, original: Path | None,
@@ -248,21 +302,27 @@ def reject_document(cfg: AppConfig, store: Store, doc_id: int, original: Path | 
 
     只接受待複核的文件(其他丟 ValueError,找不到丟 LookupError)。原檔在 review/ 就移到 failed/、刪 sidecar;
     這份文件的行動一併退場(等確認的期限提醒不再留在「家人確認」)。讀值留著,當作 AI 當初讀到什麼的紀錄。
+    original 過期時的處理同 correct_document:整段在鎖裡做,資料庫現在記的是別的位置就以它為準。
     """
-    doc = store.get_document(doc_id)
-    if doc is None:
-        raise LookupError(f"找不到文件 {doc_id}")
-    if doc.get("action") != "review":
-        raise ValueError("只有等待複核的文件可以退回")
-    target = original
-    if original is not None and _inside(original, cfg.paths.review):
-        try:
-            target = archiver.move_to_failed(original, cfg)
-            original.with_suffix(original.suffix + SIDECAR_SUFFIX).unlink(missing_ok=True)
-        except OSError as exc:
-            log.error("退回時搬移原檔失敗:%s(%s)", original.name, exc)
-    record = _record(doc, "failed", f"人工複核判定退回:{reason}", target, doc.get("result"), SOURCE_REJECT)
-    store.update_document(doc_id, record)
-    store.replace_actions(doc_id, [])
-    append_record(cfg.paths.logs, record)
-    log.info("家人退回:文件 %s → [failed]", doc_id)
+    with _LOCK:
+        doc = store.get_document(doc_id)
+        if doc is None:
+            raise LookupError(f"找不到文件 {doc_id}")
+        if doc.get("action") != "review":
+            raise ValueError("只有等待複核的文件可以退回")
+        original = _original_now(cfg, doc, original)
+        target = original
+        if original is not None and _inside(original, cfg.paths.review):
+            try:
+                target = archiver.move_to_failed(original, cfg)
+            except OSError as exc:
+                log.error("退回時搬移原檔失敗:文件 %s(%s)", doc_id, error_kind(exc))
+                if not original.exists():
+                    target = None   # 原檔已經不在原位:不把這個位置寫回(資料庫記的位置不變)
+            else:
+                _drop_sidecar(original, doc_id)
+        record = _record(doc, "failed", f"人工複核判定退回:{reason}", target, doc.get("result"), SOURCE_REJECT)
+        store.update_document(doc_id, record)
+        store.replace_actions(doc_id, [])
+        append_record(cfg.paths.logs, record)
+        log.info("家人退回:文件 %s → [failed]", doc_id)

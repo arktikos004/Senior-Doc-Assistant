@@ -86,7 +86,8 @@ def test_redirect_messages_come_from_the_whitelist():
     """轉址帶的訊息都在白名單內(不在的話頁面不會顯示);新增訊息忘了登記,轉址時就直接失敗。"""
     used = {web_app.MSG_CORRECTED, web_app.MSG_REJECTED, web_app.MSG_CATEGORY} | {
         msg for _, msg in (*web_app._CONFIRM_DECISIONS.values(), *web_app._REMINDER_DECISIONS.values())} | {
-        web_app.MSG_SETTINGS_SAVED, web_app.MSG_SETTINGS_UNCHANGED, web_app.MSG_PURGED, web_app.MSG_PURGED_PARTLY}
+        web_app.MSG_SETTINGS_SAVED, web_app.MSG_SETTINGS_UNCHANGED, web_app.MSG_PURGED, web_app.MSG_PURGED_PARTLY,
+        web_app.MSG_UPLOAD_CANCELLED}
     assert used == web_app._MESSAGES
     r = web_app._redirect_with_msg("/review", web_app.MSG_REJECTED)
     assert r.status_code == 303 and r.headers["location"] == "/review?msg=%E5%B7%B2%E9%80%80%E5%9B%9E"

@@ -140,6 +140,20 @@ def test_replace_actions_supersedes_every_old_action(store):
     assert (by_id[untouched]["status"], by_id[untouched]["superseded"]) == ("pending", False)   # 別份文件不受影響
 
 
+def test_superseded_action_keeps_its_status(store):
+    # 被更正取代的舊行動不能再改狀態:舊頁面上的「恢復提醒」若和更正同時到,不能讓舊期限又生效(SEC-01)
+    doc_id = store.add_document(_record())
+    old = store.add_action(doc_id, "calendar", "auto", {"date": "2026-10-20"})
+    (new,) = store.replace_actions(doc_id, [{"kind": "calendar", "tier": "auto", "payload": {"date": "2026-10-25"}}])
+
+    store.set_action_status(old, "pending")
+    store.set_action_status(new, "done")
+
+    by_id = {a["id"]: a for a in store.list_actions()}
+    assert (by_id[old]["status"], by_id[old]["superseded"]) == ("rejected", True)
+    assert by_id[new]["status"] == "done"   # 沒被取代的照常改
+
+
 def test_replace_actions_is_all_or_nothing(store):
     doc_id = store.add_document(_record())
     old = store.add_action(doc_id, "calendar", "auto", {})

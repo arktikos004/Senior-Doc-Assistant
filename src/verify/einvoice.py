@@ -28,6 +28,7 @@ from typing import Any
 
 from ..models import ExtractionResult
 from .checks import CONSUMER_TAX_ID, entry, is_blank, normalize_invoice_number, parse_iso_date
+from .logname import log_label
 
 log = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ def load_image(file_path: Path):
         data = np.fromfile(str(file_path), dtype=np.uint8)
         return cv2.imdecode(data, cv2.IMREAD_COLOR) if data.size else None
     except Exception as exc:  # 檔案損毀、不是影像
-        log.info("QR 驗證讀不到影像:%s(%s)", file_path.name, exc)
+        log.info("QR 驗證讀不到影像:%s(%s)", log_label(file_path), type(exc).__name__)
         return None
 
 

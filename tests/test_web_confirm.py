@@ -1,5 +1,12 @@
 """家人確認頁測試:只列 confirm + pending,確認/退回會改變行動狀態。"""
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
+
+from src.store import Store
+from test_web_correct import browser_form
+from web.app import CSRF_FIELD
 
 
 def _result(doc_type="藥袋"):
@@ -38,6 +45,7 @@ def test_reject_asks_before_submitting(client, actions):
     html = client.get("/confirm").text
     assert html.count('data-confirm="退回後就不會生效。"') == html.count('value="rejected"') == 2
     assert html.count('data-confirm-ok="確定退回"') == 2
+    assert html.count('data-confirm-field="confirm_reject"') == 2     # 確認後 app.js 補上伺服器要看的欄位
     assert 'data-confirm-title="確定要退回「服藥時間表」嗎?"' in html
     assert 'data-confirm-title="確定要退回「期限提醒」嗎?"' in html
     assert 'value="done" data-confirm' not in html
@@ -60,10 +68,28 @@ def test_confirm_marks_done(client, store, actions, flash_text, action_status):
 
 
 def test_reject_marks_rejected(client, store, actions, flash_text, action_status):
-    r = client.post(f"/confirm/{actions['deadline']}", data={"decision": "rejected"}, follow_redirects=False)
+    r = client.post(f"/confirm/{actions['deadline']}", data={"decision": "rejected", "confirm_reject": "1"},
+                    follow_redirects=False)
     assert r.status_code == 303
     assert action_status(store, actions["deadline"]) == "rejected"
     assert flash_text(client.get(r.headers["location"]).text) == "已退回"
+
+
+def test_reject_without_confirmation_asks_on_a_page(client, store, actions, action_status):
+    """沒有 JS(或 app.js 沒跑起來)就沒有確認框:伺服器沒收到確認欄位不會退回(SEC-02),回一頁確認頁再問一次,
+    字和確認框一樣;按「確定退回」才生效,「先不要」回家人確認。「確認」不必多問。"""
+    r = client.post(f"/confirm/{actions['med']}", data={"decision": "rejected"})
+    assert r.status_code == 400 and action_status(store, actions["med"]) == "pending"
+    assert "<h1>確定要退回「服藥時間表」嗎?</h1>" in r.text and "退回後就不會生效。" in r.text
+    assert '<a class="btn btn--secondary btn--lg" href="/confirm">先不要</a>' in r.text
+    assert "確定退回</button>" in r.text and r.text.index(">先不要</a>") < r.text.index("確定退回</button>")
+    assert '<a class="side__link" href="/confirm" aria-current="page">' in r.text
+    form = browser_form(r.text, f"/confirm/{actions['med']}")
+    assert {k: v for k, v in form.items() if k != CSRF_FIELD} == {"decision": "rejected", "confirm_reject": "1"}
+    r = client.post(f"/confirm/{actions['med']}", data=form, follow_redirects=False)
+    assert r.status_code == 303 and action_status(store, actions["med"]) == "rejected"
+    r = client.post(f"/confirm/{actions['deadline']}", data={"decision": "done"}, follow_redirects=False)
+    assert r.status_code == 303 and action_status(store, actions["deadline"]) == "done"
 
 
 def test_invalid_decision_is_400(client, store, actions, action_status):
@@ -88,6 +114,34 @@ def test_auto_or_decided_actions_cannot_be_confirmed(client, store, actions, act
     assert action_status(store, actions["auto"]) == "pending"
     assert client.post(f"/confirm/{actions['done']}", data={"decision": "rejected"}).status_code == 409
     assert action_status(store, actions["done"]) == "done"
+
+
+def test_two_family_members_deciding_at_once_only_one_counts(app, form_client, store, actions, action_status,
+                                                          monkeypatch):
+    """兩位家人同時按同一個事項(一個確認、一個退回):只有先到的算數,另一個看到「已經處理過了」(SEC-01)。
+
+    在寫入狀態的地方放一道關卡:沒有鎖時兩個請求都已經讀到「還在等確認」,兩個都回成功,後寫的蓋掉先寫的。
+    """
+    clients = [form_client(app), form_client(app)]
+    forms = [{"decision": decision, "confirm_reject": "1", CSRF_FIELD: c.csrf_token()}
+             for c, decision in zip(clients, ("done", "rejected"))]
+    gate, real = threading.Barrier(2), Store.set_action_status
+
+    def gated(self, action_id, status):
+        try:
+            gate.wait(timeout=1.0)      # 有鎖時另一個請求進不來,等不到就自己往下走
+        except threading.BrokenBarrierError:
+            pass
+        return real(self, action_id, status)
+
+    monkeypatch.setattr(Store, "set_action_status", gated)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        sent = list(pool.map(lambda pair: pair[0].post(f"/confirm/{actions['med']}", data=pair[1], follow_redirects=False),
+                             zip(clients, forms)))
+    assert sorted(r.status_code for r in sent) == [303, 409]
+    winner = forms[[r.status_code for r in sent].index(303)]["decision"]
+    assert action_status(store, actions["med"]) == winner       # 狀態是回成功的那一位決定的
+    assert "已經處理過了" in next(r.text for r in sent if r.status_code == 409)
 
 
 def test_decided_action_shows_on_result_page(client, store, actions):
