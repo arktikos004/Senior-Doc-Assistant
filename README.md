@@ -35,7 +35,7 @@
 手機拍照或上傳(網頁)
    ▼
 1. 收件        先選大類、再選文件(都可不選);檢查大小(≤ 15MB)、副檔名與檔頭;檔名一律重新產生
-2. 前處理      去除 EXIF/GPS、轉正;PDF 只取第一頁
+2. 前處理      去除 EXIF/GPS、轉正;白底上只佔一小塊的文件裁掉白邊;PDF 只取第一頁
 3. 擷取        Gemma 4 只照抄:類型、欄位、80 字內白話解說;讀不清就標 unreadable,不猜
                藥袋、醫療與保險與身分證明兩類、初賽還不能自動判讀的文件、沒選類型的文件只在本機(Ollama)推論
 4. 自我驗證    電子發票 QR 逐欄比對;統編檢查碼、字軌、期別、日期與金額合理性
@@ -90,7 +90,7 @@ python -m venv .venv
 ```
 
 - 有 3 個前端測試會呼叫 Node.js 執行 `web/static/` 的程式;沒裝 Node.js 時,這 3 個測試會自動略過。
-- Windows 的一般帳號不能建立符號連結,有 2 個符號連結的測試會略過(結果是 1115 passed、2 skipped)。
+- Windows 的一般帳號不能建立符號連結,有 2 個符號連結的測試會略過(結果是 1129 passed、2 skipped)。
 
 ### 展示模式(沒有模型也能看完整畫面)
 
@@ -130,6 +130,7 @@ ollama pull gemma4:12b                                   # 需 Ollama >= 0.22;�
 | `model.provider` | `ollama` | `ollama`(本機)/ `workers_ai`(雲端備援)/ `mock`;設定頁可在前兩者之間切換 |
 | `model.local_only_doc_types` | 藥袋 | 永遠只在本機推論的類型;藥袋就算漏寫也會補上 |
 | `ollama.model` | `gemma4:12b` | 本機模型 |
+| `ollama.num_ctx` | 8192 | 模型一次能看的 token 數(提示詞 + 影像 + 回答);Ollama 預設的 4096 放不下手機照片加通用版提示詞,回答會被截斷 |
 | `workers_ai.model` | `@cf/google/gemma-4-26b-a4b-it` | 雲端模型;帳號與 Token 只從環境變數讀 |
 | `confidence.auto_threshold` | 0.80 | 驗證信心達到才自動存檔;設定頁可選 80%、85%、90%、95%,伺服器只收 80%–98% |
 | `target_doc_types` | 發票、收據、帳單、公文、藥袋 | 其他類型一律轉複核 |

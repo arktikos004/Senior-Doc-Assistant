@@ -1,4 +1,4 @@
-"""影像前處理測試:EXIF 轉正、縮圖、PDF 轉 PNG、中繼資料移除、歪斜校正。
+"""影像前處理測試:EXIF 轉正、縮圖、PDF 轉 PNG、中繼資料移除、歪斜校正、裁白邊。
 
 所有影像都在測試中用 PIL 合成,不讀任何真實文件。
 """
@@ -52,7 +52,8 @@ def test_exif_orientation_6_is_transposed(tmp_path):
     path = tmp_path / "rotated.jpg"
     img.save(path, format="JPEG", exif=exif.tobytes(), quality=95)
 
-    out = _decode(prepare_image(path, deskew=False).data)
+    # 只看轉正:白底上一小塊標記會被當成小張文件裁掉,這裡關掉裁白邊
+    out = _decode(prepare_image(path, deskew=False, crop=False).data)
 
     assert out.size == (200, 300)  # 轉正後變直式
     # 順時針 90°:原本的左上角移到右上角
@@ -243,6 +244,144 @@ def test_prepare_image_deskews_tilted_scan(tmp_path):
     assert abs(estimate_skew(out)) < 1.0
 
 
+# --- 裁掉白邊 ---
+
+
+def _receipt_on_page(receipt: tuple[int, int] = (600, 1700)) -> Image.Image:
+    """合成「A4 掃描(300 DPI),上面只有一小張收據」:白底,收據在左上,約佔 1/4 寬、1/2 高。"""
+    page = Image.new("RGB", (2480, 3508), "white")
+    page.paste(_text_like(*receipt), (420, 260))
+    return page
+
+
+def _ink_share(img: Image.Image) -> tuple[float, float]:
+    """黑色內容的外框佔整張影像的比例(寬、高)。"""
+    left, top, right, bottom = img.convert("L").point(lambda v: 255 if v < 128 else 0).getbbox()
+    return (right - left) / img.width, (bottom - top) / img.height
+
+
+def _dark_pixels(img: Image.Image) -> int:
+    return sum(img.convert("L").histogram()[:128])
+
+
+def test_white_margins_are_cropped_so_small_receipt_fills_the_image(tmp_path):
+    # 掃描的小張收據只佔 A4 一角:整頁縮小後送進模型,字只剩幾個像素高,統編讀不出來(10/5 實測)
+    path = tmp_path / "scan.png"
+    _receipt_on_page().save(path)
+
+    out = _decode(prepare_image(path, deskew=False).data)
+
+    wide, tall = _ink_share(out)
+    assert wide > 0.8 and tall > 0.8
+    assert max(out.size) <= MAX_LONG_EDGE
+
+
+def test_cropping_never_drops_content(tmp_path):
+    # 裁的只能是空白:裁完的黑色像素和原圖一樣多(裁完不超過長邊上限,沒有重新取樣)
+    page = _receipt_on_page()
+    path = tmp_path / "scan.png"
+    page.save(path)
+
+    out = _decode(prepare_image(path, deskew=False).data)
+
+    assert _dark_pixels(out) == _dark_pixels(page)
+
+
+def test_faint_content_is_kept_when_cropping(tmp_path):
+    # 褪色的熱感紙、淡色的複寫聯也是內容:收據下方一塊很淡的字(灰階 205)要留在裁切範圍內
+    page = _receipt_on_page(receipt=(600, 1200))
+    draw = ImageDraw.Draw(page)
+    for y in range(1600, 1800, 45):
+        draw.rectangle([480, y, 1000, y + 16], fill=(205, 205, 205))
+    faint = page.convert("L").histogram()[205]
+    path = tmp_path / "faint.png"
+    page.save(path)
+
+    out = _decode(prepare_image(path, deskew=False).data)
+
+    assert out.height < 2000                       # 有裁(整頁縮小的話高度是長邊上限 2048)
+    assert out.convert("L").histogram()[205] == faint
+
+
+def test_dust_specks_do_not_stop_cropping(tmp_path):
+    # 掃描器玻璃上的灰塵:離內容很遠的幾個小點不算內容,照樣裁到收據
+    page = _receipt_on_page()
+    draw = ImageDraw.Draw(page)
+    for x, y in [(2400, 3400), (2350, 150), (80, 3300)]:
+        draw.rectangle([x, y, x + 3, y + 3], fill="black")
+    path = tmp_path / "dusty.png"
+    page.save(path)
+
+    out = _decode(prepare_image(path, deskew=False).data)
+
+    # 裁到收據(約 600 × 1700)加留邊;被雜點擋住的話會是整頁縮小後的 1448 × 2048
+    assert out.width < 800 and out.height < 1950
+
+
+def test_full_page_document_is_not_cropped(tmp_path):
+    # 內容本來就佔滿整頁:省不了多少,不裁
+    path = tmp_path / "page.png"
+    _text_like(900, 1200).save(path)
+
+    assert _decode(prepare_image(path, deskew=False).data).size == (900, 1200)
+
+
+def test_photo_on_dark_background_is_not_cropped(tmp_path):
+    # 手機拍桌上的收據:背景不是白的,分不出哪裡是空白,不裁
+    photo = Image.new("RGB", (1600, 1200), (90, 70, 50))
+    photo.paste(_text_like(400, 700), (200, 150))
+    path = tmp_path / "photo.png"
+    photo.save(path)
+
+    assert _decode(prepare_image(path, deskew=False).data).size == (1600, 1200)
+
+
+def test_crop_failure_sends_the_uncropped_image(tmp_path, monkeypatch):
+    # 裁切只是加分:偵測出錯就照原樣送,不能讓文件辨識失敗
+    def boom(_img):
+        raise RuntimeError("偵測失敗")
+
+    monkeypatch.setattr(preprocess, "content_box", boom)
+    path = tmp_path / "scan.png"
+    _receipt_on_page().save(path)
+
+    out = _decode(prepare_image(path, deskew=False).data)
+
+    assert max(out.size) == MAX_LONG_EDGE          # 整頁縮到長邊上限
+
+
+def test_crop_can_be_turned_off(tmp_path):
+    path = tmp_path / "scan.png"
+    _receipt_on_page().save(path)
+
+    out = _decode(prepare_image(path, deskew=False, crop=False).data)
+
+    assert max(out.size) == MAX_LONG_EDGE
+
+
+def test_small_receipt_in_pdf_is_rendered_large_enough_to_read(tmp_path):
+    # PDF 原本用 144 DPI 轉圖:A4 一角的小收據高度只有八百多像素。改用較高解析度,裁掉白邊後約一千六百像素
+    path = tmp_path / "scan.pdf"
+    _receipt_on_page().save(path, format="PDF", resolution=300.0)
+
+    out = _decode(prepare_image(path, deskew=False).data)
+
+    wide, tall = _ink_share(out)
+    assert wide > 0.8 and tall > 0.8
+    assert out.height >= 1500
+
+
+def test_huge_pdf_page_is_rendered_within_a_pixel_budget(tmp_path):
+    # 海報尺寸的頁面不能照固定倍率轉圖(會佔掉幾百 MB 記憶體):依頁面大小降低倍率
+    path = tmp_path / "poster.pdf"
+    Image.new("RGB", (3000, 4000), "white").save(path, format="PDF")   # 3000 × 4000 pt
+
+    rendered = preprocess._render_pdf(path)
+
+    assert max(rendered.size) <= preprocess.PDF_MAX_EDGE
+    assert rendered.height > rendered.width
+
+
 # ---- 加密 PDF(PDF-PW):偵測、用密碼解開 --------------------------------------------
 
 def test_encrypted_pdf_is_detected(tmp_path):
@@ -268,7 +407,7 @@ def test_decrypt_pdf_writes_a_copy_that_opens_without_a_password(tmp_path):
 
     assert preprocess.decrypt_pdf(locked, PDF_PASSWORD, opened) is True
     assert preprocess.pdf_needs_password(opened) is False
-    assert _decode(load_image_bytes(opened)).size == (240, 320)   # 原本 120×160 的頁面,照常以 2 倍渲染
+    assert _decode(load_image_bytes(opened)).size == (480, 640)   # 原本 120×160 的頁面,照常以 4 倍渲染
     assert preprocess.pdf_needs_password(locked) is True          # 原檔不動
 
 

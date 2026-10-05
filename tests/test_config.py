@@ -34,6 +34,12 @@ confidence:
     assert cfg.local_only_doc_types == AppConfig().local_only_doc_types
 
 
+def test_ollama_context_length_default_and_override(tmp_path):
+    # 預設要放得下「手機照片 + 通用版提示詞 + 回答」(約 4,200 個 token);Ollama 自己的預設 4096 不夠
+    assert OllamaConfig().num_ctx == 8192
+    assert _load(tmp_path, 'ollama:\n  num_ctx: "16384"\n').ollama.num_ctx == 16384
+
+
 def test_unknown_provider_rejected(tmp_path):
     with pytest.raises(ValueError, match="provider"):
         _load(tmp_path, "model:\n  provider: other\n")

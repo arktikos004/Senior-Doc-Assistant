@@ -274,6 +274,17 @@ def test_ollama_turns_off_thinking_on_every_call(image_file):
     assert [call.get("think") for call in client.calls] == [False, False]
 
 
+def test_ollama_sets_context_length_on_every_call(image_file):
+    # 手機照片(約 300 萬像素)加通用版提示詞約 3,900 個 token:用 Ollama 預設的 4096,回答寫到一半就被截斷
+    # (10/5 實測 done_reason=length)。每次呼叫都帶設定的 num_ctx,重試那次也要
+    cfg = AppConfig()
+    client = FakeOllamaClient(["{截斷的輸出", json.dumps(GOOD_REPLY)])
+
+    OllamaAnalyzer(cfg, client=client).analyze(image_file)
+
+    assert [call["options"].get("num_ctx") for call in client.calls] == [cfg.ollama.num_ctx] * 2
+
+
 def test_ollama_retries_once_when_reply_is_not_json(image_file):
     client = FakeOllamaClient(["{截斷的輸出", json.dumps(GOOD_REPLY)])
 

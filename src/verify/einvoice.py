@@ -15,7 +15,10 @@ https://www.einvoice.nat.gov.tw/static/ptl/ein_upload/attachments/1575448081679_
 - 第伍章參考原始碼以 ToString("x8") 產生金額,十六進位可能是小寫,解析時大小寫都接受。
 - 第貳章五 6.:B2B 發票的隨機碼為 4 個空白。
 - 第壹章:一維條碼為 Code 39(年期別 5 + 字軌 10 + 隨機碼 4 = 19 碼)。實測 OpenCV 5.0 的
-  cv2.barcode 只解 EAN/UPC:Code 39 可以定位但解不出內容,因此一維條碼一律回 skip,不另加依賴。
+  cv2.barcode 只解 EAN/UPC:Code 39 可以定位但解不出內容,因此一維條碼一律回 skip。
+
+QR 解碼先用 OpenCV;解不開時再用 zxing-cpp(Apache-2.0,源自 Google ZXing):掃描器存成黑白二值的
+證明聯,OpenCV 的兩種偵測器都解不開,zxing-cpp 解得開(10/5 實測)。zxing-cpp 沒安裝時照舊只用 OpenCV。
 """
 from __future__ import annotations
 
@@ -180,15 +183,38 @@ def _decode_once(image) -> list[str]:
     return texts
 
 
+def _decode_zxing(image) -> list[str]:
+    """用 zxing-cpp 解 QR:黑白二值的掃描檔,OpenCV 兩種偵測器都解不開、zxing 解得開(10/5 實測)。
+
+    沒安裝 zxing-cpp 或解碼出錯都回空清單——只是少一次機會,不影響其他檢查。
+    """
+    try:
+        import zxingcpp
+    except ImportError:
+        return []
+    try:
+        codes = zxingcpp.read_barcodes(image, formats=zxingcpp.BarcodeFormat.QRCode)
+    except Exception as exc:
+        log.info("zxing 解碼出錯:%s", type(exc).__name__)
+        return []
+    return [code.text for code in codes if code.text]
+
+
 def decode_qr_texts(image) -> list[str]:
-    """回傳影像中所有解得出的 QR 字串;一找到合法的左側 QR 就停止嘗試更多前處理。"""
+    """回傳影像中所有解得出的 QR 字串;一找到合法的左側 QR 就停止嘗試更多前處理。
+
+    先用 OpenCV(原圖與各種前處理);都沒找到左側 QR,再用 zxing-cpp 對原圖試一次。
+    """
     found: list[str] = []
     for variant in _variants(image):
         for text in _decode_once(variant):
             if text not in found:
                 found.append(text)
         if any(_try_parse(t) for t in found):
-            break
+            return found
+    for text in _decode_zxing(image):
+        if text not in found:
+            found.append(text)
     return found
 
 

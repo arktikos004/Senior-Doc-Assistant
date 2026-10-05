@@ -4,8 +4,8 @@
 避免各 provider 各自處理、結果不一致。
 
 只影響「送進模型」的影像;自我驗證(src/verify)讀的是原檔,不受這裡影響。
-順序:EXIF 轉正 → 縮到長邊上限 → 輕度歪斜校正 → 重新編碼(同時去除 EXIF/GPS 等中繼資料)。
-歪斜校正是「盡力而為」:偵測失敗就略過、不轉。但影像解不開、無法重新編碼,或 PDF 渲染失敗時
+順序:EXIF 轉正 → 裁掉白邊 → 縮到長邊上限 → 輕度歪斜校正 → 重新編碼(同時去除 EXIF/GPS 等中繼資料)。
+裁白邊與歪斜校正是「盡力而為」:偵測失敗就略過、照原樣送。但影像解不開、無法重新編碼,或 PDF 渲染失敗時
 會丟出例外,由 Pipeline 記成 failed——絕不把原檔送出(原檔可能帶 EXIF/GPS 等中繼資料)。
 """
 from __future__ import annotations
@@ -23,6 +23,20 @@ log = logging.getLogger(__name__)
 # 2048px 對單據上的小字仍足夠清楚
 MAX_LONG_EDGE = 2048
 JPEG_QUALITY = 92  # 照片重新編碼的品質;太低會讓細小數字糊掉
+
+# PDF 轉圖:約 288 DPI。原本 2 倍(144 DPI)時,A4 一角的小張收據裁掉白邊後字太小,統編讀不出來(10/5 實測)
+PDF_RENDER_SCALE = 4.0
+PDF_MAX_EDGE = 3400         # 轉出來的長邊上限(A4 的 4 倍約 3,368);更大的頁面降低倍率,不佔掉幾百 MB 記憶體
+
+# 裁白邊:只裁「白底、內容只佔一小塊」的影像(掃描的小張收據)。分不出哪裡是空白的(照片、深色背景)
+# 和內容本來就佔滿的都不動;裁的只能是空白,所以淡色的字也算內容、四周留邊
+CROP_MAX_CONTENT = 0.60     # 內容外框佔整張面積超過這個比例就不裁(省不了多少)
+CROP_MIN_CONTENT = 0.01     # 小於這個比例多半是雜點或空白頁,不裁
+CROP_MARGIN = 0.04          # 內容外框四周各留這個比例
+_CROP_ANALYSIS_EDGE = 600   # 偵測時先縮小
+_CROP_BACKGROUND = 200      # 四邊亮度的中位數低於這個值就不是白底
+_CROP_INK_DELTA = 25        # 比背景暗這麼多才算內容(褪色的熱感紙、淡色的複寫聯也算)
+_CROP_MIN_RUN = 3           # 縮小後一列(欄)至少有幾個內容像素才算有內容;掃描器上的灰塵不算
 
 # 歪斜校正:只在偵測到「明確」傾角時才轉,小角度視覺模型本身就讀得懂,轉了反而多一次重新取樣
 DESKEW_MIN_ANGLE = 2.0      # 小於此角度不轉
@@ -53,7 +67,7 @@ class EncryptedPdfError(UnreadableImageError):
 MSG_PDF_LOCKED = "這份 PDF 有密碼,要先輸入密碼才能讀"
 
 
-def prepare_image(file_path: Path, deskew: bool = True) -> PreparedImage:
+def prepare_image(file_path: Path, deskew: bool = True, crop: bool = True) -> PreparedImage:
     """讀取文件並做前處理;PDF 渲染第一頁為 PNG。
 
     一律重新編碼,順便去掉 EXIF(拍攝裝置、GPS 位置等),避免隨影像送出。
@@ -61,7 +75,7 @@ def prepare_image(file_path: Path, deskew: bool = True) -> PreparedImage:
     (原檔可能帶中繼資料);Pipeline 會把文件記成 failed,原檔留在 failed/。
     """
     if file_path.suffix.lower() == ".pdf":
-        return _encode(_process(_render_pdf(file_path), deskew), "PNG")
+        return _encode(_process(_render_pdf(file_path), deskew, crop), "PNG")
 
     try:
         img = Image.open(file_path)
@@ -71,7 +85,7 @@ def prepare_image(file_path: Path, deskew: bool = True) -> PreparedImage:
             img.draft("RGB", (MAX_LONG_EDGE, MAX_LONG_EDGE))
         img = ImageOps.exif_transpose(img)
         out_format = "JPEG" if source_format in ("JPEG", "MPO") else "PNG"
-        return _encode(_process(img, deskew), out_format)
+        return _encode(_process(img, deskew, crop), out_format)
     except Image.DecompressionBombError:
         raise  # 惡意或異常巨大的影像:原樣往外丟,訊息本身已說明原因
     except Exception as exc:
@@ -138,15 +152,17 @@ def _render_pdf(file_path: Path) -> Image.Image:
         raise
     try:
         page = pdf[0]
-        bitmap = page.render(scale=2.0)  # 約 144 DPI,兼顧清晰度與大小
-        return bitmap.to_pil()
+        scale = min(PDF_RENDER_SCALE, PDF_MAX_EDGE / max(page.get_size()))
+        return page.render(scale=scale).to_pil()
     finally:
         pdf.close()
 
 
-def _process(img: Image.Image, deskew: bool) -> Image.Image:
-    """色彩模式統一 → 縮圖 → (可選)歪斜校正。"""
+def _process(img: Image.Image, deskew: bool, crop: bool = True) -> Image.Image:
+    """色彩模式統一 → (可選)裁掉白邊 → 縮圖 → (可選)歪斜校正。"""
     img = _to_rgb(img)
+    if crop:
+        img = crop_to_content(img)   # 先裁再縮:小張收據才留得住像素
     img.thumbnail((MAX_LONG_EDGE, MAX_LONG_EDGE), Image.LANCZOS)  # 只縮不放
     if deskew:
         img = deskew_image(img)
@@ -174,6 +190,58 @@ def _encode(img: Image.Image, fmt: str) -> PreparedImage:
         return PreparedImage(buf.getvalue(), "image/jpeg")
     img.save(buf, format="PNG")
     return PreparedImage(buf.getvalue(), "image/png")
+
+
+# --- 裁掉白邊 ---
+
+
+def crop_to_content(img: Image.Image) -> Image.Image:
+    """白底、內容只佔一小塊時裁到內容外框(四周留邊);不該裁或任何失敗都回傳原物件。"""
+    try:
+        box = content_box(img)
+    except Exception as exc:  # 裁切只是加分,不能讓它造成辨識失敗
+        log.warning("裁白邊失敗,略過:%s", type(exc).__name__)
+        return img
+    return img.crop(box) if box else img
+
+
+def content_box(img: Image.Image) -> tuple[int, int, int, int] | None:
+    """內容外框(原圖座標 left, top, right, bottom,已含留邊);不該裁就回 None。
+
+    四邊夠亮才當成白底;比背景明顯暗的像素算內容,每列(欄)要有連續幾個才算,免得被灰塵雜點撐大。
+    外框佔整張的比例太大(省不了多少)或太小(多半是雜點、空白頁)都不裁。
+    """
+    import math
+
+    import numpy as np
+
+    gray = img.convert("L")
+    gray.thumbnail((_CROP_ANALYSIS_EDGE, _CROP_ANALYSIS_EDGE), Image.BOX)
+    pixels = np.asarray(gray, dtype=np.int16)
+    border = np.concatenate([pixels[0], pixels[-1], pixels[:, 0], pixels[:, -1]])
+    background = float(np.median(border))
+    if background < _CROP_BACKGROUND:
+        return None
+    ink = pixels < background - _CROP_INK_DELTA
+    rows = np.flatnonzero(ink.sum(axis=1) >= _CROP_MIN_RUN)
+    cols = np.flatnonzero(ink.sum(axis=0) >= _CROP_MIN_RUN)
+    if rows.size == 0 or cols.size == 0:
+        return None
+    top, bottom, left, right = int(rows[0]), int(rows[-1]) + 1, int(cols[0]), int(cols[-1]) + 1
+    height, width = pixels.shape
+    share = (bottom - top) * (right - left) / (height * width)
+    if not CROP_MIN_CONTENT <= share <= CROP_MAX_CONTENT:
+        return None
+    # 留邊再多放一個縮小後的像素:外框邊緣那一列可能只有一兩個內容像素,沒被算進來
+    pad_x = (right - left) * CROP_MARGIN + 1
+    pad_y = (bottom - top) * CROP_MARGIN + 1
+    scale_x, scale_y = img.width / width, img.height / height
+    return (
+        max(0, math.floor((left - pad_x) * scale_x)),
+        max(0, math.floor((top - pad_y) * scale_y)),
+        min(img.width, math.ceil((right + pad_x) * scale_x)),
+        min(img.height, math.ceil((bottom + pad_y) * scale_y)),
+    )
 
 
 # --- 歪斜校正 ---

@@ -8,6 +8,7 @@ Pillow>=10.0         # 影像處理
 numpy>=1.26          # 影像前處理(歪斜偵測);opencv 也依賴它
 openpyxl>=3.1        # 對帳彙整匯出 Excel(.xlsx)
 opencv-python-headless>=4.9  # 自我驗證:電子發票 QR/條碼解碼(免安裝系統函式庫)
+zxing-cpp>=2.2       # 自我驗證:OpenCV 解不開的 QR(黑白二值的掃描檔)再試一次;Apache-2.0,源自 Google ZXing
 qrcode[pil]>=7.4     # 合成樣本:產生符合財政部格式的電子發票 QR
 pytest>=8.0          # 單元測試
 

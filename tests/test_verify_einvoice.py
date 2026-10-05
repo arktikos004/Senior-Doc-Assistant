@@ -2,6 +2,7 @@
 
 QR 影像都在測試中以 qrcode 套件即時產生並寫進 tmp_path,不讀任何真實發票。
 """
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -174,6 +175,31 @@ def test_opencv_decodes_both_qr_and_picks_left(tmp_path):
     assert LEFT in texts
     qr = einvoice.find_left_qr(texts)
     assert qr.invoice_number == "ZX10293847" and qr.total_amount == 350
+
+
+def test_zxing_decodes_when_opencv_cannot(tmp_path, monkeypatch):
+    # 黑白二值的掃描檔,OpenCV 兩種偵測器都解不開、zxing-cpp 解得開(10/5 實測):OpenCV 沒找到左側 QR 時再用 zxing 試
+    monkeypatch.setattr(einvoice, "_decode_once", lambda image: [])   # 模擬 OpenCV 解不開
+    path = tmp_path / "掃描.png"
+    _invoice_image().save(path)
+
+    texts = einvoice.decode_qr_texts(einvoice.load_image(path))
+
+    assert einvoice.find_left_qr(texts) == einvoice.parse_left_qr(LEFT)
+    checks = einvoice.verify_einvoice(_result(amount=380.0), path)
+    assert checks[einvoice.CHECK_QR_TOTAL]["status"] == "fail"      # 解開之後照樣逐欄比對
+    assert checks[einvoice.CHECK_QR_INVOICE]["status"] == "pass"
+
+
+def test_missing_zxing_falls_back_to_opencv_only(tmp_path, monkeypatch):
+    # zxing-cpp 沒裝也不出錯:照舊只用 OpenCV
+    monkeypatch.setitem(sys.modules, "zxingcpp", None)   # 之後 import zxingcpp 會丟 ImportError
+    path = tmp_path / "發票.png"
+    _invoice_image().save(path)
+    assert einvoice.find_left_qr(einvoice.decode_qr_texts(einvoice.load_image(path))).invoice_number == "ZX10293847"
+
+    monkeypatch.setattr(einvoice, "_decode_once", lambda image: [])
+    assert einvoice.decode_qr_texts(einvoice.load_image(path)) == []
 
 
 def test_end_to_end_match_is_pass(tmp_path):

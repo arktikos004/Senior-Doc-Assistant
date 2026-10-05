@@ -43,7 +43,11 @@ class OllamaAnalyzer:
                     }
                 ],
                 format=schema,              # 強制結構化 JSON 輸出(仍可能因輸出被截斷而不是合法 JSON)
-                options={"temperature": 0}, # 辨識任務不需要創意
+                options={
+                    "temperature": 0,       # 辨識任務不需要創意
+                    # Ollama 預設 4096:手機照片加通用版提示詞就約 3,900 個 token,回答寫到一半被截斷(10/5 實測)
+                    "num_ctx": self.cfg.ollama.num_ctx,
+                },
                 think=False,                # Gemma 4 預設先思考,輸出額度用完時 content 是空的(S0-3 實測)
             )
             return response.message.content

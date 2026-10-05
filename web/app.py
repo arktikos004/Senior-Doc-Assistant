@@ -296,7 +296,7 @@ _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _csrf_token: ContextVar[str] = ContextVar("csrf_token", default="")
 
 # 部署新版時改成當天日期;/healthz 會回報,用來確認 GPU 電腦上跑的是哪一版
-APP_VERSION = "2026.10.02"
+APP_VERSION = "2026.10.04"
 _OLLAMA_PROBE_TIMEOUT = 2.0   # 秒;健康檢查不能被卡住的 Ollama 拖住
 
 # 誰改的設定:Cloudflare Access 登入後轉過來的 email 標頭。只用來記錄,不當授權(本機直接開沒有這個標頭);

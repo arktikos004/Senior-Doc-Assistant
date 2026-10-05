@@ -20,6 +20,9 @@ class OllamaConfig:
     host: str = "http://localhost:11434"
     model: str = DEFAULT_OLLAMA_MODEL
     timeout: int = 180
+    # 模型一次能看的 token 數(提示詞 + 影像 + 回答)。手機照片加通用版提示詞約 3,900 個,
+    # 用 Ollama 預設的 4096 回答會被截斷(10/5 實測)
+    num_ctx: int = 8192
 
 
 @dataclass
@@ -113,6 +116,7 @@ def load_config(path: Path | None = None) -> AppConfig:
             host=ollama_raw.get("host", OllamaConfig.host),
             model=ollama_raw.get("model", OllamaConfig.model),
             timeout=int(ollama_raw.get("timeout", OllamaConfig.timeout)),
+            num_ctx=int(ollama_raw.get("num_ctx", OllamaConfig.num_ctx)),
         ),
         workers_ai=WorkersAIConfig(
             model=workers_raw.get("model", WorkersAIConfig.model),

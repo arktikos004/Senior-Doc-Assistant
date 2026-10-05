@@ -12,6 +12,7 @@ ollama:
   host: "http://localhost:11434"   # Ollama 服務位址(需 Ollama >= 0.22 才支援 Gemma 4)
   model: "gemma4:12b"              # 約 8GB,可完整放進 16GB VRAM;需先 ollama pull gemma4:12b
   timeout: 180                     # 單張辨識逾時秒數
+  num_ctx: 8192                    # 模型一次能看的 token 數(提示詞 + 影像 + 回答);Ollama 預設 4096,手機照片的回答會被截斷
 
 workers_ai:
   model: "@cf/google/gemma-4-26b-a4b-it"   # Cloudflare Workers AI 上的 Gemma 4 26B(MoE)
