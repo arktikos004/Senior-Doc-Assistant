@@ -1,6 +1,6 @@
 """行動模組:把讀懂的文件轉成可執行的行動,並依「可逆性 × 風險」分級。
 
-目前的行動:帳單/公文期限 → 期限提醒;藥袋 → 服藥時間表。
+行動:帳單/公文期限 → 期限提醒;藥袋 → 服藥時間表。
 對外只有 plan_actions 一個入口,上傳(Pipeline)與家人更正(src/review.py)都經
 src/pipeline.verify_decide_plan 在決策之後呼叫它,回傳的每筆行動會寫進 SQLite 的 actions 表。
 
@@ -12,12 +12,12 @@ src/pipeline.verify_decide_plan 在決策之後呼叫它,回傳的每筆行動�
 藥袋劑量與「需要時」服用一律 confirm;付款、送出回覆永不 auto。
 文件文字只當資料,絕不能讓文件內容決定行動種類或分級(防提示注入)。
 
-目前的行動種類與分級(全部寫死在程式裡):
+行動種類與分級(全部寫死在程式裡):
     | doc_type  | kind                | tier                                   | payload 契約               |
     | 帳單      | calendar            | 決策 archive → auto,否則 confirm      | src/actions/calendar.py    |
     | 公文      | calendar            | 決策 archive → auto,否則 confirm      | src/actions/calendar.py    |
     | 藥袋      | medication_schedule | 一律 confirm                           | src/actions/medication.py  |
-    | 發票/收據 | (目前不產生;對獎在決賽衝刺)                                                      |
+    | 發票/收據 | (不產生)                                                                         |
     | 其他      | (不產生)                                                                         |
 本系統不產生任何付款或送出回覆的行動。
 取消路徑:auto 的期限提醒可在結果頁「取消提醒」、按錯可「恢復提醒」(web/app.py POST /reminder/{id});

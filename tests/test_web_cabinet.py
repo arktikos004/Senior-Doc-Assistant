@@ -17,7 +17,7 @@ from test_web_security import assert_security_headers
 from test_web_static import _problems
 from web.app import create_app
 
-IDENTITY_NOTE = "身分證明類(身分證、健保卡、戶口名簿)初賽還不能自動判讀,拍了會交給家人複核"
+IDENTITY_NOTE = "身分證明類(身分證、健保卡、戶口名簿)拍了會交給家人複核"
 
 
 @pytest.fixture
@@ -105,14 +105,14 @@ def test_empty_cabinet_invites_first_upload(client):
 
 
 def test_identity_note_until_there_is_an_identity_document(client, filed):
-    """身分證明初賽沒有能自動判讀的類型:這一類沒有文件時說明;本機模式不寫「只在這台電腦處理」。"""
+    """身分證明類交給家人確認:這一類沒有文件時說明;本機模式不寫「只在這台電腦處理」。"""
     assert f"{IDENTITY_NOTE}。" in client.get("/cabinet").text
     filed("帳單", "生活契約")
     for url in ("/cabinet", "/cabinet?cat=生活契約", f"/cabinet?cat={quote('身分證明')}"):
         html = client.get(url).text
         assert f"{IDENTITY_NOTE}。" in html and "只在這台電腦處理" not in html
     filed("其他", "身分證明", "範例戶政事務所")
-    assert "初賽還不能自動判讀" not in client.get("/cabinet").text
+    assert "拍了會交給家人複核" not in client.get("/cabinet").text
 
 
 def test_cloud_mode_says_identity_documents_stay_local(tmp_path):
@@ -263,10 +263,10 @@ def test_identity_documents_say_why_they_wait_for_review(client, store, cfg, png
     """選了身分證明的文件一律轉人工,原因照實寫,不說成 AI 沒把握。"""
     path = cfg.paths.review / "20261003-010000-abcd1234.png"
     path.write_bytes(png_bytes())
-    doc_id = store.add_document({"原始檔案": path.name, "動作": "review", "原因": "身分證明類文件目前不自動判讀,需人工確認",
+    doc_id = store.add_document({"原始檔案": path.name, "動作": "review", "原因": "身分證明類文件交給家人對照原件確認",
                                  "目標路徑": str(path), "AI辨識結果": {"doc_type": "收據", "date": "2026-10-01",
                                                                      "amount": 100.0}, "錯誤": None, "類別": "身分證明"})
-    reason = "身分證明類文件目前不自動判讀,請對照原件確認。"
+    reason = "身分證明類文件請家人對照原件確認。"
     assert reason in client.get("/review").text
     assert reason in client.get(f"/doc/{doc_id}").text
     assert reason in client.get(f"/doc/{doc_id}/correct").text      # 更正頁和待複核清單同一句
@@ -288,12 +288,12 @@ def _labelled(store, label: str, category: str, result: dict, action: str = "arc
 
 @pytest.mark.parametrize("category, name", [("醫療與保險", "保單"), ("身分證明", "身分證"), ("財產資產", "存摺")])
 def test_unreadable_item_is_shown_by_its_name_everywhere(client, png_bytes, category, name):
-    """驗收:選了初賽不能自動判讀的名稱上傳(MockAnalyzer 讀成發票)→ 結果頁大標、頁籤、麵包屑、原件說明、
+    """驗收:選了交給家人確認的名稱上傳(MockAnalyzer 讀成發票)→ 結果頁大標、頁籤、麵包屑、原件說明、
     文件櫃、最近看過的文件、待複核清單、更正頁都顯示家人選的名稱;原因照實寫,不說成 AI 沒把握。"""
     r = client.post("/upload", files={"file": ("a.png", png_bytes(), "image/png")},
                     data={"category": category, "doc_type": name}, follow_redirects=False)
     doc_id = int(r.headers["location"].rsplit("/", 1)[1])
-    reason = f"「{name}」初賽還不能自動判讀,請對照原件確認。"
+    reason = f"「{name}」請家人對照原件確認。"
     page = client.get(f"/doc/{doc_id}").text
     assert f"<h1>{name}</h1>" in page and f"<title>{name} - 看有 高齡家庭文書輔助</title>" in page
     assert _crumbs(page).endswith(f"<span>{name}</span>") and f"您上傳的{name}原件" in page
@@ -335,7 +335,7 @@ def test_names_outside_the_list_are_never_shown(client, store, label):
                        action="review")
     page = client.get(f"/doc/{doc_id}").text
     assert "<h1>收據</h1>" in page and label not in page and "alert(1)" not in page
-    assert "初賽還不能自動判讀" not in page
+    assert "請家人對照原件確認" not in page
     assert _titles(client.get("/review").text) == ["收據"]
 
 

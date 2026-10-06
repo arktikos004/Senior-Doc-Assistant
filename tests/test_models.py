@@ -70,7 +70,7 @@ def test_category_tables_are_consistent():
 # ---- 上傳選項清單(使用者 10/3 決定) ------------------------------------------------
 
 def test_upload_catalog_is_the_users_list():
-    """每類的常見文件與順序照使用者 10/3 的決定;類型提示只用初賽能自動判讀的五種,None 是還不能自動判讀。"""
+    """每類的常見文件與順序照使用者 10/3 的決定;類型提示只用能自動判讀的五種,None 是交給家人確認。"""
     from src.models import CATEGORIES, CATEGORY_DOCS
     assert tuple(CATEGORY_DOCS) == CATEGORIES
     assert CATEGORY_DOCS == {

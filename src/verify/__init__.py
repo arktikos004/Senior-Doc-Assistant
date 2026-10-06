@@ -1,8 +1,8 @@
 """自我驗證引擎:用獨立於 VLM 的確定性檢查核對辨識結果。
 
-目前的檢查:電子發票左側 QR 解碼比對(唯一的獨立證據)、統編檢查碼、字軌格式、期別/日期合理性、
-繳費期限、金額合理性、主旨與藥品清單完整。一維條碼(Code 39)與明細加總目前一律 skip:
-OpenCV 解不了 Code 39,ExtractionResult 也還沒有明細欄位(見 einvoice.py、checks.py)。
+檢查:電子發票左側 QR 解碼比對(唯一的獨立證據)、統編檢查碼、字軌格式、期別/日期合理性、
+繳費期限、金額合理性、主旨與藥品清單完整。一維條碼(Code 39)與明細加總一律 skip:
+OpenCV 不支援 Code 39,ExtractionResult 也沒有明細欄位(見 einvoice.py、checks.py)。
 對外只有 verify_result 一個入口,Pipeline 在「辨識」與「決策」之間呼叫它。
 
 契約:

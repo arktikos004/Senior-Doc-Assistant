@@ -101,8 +101,8 @@ def test_cloud_mode_says_sensitive_categories_stay_local(tmp_path):
     cfg = _cloud_cfg(tmp_path)
     html = TestClient(create_app(cfg, analyzer=MockAnalyzer(cfg))).get("/").text
     assert "醫療與保險、身分證明兩類只在這台電腦處理,不會送到雲端。" in html
-    # 上傳區不加身分證明或「初賽還不能自動判讀」的說明(使用者 10/3);說明留在文件櫃
-    assert "初賽還不能自動判讀" not in html and "data-kinds-none" not in html
+    # 上傳區不加身分證明類的說明(使用者 10/3);說明留在文件櫃
+    assert "拍了會交給家人複核" not in html and "data-kinds-none" not in html
 
 
 def test_upload_redirects_to_result_page(client, upload):
@@ -289,7 +289,7 @@ def test_home_offers_category_first_then_kind(client):
     for values in rows.values():                          # app.js 依大類篩出來的順序和清單一樣
         assert [k for k in kinds if k in values] == values
     upload_area = html.split('<section class="panel upload"')[1].split("</section>")[0]
-    assert "upload__note" not in upload_area and "初賽還不能自動判讀" not in upload_area   # 本機模式:沒有說明
+    assert "upload__note" not in upload_area and "拍了會交給家人複核" not in upload_area   # 本機模式:沒有說明
 
 
 # 用假的 DOM 跑真的 app.js:兩列的選項照伺服器畫出來的(__DATA__),換大類後看第二列留下哪些、選中哪一個
@@ -482,7 +482,7 @@ def test_cloud_mode_routes_by_category_end_to_end(tmp_path, monkeypatch, form_cl
 
 def test_cloud_mode_routes_catalog_items_end_to_end(tmp_path, monkeypatch, form_client, upload):
     """驗收(雲端模式,上傳選項清單):財產資產 + 稅單 → 雲端、用帳單的提示詞(財產資產不是敏感類);
-    初賽不能自動判讀的名稱不論大類都只在本機、用通用提示詞(保單、存摺、身分證、租約),而且一律轉人工。"""
+    交給家人確認的名稱不論大類都只在本機、用通用提示詞(保單、存摺、身分證、租約),而且一律轉人工。"""
     client, sent, local, store = _cloud_client(tmp_path, monkeypatch, form_client)
 
     tax = _doc_id(upload(client, category="財產資產", doc_type="稅單"))
@@ -497,14 +497,14 @@ def test_cloud_mode_routes_catalog_items_end_to_end(tmp_path, monkeypatch, form_
     assert [(d["doc_label"], d["action"]) for d in docs] == [(name, "review") for _, name in manual]
 
 
-# ---- 上傳選項清單(使用者 10/3):每類的常見文件,不能自動判讀的先列上去、交給家人複核 ------------------
+# ---- 上傳選項清單(使用者 10/3):每類的常見文件,不能自動判讀的也列上去、交給家人複核 ------------------
 
 def test_unreadable_item_is_local_and_waits_for_the_family(cfg, client, analyzer, upload):
     """(醫療與保險, 保單):只在本機、沒有類型提示;MockAnalyzer 讀成自評 0.92 的發票也轉人工;記下「保單」。"""
     doc = Store(cfg.paths.db_path).get_document(_doc_id(upload(client, category="醫療與保險", doc_type="保單")))
     assert analyzer.hints == [None] and analyzer.local_only == [True]
     assert (doc["doc_label"], doc["action"], doc["category"]) == ("保單", "review", "醫療與保險")
-    assert doc["reason"] == "「保單」初賽還不能自動判讀,需人工確認"
+    assert doc["reason"] == "「保單」交給家人對照原件確認"
 
 
 def test_identity_item_is_local_and_waits_for_the_family(cfg, client, analyzer, upload):

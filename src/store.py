@@ -3,7 +3,7 @@
 SQLite 是文件、行動與更正狀態的單一事實來源(原則 8);records.jsonl 只是同一份處理紀錄的
 衍生流水帳(人看得懂、可 grep),新功能一律讀這裡、不讀 jsonl。家人更正或退回時更新原本那筆文件
 (update_document),不新增一筆;這份文件的舊行動換成新的(replace_actions)。corrections 表在
-家人更正讀值時寫入(F7),之後的「越用越準」(規劃中)只讀 verified 的更正。每次呼叫開一條新連線,
+家人更正讀值時寫入(F7),記下更正前後的讀值與是否通過核對(verified)。每次呼叫開一條新連線,
 FastAPI 的執行緒池與 CLI 都能安全共用同一個檔案。
 """
 from __future__ import annotations

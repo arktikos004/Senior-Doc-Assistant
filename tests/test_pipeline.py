@@ -416,7 +416,7 @@ def test_document_text_cannot_choose_category_or_routing(tmp_path):
 
 
 def test_identity_category_always_goes_to_review(tmp_path):
-    """選了身分證明:初賽不自動判讀,就算模型讀成一張欄位齊全、自評 0.92 的發票,也一律轉人工。"""
+    """選了身分證明:交給家人確認,就算模型讀成一張欄位齊全、自評 0.92 的發票,也一律轉人工。"""
     from src.decision import IDENTITY_REVIEW_REASON
 
     cfg = _make_cfg(tmp_path)
@@ -432,7 +432,7 @@ def _last_line(cfg: AppConfig) -> dict:
 
 
 def test_unreadable_item_stays_local_and_always_goes_to_review(tmp_path):
-    """(醫療與保險, 保單):初賽不能自動判讀——只在本機、沒有類型提示;就算讀成欄位齊全、自評 0.92 的發票
+    """(醫療與保險, 保單):交給家人確認——只在本機、沒有類型提示;就算讀成欄位齊全、自評 0.92 的發票
     也轉人工,原因寫家人選的名稱;處理紀錄、流水帳與資料庫都記下「保單」。"""
     from src.store import Store
 
@@ -440,7 +440,7 @@ def test_unreadable_item_stays_local_and_always_goes_to_review(tmp_path):
     analyzer = _RecordingAnalyzer(cfg)
     record = Pipeline(cfg, analyzer).process_file(_drop(cfg, "清晰發票.png"), category="醫療與保險", label="保單")
     assert analyzer.calls == [(None, True)]
-    assert record["動作"] == "review" and record["原因"] == "「保單」初賽還不能自動判讀,需人工確認"
+    assert record["動作"] == "review" and record["原因"] == "「保單」交給家人對照原件確認"
     assert (record["使用者選的文件"], record["使用者提示"], record["類別"]) == ("保單", None, "醫療與保險")
     assert _last_line(cfg)["使用者選的文件"] == "保單"
     doc = Store(cfg.paths.db_path).get_document(record["文件ID"])
@@ -448,15 +448,15 @@ def test_unreadable_item_stays_local_and_always_goes_to_review(tmp_path):
 
 
 def test_unreadable_item_in_a_non_sensitive_category_is_still_local(tmp_path):
-    """(財產資產, 存摺)、(生活契約, 租約):大類不敏感,但初賽不能自動判讀的名稱一樣只在本機、轉人工。"""
+    """(財產資產, 存摺)、(生活契約, 租約):大類不敏感,但交給家人確認的名稱一樣只在本機、轉人工。"""
     cfg = _make_cfg(tmp_path)
     analyzer = _RecordingAnalyzer(cfg)
     pipeline = Pipeline(cfg, analyzer)
     records = [pipeline.process_file(_drop(cfg, f"發票{i}.png"), "發票", category=category, label=label)
                for i, (category, label) in enumerate([("財產資產", "存摺"), ("生活契約", "租約")])]
     assert analyzer.calls == [(None, True), (None, True)]                # 清單上的「沒有提示」取代傳進來的提示
-    assert [r["原因"] for r in records] == ["「存摺」初賽還不能自動判讀,需人工確認",
-                                           "「租約」初賽還不能自動判讀,需人工確認"]
+    assert [r["原因"] for r in records] == ["「存摺」交給家人對照原件確認",
+                                           "「租約」交給家人對照原件確認"]
 
 
 def test_identity_items_name_the_chosen_document(tmp_path):
@@ -465,7 +465,7 @@ def test_identity_items_name_the_chosen_document(tmp_path):
     analyzer = _RecordingAnalyzer(cfg)
     record = Pipeline(cfg, analyzer).process_file(_drop(cfg, "清晰發票.png"), category="身分證明", label="身分證")
     assert analyzer.calls == [(None, True)]
-    assert record["動作"] == "review" and record["原因"] == "「身分證」初賽還不能自動判讀,需人工確認"
+    assert record["動作"] == "review" and record["原因"] == "「身分證」交給家人對照原件確認"
     assert (record["使用者選的文件"], record["類別"]) == ("身分證", "身分證明")
 
 

@@ -223,8 +223,8 @@ def check_amount_sum(total: Any, line_amounts: list[float] | None) -> dict[str, 
     """明細加總 = 總計。
 
     注意:算術通過**不能當唯一證據**——模型會「湊數」讓明細剛好加到它讀的總額,
-    所以這項只算弱證據,與格式檢查同級。目前的 ExtractionResult 沒有明細欄位,
-    verify_result 傳 None,一律 skip;介面先留好,之後有明細時直接接上。
+    所以這項只算弱證據,與格式檢查同級。ExtractionResult 沒有明細欄位,
+    verify_result 傳 None,一律 skip。
     """
     fields = ["amount"]
     if total is None or not line_amounts:

@@ -41,8 +41,8 @@ FIELD_LABELS: dict[str, str] = {
 CATEGORIES: tuple[str, ...] = ("身分證明", "財產資產", "醫療與保險", "生活契約")
 UNCATEGORIZED = "未分類"   # 公文等要看內容才分得出來、上傳時又沒選大類的文件,由家人指定
 # 上傳時每個大類可以再選的常見文件(使用者 10/3 決定;順序就是畫面第二列的順序,畫面最後再加「不確定」):
-# (名稱, 類型提示)。類型提示是初賽能自動判讀的類型(稅單、管理費當帳單讀,醫療收據當收據讀);
-# None 表示初賽還不能自動判讀:照樣能上傳,但只在本機辨識、一律交給家人複核,畫面顯示家人選的名稱
+# (名稱, 類型提示)。類型提示是能自動判讀的類型(稅單、管理費當帳單讀,醫療收據當收據讀);
+# None 表示交給家人確認:照樣能上傳,但只在本機辨識、一律交給家人複核,畫面顯示家人選的名稱
 CATEGORY_DOCS: dict[str, tuple[tuple[str, str | None], ...]] = {
     "身分證明": (("身分證", None), ("健保卡", None), ("戶口名簿", None), ("駕照", None), ("護照", None),
                 ("印鑑證明", None)),
@@ -54,7 +54,7 @@ CATEGORY_DOCS: dict[str, tuple[tuple[str, str | None], ...]] = {
 }
 # 清單上的名稱 → 類型提示(同一個名稱在每個大類的提示都一樣,例如公文);畫面只顯示這裡有的名稱
 DOC_LABELS: dict[str, str | None] = {name: hint for docs in CATEGORY_DOCS.values() for name, hint in docs}
-# 每個大類能自動判讀的文件類型,由 CATEGORY_DOCS 推出(依清單順序);身分證明初賽一種都沒有
+# 每個大類能自動判讀的文件類型,由 CATEGORY_DOCS 推出(依清單順序);身分證明類沒有
 CATEGORY_TYPES: dict[str, tuple[str, ...]] = {
     category: tuple(dict.fromkeys(hint for _, hint in docs if hint)) for category, docs in CATEGORY_DOCS.items()
 }
@@ -62,7 +62,7 @@ CATEGORY_TYPES: dict[str, tuple[str, ...]] = {
 TYPE_CATEGORY: dict[str, str] = {"發票": "財產資產", "收據": "財產資產", "藥袋": "醫療與保險", "帳單": "生活契約"}
 # 屬敏感個資的大類:不論文件類型都只在本機辨識(同藥袋)
 SENSITIVE_CATEGORIES: frozenset[str] = frozenset({"身分證明", "醫療與保險"})
-# 初賽沒有能自動判讀的身分證明類型:選了這一類,不論讀成什麼都交給家人確認
+# 身分證明類交給家人確認:選了這一類,不論讀成什麼都轉人工
 IDENTITY_CATEGORY = "身分證明"
 
 

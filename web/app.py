@@ -6,7 +6,7 @@
 
 頁面:
     /                    拍照或上傳文件(先選大類,再選這一類的哪一種)+ 最近看過的文件
-    POST /upload         存檔(重產檔名)→ Pipeline(敏感大類與初賽不能自動判讀的文件只在本機辨識)→ 303 到結果頁
+    POST /upload         存檔(重產檔名)→ Pipeline(敏感大類與交給家人確認的文件只在本機辨識)→ 303 到結果頁
     /cabinet             文件櫃:四大類的份數與文件;?cat= 只看一類
     /doc/{id}            白話解說、朗讀、核對印章、行動、欄位、原件
     /doc/{id}/file       原件(只送 archive/review/failed/uploads 內的檔)

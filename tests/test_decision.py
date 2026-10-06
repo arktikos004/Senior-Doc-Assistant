@@ -41,14 +41,15 @@ def test_confidence_at_threshold_archives():
 
 
 def test_manual_items_go_to_review_whatever_the_reading():
-    """上傳時選了初賽不能自動判讀的文件:讀值再好也轉人工,原因寫家人選的名稱;沒有名稱(身分證明選「不確定」)
+    """上傳時選了交給家人確認的文件:讀值再好也轉人工,原因寫家人選的名稱;沒有名稱(身分證明選「不確定」)
     沿用身分證明類的原因;讀不出來照一般規則記成 failed。"""
     from src.decision import IDENTITY_REVIEW_REASON, decide_manual
 
     good = make_result()                                 # 欄位齊全、自評 0.95 的發票,一般規則會存檔
     assert decide(good, CFG).action == "archive"
     decision = decide_manual(good, CFG, label="保單")
-    assert (decision.action, decision.reason) == ("review", "「保單」初賽還不能自動判讀,需人工確認")
+    assert (decision.action, decision.reason) == ("review", "「保單」交給家人對照原件確認")
+    assert IDENTITY_REVIEW_REASON == "身分證明類文件交給家人對照原件確認"
     assert (decide_manual(good, CFG).action, decide_manual(good, CFG).reason) == ("review", IDENTITY_REVIEW_REASON)
     assert decide_manual(None, CFG, label="保單").action == "failed"
 

@@ -509,7 +509,7 @@ def verification_view(result: dict[str, Any]) -> dict[str, Any]:
     conflict = any(c["independent"] and c["status"] == "fail" for c in checks)
     evidence = any(c["independent"] and c["status"] != "skip" for c in checks)
     if not checks:
-        overall, text = "none", "尚未驗證"
+        overall, text = "none", "未核對"
     elif counts["fail"]:
         overall, text = "fail", f"有 {counts['fail']} 項{'不符' if conflict else '沒通過'},請對照原件"
     elif matched:
@@ -629,7 +629,7 @@ def review_reason(result: dict[str, Any] | None) -> str:
     doc_type = result.get("doc_type") or ""
     required = required_specs(doc_type)
     if not required:   # 支援的類型都有必要欄位(REQUIRED_FIELDS),沒有就是不支援
-        return "這類文件目前不在支援範圍(發票、收據、帳單、公文、藥袋),請對照原件確認。"
+        return "這類文件不在支援範圍(發票、收據、帳單、公文、藥袋),請對照原件確認。"
     verification = result.get("verification")
     if isinstance(verification, dict) and verification.get("_summary") == VERIFY_ERROR_SUMMARY:
         return "這次的核對沒有完成(核對程式出錯),請對照原件確認。"
@@ -648,13 +648,13 @@ def review_reason(result: dict[str, Any] | None) -> str:
 
 
 def doc_review_reason(doc: dict[str, Any]) -> str:
-    """一份文件為什麼要複核:上傳時選了初賽不能自動判讀的文件(保單、身分證…)或身分證明類,一律轉人工
+    """一份文件為什麼要複核:上傳時選了交給家人確認的文件(保單、身分證…)或身分證明類,一律轉人工
     (決策層級的規則,讀值再好也一樣),原因照實寫家人選的名稱;其餘照讀值與核對結果組句(review_reason)。"""
     label = doc_label(doc)
     if label and DOC_LABELS[label] is None:
-        return f"「{label}」初賽還不能自動判讀,請對照原件確認。"
+        return f"「{label}」請家人對照原件確認。"
     if doc.get("category") == IDENTITY_CATEGORY:
-        return "身分證明類文件目前不自動判讀,請對照原件確認。"
+        return "身分證明類文件請家人對照原件確認。"
     return review_reason(doc.get("result"))
 
 
@@ -948,7 +948,7 @@ def doc_view(doc: dict[str, Any], *, file_url: str | None, hint: str | None = No
              actions: list[dict[str, Any]] | None = None,
              file_size: tuple[int, int] | None = None,
              correct_url: str | None = None, corrected: bool = False) -> dict[str, Any]:
-    """結果頁的畫面資料。hint 是上傳時使用者選的類型(目前只用來決定是否顯示藥袋聲明);
+    """結果頁的畫面資料。hint 是上傳時使用者選的類型(只用來決定是否顯示藥袋聲明);
     actions 是這份文件的 action_view 清單,用來組摘要上的提醒/家人確認狀態。
     correct_url:「更正讀值」的連結(不能更正的文件是 None);corrected:家人更正過這份文件的讀值。"""
     result = doc.get("result") or {}
@@ -1015,20 +1015,20 @@ _ICON_PATHS.update({
 CATEGORY_ICONS: dict[str, str] = {"身分證明": "id", "財產資產": "asset", "醫療與保險": "health",
                                   "生活契約": "contract", UNCATEGORIZED: "file"}
 ASSIGNABLE_CATEGORIES: tuple[str, ...] = (*CATEGORIES, UNCATEGORIZED)   # 家人在更正頁能指定的類別
-# 文件櫃卡片上的例子:說明這一類放什麼,不代表都能自動判讀(身分證明初賽還不能)
+# 文件櫃卡片上的例子:說明這一類放什麼,不代表都能自動判讀(身分證明類交給家人確認)
 CATEGORY_EXAMPLES: dict[str, str] = {"身分證明": "身分證、健保卡、戶口名簿", "財產資產": "發票、收據、稅單",
                                      "醫療與保險": "藥袋、保單、醫療收據", "生活契約": "水電瓦斯、電信、租約"}
 KINDS_LEGEND = "是哪一種文件?"   # 上傳第二列沒選大類(或沒有 JS)時的標題
 
 
 def id_note(cloud: bool, examples: bool = False) -> str:
-    """身分證明類的說明(文件櫃;上傳區不放任何說明,使用者 10/3):初賽沒有能自動判讀的類型。
+    """身分證明類的說明(文件櫃;上傳區不放任何說明,使用者 10/3):這一類交給家人確認。
 
     「只在這台電腦處理」只在雲端模式寫:本機模式所有文件都在這台電腦,特別寫出來反而像別的文件會送出去
     (同首頁藥袋提示的規則,10/2 決定)。examples:名稱後面加上例子(文件櫃用)。
     """
     name = f"身分證明類({CATEGORY_EXAMPLES['身分證明']})" if examples else "身分證明類"
-    return f"{name}初賽還不能自動判讀,拍了會交給家人複核{',而且只在這台電腦處理' if cloud else ''}。"
+    return f"{name}拍了會交給家人複核{',而且只在這台電腦處理' if cloud else ''}。"
 
 
 def kind_choices() -> list[dict[str, Any]]:

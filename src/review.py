@@ -141,7 +141,7 @@ def reading(result: ExtractionResult) -> dict[str, Any]:
 
 
 def vendor_key(result: ExtractionResult) -> str | None:
-    """同一個來源的鍵(給之後的越用越準找範例,W2-A 的約定):有賣方統編用統編,否則用正規化的商家名稱。"""
+    """同一個來源的鍵(寫進更正紀錄,W2-A 的約定):有賣方統編用統編,否則用正規化的商家名稱。"""
     fields = result.fields if isinstance(result.fields, dict) else {}
     tax_id = str(fields.get("seller_tax_id") or "").strip()
     if re.fullmatch(r"\d{8}", tax_id):
@@ -286,7 +286,7 @@ def correct_document(cfg: AppConfig, store: Store, doc_id: int, changes: dict[st
         record = _record(doc, decision.action, decision.reason, target, result.to_dict(), SOURCE_CORRECT)
         store.update_document(doc_id, record)
         store.replace_actions(doc_id, result.actions)
-        # 驗證閘門(之後的越用越準只收 verified):沒有任何檢查不通過、核對有完成、必要欄位齊全,也就是能存檔
+        # 驗證閘門(更正紀錄的 verified):沒有任何檢查不通過、核對有完成、必要欄位齊全,也就是能存檔
         store.add_correction(reading(before), reading(result), document_id=doc_id, doc_type=result.doc_type,
                              vendor_key=vendor_key(result), verified=decision.action == "archive",
                              source=SOURCE_CORRECT)

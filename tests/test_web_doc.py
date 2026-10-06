@@ -76,7 +76,7 @@ def test_model_text_is_escaped(client, add_doc):
 
 def test_without_verification_says_unverified(client, add_doc):
     html = client.get(f"/doc/{add_doc(BILL)}").text
-    assert "尚未驗證" in html
+    assert "未核對" in html
 
 
 def test_verification_badges_use_text_not_only_color(client, add_doc):

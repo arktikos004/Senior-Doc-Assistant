@@ -30,7 +30,7 @@ def test_cancelled_reminder_offers_restore():
 
 @pytest.mark.parametrize("raw", [
     _raw(tier="confirm"),                                   # 等家人確認:到「家人確認」處理
-    _raw(tier="confirm", status="done"),                    # 家人已確認:撤回要等長輩/家人身分角色(規劃中)
+    _raw(tier="confirm", status="done"),                    # 家人已確認:不提供取消或恢復
 ])
 def test_reminders_needing_family_have_no_toggle(raw):
     assert _answer(BILL, raw)["status"]["toggle"] is None

@@ -9,8 +9,8 @@ from __future__ import annotations
 from .config import AppConfig
 from .models import FIELD_LABELS, REQUIRED_FIELDS, Decision, ExtractionResult
 
-IDENTITY_REVIEW_REASON = "身分證明類文件目前不自動判讀,需人工確認"
-MANUAL_REVIEW_REASON = "「{label}」初賽還不能自動判讀,需人工確認"   # label:家人選的名稱(保單、身分證…)
+IDENTITY_REVIEW_REASON = "身分證明類文件交給家人對照原件確認"
+MANUAL_REVIEW_REASON = "「{label}」交給家人對照原件確認"   # label:家人選的名稱(保單、身分證…)
 
 
 def _missing_required(result: ExtractionResult) -> list[str]:
@@ -79,10 +79,10 @@ def decide(result: ExtractionResult | None, cfg: AppConfig) -> Decision:
 
 
 def decide_manual(result: ExtractionResult | None, cfg: AppConfig, label: str | None = None) -> Decision:
-    """上傳時選了初賽不能自動判讀的文件(清單上沒有類型提示的保單、存摺…,以及身分證明整類):
+    """上傳時選了交給家人確認的文件(清單上沒有類型提示的保單、存摺…,以及身分證明整類):
     不論模型讀成什麼(就算讀成欄位齊全的收據)都轉人工。
 
-    label 是家人選的名稱(取自固定清單),原因照實寫「「保單」初賽還不能自動判讀」;身分證明選「不確定」
+    label 是家人選的名稱(取自固定清單),原因照實寫「「保單」交給家人對照原件確認」;身分證明選「不確定」
     沒有名稱,沿用身分證明類的原因。讀不出來的照一般規則記成 failed;其餘一律 review,
     不靠模型把它判成「其他」才轉人工。
     """

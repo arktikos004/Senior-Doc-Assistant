@@ -85,7 +85,7 @@ class Pipeline:
         只在本機辨識,不論類型提示;文件歸哪一類由 category_for 決定(選了就照選的,沒選依辨識出的類型)。
         label:使用者在大類裡選的文件名稱(CATEGORY_DOCS,例如「稅單」「保單」;可為 None)。只認所選大類
         清單上的名稱(catalog_entry),其他當作沒選;選了就改用清單上的類型提示(稅單 → 帳單)。清單上沒有
-        類型提示的(保單、存摺…初賽不能自動判讀)和身分證明整類一樣:只在本機辨識、不論讀成什麼都轉人工。
+        類型提示的(保單、存摺…交給家人確認)和身分證明整類一樣:只在本機辨識、不論讀成什麼都轉人工。
         大類與名稱只看使用者的選擇與固定清單,文件上的文字決定不了分流、歸類與決策(原則 3)。
         """
         log.info("開始處理:%s", file_path.name)
@@ -95,7 +95,7 @@ class Pipeline:
             label, doc_type_hint = entry   # 名稱與類型提示一律取自固定清單
         else:
             label = None
-        # 初賽不能自動判讀的(清單上沒有類型提示的項目、身分證明整類):只在本機辨識,一律轉人工
+        # 交給家人確認的(清單上沒有類型提示的項目、身分證明整類):只在本機辨識,一律轉人工
         manual = (entry is not None and entry[1] is None) or category == IDENTITY_CATEGORY
 
         # 步驟 1:AI 辨識
@@ -117,7 +117,7 @@ class Pipeline:
         # 步驟 2–4:核對(要在搬檔前做,才讀得到原檔)→ 決策 → 規劃行動(提醒、服藥時間表…);
         # 辨識失敗沒有讀值可核對,直接記為 failed、不產生行動
         if result is not None:
-            # 選了初賽不能自動判讀的文件:一律轉人工,原因寫家人選的名稱(行動也照轉人工的決策分級)
+            # 選了交給家人確認的文件:一律轉人工,原因寫家人選的名稱(行動也照轉人工的決策分級)
             decide_fn = partial(decide_manual, label=label) if manual else decide
             decision = verify_decide_plan(result, file_path, self.cfg, received_on=date.today(),
                                           decide_fn=decide_fn)
