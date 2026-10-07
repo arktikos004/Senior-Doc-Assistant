@@ -9,7 +9,7 @@ import yaml
 # 專案根目錄(src/ 的上一層)
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# 預設模型一律選非中資的開源模型(見 README「設定」一節)
+# 預設模型一律選非中資的開源模型(同 config.yaml 開頭的說明)
 DEFAULT_OLLAMA_MODEL = "gemma4:12b"
 DEFAULT_WORKERS_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it"
 PROVIDERS = ("ollama", "workers_ai", "mock")

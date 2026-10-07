@@ -1,218 +1,98 @@
 # 看有
 
-> 正式作品名稱:**結合視覺語言模型與分層核對機制之高齡家庭文書輔助系統**。
-> 「看有」是台語 khuànn-ū,「看得懂」的意思。
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)
+![Model: Gemma 4](https://img.shields.io/badge/model-Gemma%204-orange.svg)
 
-讓**獨居或雙老家庭的長輩,與不在身邊的家人**看懂並準時處理寄到家裡的帳單、公文、藥袋與發票。
-長輩用手機拍一張照,系統用以本機為主的開源視覺語言模型(Google Gemma 4)讀取文件,
-再用文件上不經過模型的資訊(電子發票 QR Code、檢查碼、日期與格式規則)核對讀值,
-最後依風險決定哪些事直接提醒、哪些交給家人確認。它只協助閱讀:不替人付款、不送出回覆、不做醫療判斷。
+**結合視覺語言模型與分層核對機制之高齡家庭文書輔助系統**
+
+拍一張照，看懂寄到家裡的帳單、公文、藥袋與發票。「看有」是台語 khuànn-ū，意思是「看得懂」。
+
+> **English** — Khuànn-ū ("I can read it" in Taiwanese) helps older adults living alone or with an elderly partner,
+> and family members who live elsewhere, understand the bills, official letters, medication bags and receipts that
+> arrive at home. A local open model (Google Gemma 4) reads a photo of the document; deterministic checks such as
+> e-invoice QR codes, checksums and date rules verify the reading; and the system decides by risk which items become
+> reminders and which wait for a family member. It only helps people read: it never pays, replies or gives medical advice.
 
 ## 功能
 
-- **拍照上傳,先選大類再選文件**:四大類(身分證明、財產資產、醫療與保險、生活契約),每類 5–6 個常見文件;
-  不確定可以不選,AI 會自己判斷。自動判讀發票、收據、帳單、公文、藥袋五類(稅單、管理費、水電瓦斯費、電信費當帳單讀,
-  醫療收據當收據讀);身分證明、存摺、房地權狀、保單、診斷證明、檢驗報告、租約照樣收存,只在本機辨識、交給家人確認,
-  畫面顯示家人選的名稱。
-- **讀懂**:結果頁最上面先回答要做什麼、期限、金額;AI 白話解說,「唸給我聽」時數字逐字唸。
-- **分層核對**:電子發票的讀值和左側 QR Code 逐欄比對;其他文件做格式與合理性檢查,畫面註明「不能證明讀對,請對照原件」。
-- **分級行動**:帳單的繳費期限(AI 讀取、程式檢查)與公文的期限(程式從原文推算)變成期限提醒,列在首頁「要記得的事」;
-  自動列入的提醒可在結果頁「取消提醒」,按錯可「恢復提醒」。藥袋整理成服藥時間表,一律等家人確認。
-  系統不產生付款或送出回覆。
-- **家人確認與更正讀值**:家人在「家人確認」確認或退回;任何類型的讀值都能在「更正讀值」改正,
-  存檔後重新核對、重算提醒,並更新同一筆文件。退回這類沒辦法復原的操作,會先跳出確認框(「先不要」/「確定退回」),
-  框剛打開的 0.5 秒內點擊不算數,避免連點誤按。
-- **加密 PDF**:電信費、信用卡這類電子帳單常是加密的 PDF;上傳時系統會請家人輸入密碼,解開後照常讀懂、核對、提醒。
-  密碼只用來打開這一份,不存、不記;打錯可以再試,錯 5 次或 30 分鐘沒處理,暫存的檔案就刪掉。
-- **文件櫃**:依四大類瀏覽所有文件;沒選大類的公文放在「未分類」,由家人在更正頁指定。
-- **設定**:系統狀態(只看)、這台裝置的字級與朗讀速度、可改的系統設定(只用本機或可用雲端備援、自動存檔門檻)、
-  資料管理(匯出全部紀錄、刪除全部資料)。藥袋與醫療與保險、身分證明兩類一律只在本機處理,門檻不能低於 80%,
-  每次改動都留紀錄。
+- **拍照就能讀**：手機拍照或上傳圖片、PDF（加密的電子帳單也行）；結果頁最上面先回答要做什麼、什麼時候前、多少錢，還能唸出來。
+- **讀值有依據**：電子發票逐欄比對左側 QR Code；其他文件檢查日期、金額與格式，畫面寫明每一項的證據強弱。
+- **依風險行動**：核對達標的帳單與公文，期限自動列入首頁「要記得的事」，隨時可取消；藥袋整理成服藥時間表，等家人確認。
+- **家人一起看**：從遠端確認或退回，任何讀值都能更正；更正後重新核對、重算提醒。
+- **資料留在家裡**：預設全部在家裡的電腦上推論，不送雲端。
 
-## 流程
+它只協助閱讀：不替人付款、不送出回覆、不給醫療建議。
 
-```
-手機拍照或上傳(網頁)
-   ▼
-1. 收件        先選大類、再選文件(都可不選);檢查大小(≤ 15MB)、副檔名與檔頭;檔名一律重新產生
-2. 前處理      去除 EXIF/GPS、轉正;白底上只佔一小塊的文件裁掉白邊;PDF 取第一頁
-3. 擷取        Gemma 4 只照抄:類型、欄位、80 字內白話解說;讀不清就標 unreadable,不猜
-               藥袋、醫療與保險與身分證明兩類、交給家人確認的文件、沒選類型的文件只在本機(Ollama)推論
-4. 自我驗證    電子發票 QR 逐欄比對;統編檢查碼、字軌、期別、日期與金額合理性
-               → 驗證信心(依核對結果計算,模型自評只能當上限,不能加分);核對程式出錯就轉人工
-5. 決策閘門    驗證信心 ≥ 門檻(預設 0.80)且必要欄位齊全 → 存檔;否則 → 待複核;讀不出來 → 失敗
-               交給家人確認的文件一律待複核
-6. 分級行動    帳單的繳費期限(AI 讀取,程式換算民國年並檢查)、公文的相對期限(程式推算)
-               → 期限提醒,列在首頁「要記得的事」;自動列入的提醒可在結果頁取消、按錯可恢復
-               藥袋 → 服藥時間表(早/中/晚/睡前,「需要時」另列),一律等家人確認
-               付款、送出回覆永遠不會產生;文件內容不能決定行動種類或分級
-7. 家人        確認或退回;讀錯就更正讀值 → 重新核對 → 重算提醒 → 更新同一筆文件
+## 運作方式
+
+```mermaid
+flowchart LR
+  A["拍照或上傳"] --> B["Gemma 4 照抄欄位"]
+  B --> C{"分層核對"}
+  C -- "達標" --> D["存檔、產生提醒"]
+  C -- "不符或沒把握" --> E["待複核"]
+  E -- "家人對照原件更正" --> C
 ```
 
-只有與 QR Code 比對的項目會寫「相符」;帳單、公文、藥袋做格式與合理性檢查,畫面寫「通過」並註明「不能證明讀對,請對照原件」。
-
-## 頁面一覽
-
-| 頁面 | 網址 | 做什麼 |
-|---|---|---|
-| 首頁 | `/` | 拍照或選照片(先選大類再選文件)、「要記得的事」、最近看過的文件 |
-| 文件櫃 | `/cabinet` | 四大類的份數與文件;點一類只看那一類,沒選大類的公文在「未分類」 |
-| 結果頁 | `/doc/{id}` | 要做的事(期限、金額或服藥時間表)、取消/恢復提醒、白話解說、朗讀、核對結果、讀到的內容、原件 |
-| 輸入 PDF 密碼 | `/upload/password/{代碼}` | 上傳的 PDF 有密碼時才會出現:密碼對了照常辨識,「先不要」、錯 5 次或 30 分鐘沒處理就刪掉暫存檔 |
-| 更正讀值 | `/doc/{id}/correct` | 家人對照原件更正讀值、指定這份文件屬於哪一類;存檔後重新核對、重算提醒 |
-| 家人確認 | `/confirm` | 服藥時間表與待複核文件的期限提醒:按「確認」或「退回」 |
-| 待複核 | `/review` | 核對不符、缺少必要欄位、讀值沒把握、不支援的類型,或交給家人確認的文件;每份連到更正頁 |
-| 設定 | `/settings` | 系統狀態、這台裝置的字級與朗讀速度、辨識模式與自動存檔門檻、匯出全部紀錄、刪除全部資料 |
-| 健康檢查 | `/healthz` | 給開機腳本與監看用的 JSON(狀態、版本、模型名稱,不含路徑與金鑰) |
-
-手機與平板按畫面上方的「選單」切換頁面;電腦版的選單在左邊。
+模型只把印刷文字照抄成欄位；核對、日期換算、期限推算與分級都由程式完成。「可信」一定要有模型以外的依據：
+只有和 QR Code 比對過的項目會寫「相符」，只做規則檢查的文件會註明「不能證明讀對，請對照原件」。
+完整的設計原則見[系統架構](docs/系統架構.md#14-設計原則)。
 
 ## 快速開始
 
-需要 Python 3.12 以上。測試與展示模式不需要 GPU,也不需要模型。
+需要 Python 3.12 以上。展示模式與測試不需要 GPU，也不需要模型。
 
-### 安裝與測試
-
-macOS / Linux:
+### 展示模式
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m pytest -q          # 1,131 個測試,不連網、不呼叫真實模型
-```
-
-Windows(PowerShell):
-
-```powershell
 python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt   # 一律用 python -m:資料夾改名後 pip.exe 啟動器會壞
-.venv\Scripts\python -m pytest -q
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python tools/make_demo_docs.py              # 合成帳單、藥袋、公文
+.venv/bin/python tools/make_sample.py --einvoice      # 合成電子發票（含一張金額不符）
+.venv/bin/python tools/demo_server.py --reset --seed  # 瀏覽器開 http://localhost:8000
 ```
 
-- 有 3 個前端測試會呼叫 Node.js 執行 `web/static/` 的程式;沒裝 Node.js 時,這 3 個測試會自動略過。
-- Windows 的一般帳號不能建立符號連結,有 2 個符號連結的測試會略過(結果是 1129 passed、2 skipped)。
+Windows 把 `.venv/bin/python` 換成 `.venv\Scripts\python`。展示模式的讀值是預錄的模擬資料，核對、決策與行動都是真實程式的結果。
 
-### 展示模式(沒有模型也能看完整畫面)
+測試：`.venv/bin/python -m pytest -q`（1,131 個，不連網、不呼叫真實模型）。
+
+### 用真實模型
 
 ```bash
-.venv/bin/python tools/make_demo_docs.py          # 合成帳單/藥袋/公文 → data/samples/demo/
-.venv/bin/python tools/make_sample.py --einvoice  # 合成電子發票(含一張金額不符)→ data/samples/einvoice/
-.venv/bin/python tools/demo_server.py --reset --seed
-# 瀏覽器開 http://localhost:8000
+ollama pull gemma4:12b                                # 需要 Ollama 0.22 以上；約 8GB，放得進 16GB VRAM
+.venv/bin/python -m uvicorn web.app:app --host 127.0.0.1 --port 8000
 ```
 
-Windows 把 `.venv/bin/python` 換成 `.venv\Scripts\python`。展示模式的讀值是預錄的模擬資料(每頁的安心說明會寫「展示模式」);
-核對、決策與行動都是真實程式的結果。資料放在 `data/demo_run/`,不會動到正式的資料夾。
+設定都在 [`config.yaml`](config.yaml)，每一項都有註解；辨識模式與自動存檔門檻也能在網頁的「設定」頁改。
+讓家人用手機連上（Cloudflare Tunnel + Access）、雲端備援與開機自動啟動，見[部署指南](docs/部署指南.md)。
 
-### 用真實模型(Windows GPU 電腦)
+## 評測
 
-```powershell
-ollama pull gemma4:12b                                   # 需 Ollama >= 0.22;約 8GB,放得進 16GB VRAM
-.venv\Scripts\python -m uvicorn web.app:app --host 127.0.0.1 --port 8000
-```
+`gemma4:12b`（RTX 5070 Ti 16GB）讀 11 張合成電子發票，平均 3.25 秒/張。其中 1 張刻意讓印刷金額和 QR Code 不符，模擬讀錯：
 
-雲端備援(可選):先設定環境變數 `CF_ACCOUNT_ID`、`CF_API_TOKEN`(模型 `@cf/google/gemma-4-26b-a4b-it`),
-再到設定頁把「辨識模式」改成「可以用雲端備援」(切換前會先問一次),或把 `config.yaml` 的 `model.provider` 改成 `workers_ai`。
-沒有這兩個環境變數時,設定頁不能選雲端。即使開雲端,藥袋、醫療與保險與身分證明兩類、交給家人確認的文件、
-沒選類型的文件仍只在本機推論。
+| 做法 | 自動存檔 | 存檔中的錯誤 | 轉人工 |
+|---|---|---|---|
+| 只看模型自評（11 張都是 0.95） | 11 | 1 | 0 |
+| 分層核對 | 10 | 0 | 1 |
 
-讓家人用手機連上(Cloudflare Tunnel + Access)、開機自動啟動與健康檢查:見[部署指南](docs/部署指南.md)。
-
-> Gemma 4 實測(2026-10-03,GPU 電腦 RTX 5070 Ti 16GB):`gemma4:12b` 讀 11 張合成電子發票,平均 3.25 秒/張;
-> 其中 1 張刻意讓印刷金額與 QR 不符、模擬讀錯,其餘 10 張的類型、日期、金額全對。
-> 模型自評 11 張都是 0.95,只看自評會全部自動存檔、含 1 張錯誤;經分層核對,自動存檔 10 張、錯誤 0 張、轉人工 1 張。
-> 重現:先 `tools/make_sample.py --einvoice`(固定 seed),再 `tools/evaluate.py --model gemma4:12b`。
-
-## 設定(`config.yaml`)
-
-| 鍵 | 預設 | 說明 |
-|---|---|---|
-| `model.provider` | `ollama` | `ollama`(本機)/ `workers_ai`(雲端備援)/ `mock`;設定頁可在前兩者之間切換 |
-| `model.local_only_doc_types` | 藥袋 | 永遠只在本機推論的類型;藥袋就算漏寫也會補上 |
-| `ollama.model` | `gemma4:12b` | 本機模型 |
-| `ollama.num_ctx` | 8192 | 模型一次能看的 token 數(提示詞 + 影像 + 回答);Ollama 預設的 4096 放不下手機照片加通用版提示詞,回答會被截斷 |
-| `workers_ai.model` | `@cf/google/gemma-4-26b-a4b-it` | 雲端模型;帳號與 Token 只從環境變數讀 |
-| `confidence.auto_threshold` | 0.80 | 驗證信心達到才自動存檔;設定頁可選 80%、85%、90%、95%,伺服器只收 80%–98% |
-| `target_doc_types` | 發票、收據、帳單、公文、藥袋 | 其他類型一律轉複核 |
-
-設定頁存的值放在 SQLite,蓋過 `config.yaml`;每次讀出來都重新檢查,不合規則的值不會生效。
-展示模式(`mock`)不能在設定頁切換辨識模式。
-
-模型一律使用非中資的開源模型;預設 Google Gemma 4(Apache 2.0)。
-
-## 專案結構
-
-```
-main.py              命令列入口:watch(監控資料夾)/ process(處理檔案或資料夾)/ stats / export / migrate
-config.yaml          模型、門檻、路徑、支援的文件類型
-src/
-  providers/         擷取:ollama(本機)、workers_ai(雲端)、mock;routing.py 隱私分流
-  prompts.py         各類型提示詞;parsing.py 解析模型輸出的 JSON
-  preprocess.py      影像前處理
-  verify/            自我驗證:einvoice.py(QR)、checks.py(檢查碼、格式、合理性)
-  decision.py        決策閘門
-  actions/           分級行動:期限提醒、服藥時間表(medication.py)
-  dates.py           民國年與期限推算(純函式)
-  models.py          資料契約:讀值、文件類型、四大類與每類的文件清單
-  review.py          家人更正讀值與退回(更新同一筆文件)
-  settings.py        設定頁的規則、目前生效的設定、匯出與刪除全部資料
-  store.py           SQLite(logs/app.db):文件、行動、更正、設定與設定變更紀錄
-  pipeline.py        串接以上步驟
-web/
-  app.py             FastAPI 路由(見上方〈頁面一覽〉);安全標頭、CSRF、/healthz
-  render.py          畫面資料與文案;fields.py 各類型的欄位規格
-  templates/ static/ 樣板、樣式、確認框與上傳互動(app.js)、朗讀(speech.js,Web Speech API)、PWA manifest;
-                     沒有外部 CDN 與字型,離線可用
-tools/               demo_server、make_demo_docs、make_sample(合成資料)、evaluate(評測,預設只讀合成樣本)
-deploy/              Windows 開機腳本、Cloudflare Tunnel 設定範例(見 docs/部署指南.md)
-tests/               pytest,只用 Mock 與合成資料
-docs/                系統架構、使用手冊、部署指南
-```
+重現：`tools/make_sample.py --einvoice`（固定 seed），再執行 `tools/evaluate.py --model gemma4:12b`。
 
 ## 安全與隱私
 
-- 藥袋屬特種個資,只在本機推論;上傳時選「醫療與保險」「身分證明」的文件也一律只在本機,設定頁關不掉。
-- 送模型前去除 EXIF/GPS(影像解不開就不送,不會原檔送出);原件回應帶 `no-store`,不快取。
-- 「唸給我聽」只用裝置上的本機語音;沒有本機中文語音就不唸,不把文字送到雲端語音服務。
-- 文件文字與更正表單的值都只當資料:行動種類與分級只看封閉的文件類型與決策結果,有提示注入測例。
-- 樣板 autoescape、沒有行內 JavaScript;上傳有大小上限、副檔名白名單、檔頭比對,檔名重新產生。
-- 網頁只綁 127.0.0.1,對外經 Cloudflare Tunnel + Access。所有回應帶 CSP 等安全標頭、HTML 不快取;所有 POST 檢查 CSRF token;
-  `/healthz` 只回狀態與版本,不含路徑或金鑰。
-- 設定頁:自動存檔門檻不能低於 80%;雲端備援要先設好帳號與金鑰,切換前先確認;每次改動都留紀錄
-  (什麼時候、改成什麼;經 Cloudflare Access 登入時記下登入的 email,只記錄、不當授權)。
-- 資料管理:「匯出全部紀錄」下載 JSON(文件與讀值、提醒與服藥時間表、更正、設定變更;不含照片);
-  「刪除全部資料」刪掉文件與讀值、提醒、更正紀錄、處理紀錄(`logs/records.jsonl`)與原件,設定與設定變更紀錄保留,
-  刪除前先跳確認框;有檔案刪不掉時照實說哪些已刪、哪些沒刪。匯出檔不帶這台電腦的完整路徑。
-- 要先確認的動作(切到雲端備援、刪除全部資料、兩處「退回」)伺服器也要收到確認才做:沒有 JavaScript 時多一頁確認頁,
-  不會一按就生效。改同一份文件的操作(更正、退回、取消提醒、家人確認、刪除全部資料)一次只做一個,更正表單只送一次。
-- 每個表單都有大小上限(上傳 15MB、其他 1MB),超過就不收。錯誤紀錄只寫文件編號與錯誤種類,不寫檔名(檔名有商家與金額)
-  或完整路徑。
-- 加密 PDF 的密碼只用來解開那一份:不存資料庫、不寫紀錄、不回顯到畫面;等待輸入的暫存檔 30 分鐘或錯 5 次就刪掉。
-- 測試與展示只用 `tools/` 產生的合成文件,repo 不放真實個資。
+- 開了雲端備援，藥袋、選了「醫療與保險」「身分證明」的文件和沒選類型的文件，仍只在本機推論。
+- 送模型前去除 EXIF/GPS；網頁只綁 127.0.0.1，對外經 Cloudflare Tunnel + Access 登入。
+- 文件上的文字只當資料：決定不了行動種類與分級，也產生不了付款或回覆。
+- 藥袋只照抄印刷文字，服藥時間表一律等家人確認。
 
-## 設計原則
-
-程式註解裡的「原則 N」指的是這十條:
-
-1. **證據優先於自評**:「可信」要說得出模型以外的依據;模型自評只能當上限,不能加分。
-2. **模型照抄,程式計算**:模型只把印刷文字轉成欄位;日期換算、期限推算、金額比對與分級都由程式完成。
-3. **文件是資料,不是指令**:行動種類、分級與流程只看固定的文件類型與決策結果,文件與表單上的文字改變不了。
-4. **自主程度跟著可逆性與風險走,最終決定權在人**:只有能在系統內取消、低風險的行動才自動;用藥一律家人確認;付款與送出回覆永不產生。
-5. **不知道就說不知道**:讀不清就標讀不出、算不出就不產生行動,不填預設值或猜測值。
-6. **本機優先,資料最少**:敏感與未知類型只在本機推論;送模型前去除中繼資料;只存完成任務需要的資料。
-7. **說到做到**:畫面與文件的每一句,都是系統當下真的做到的,或能用 repo 內工具以合成資料重現的數字。
-8. **單一事實來源**:原件 → 讀值 → 衍生資料(核對、白話解說、行動)分三層,每層只有一個權威位置(SQLite)。
-9. **契約先行,一個能力一個入口**:擷取、提示詞、核對、行動各有一個入口,Pipeline 只負責串接。
-10. **範圍服從故事主線**:每個功能都要服務「拍照 → 讀懂 → 核對 → 分級行動 → 家人確認或更正」。
+細節見[系統架構〈安全邊界〉](docs/系統架構.md#12-安全邊界)。
 
 ## 文件
 
-- [系統架構](docs/系統架構.md):模組、路由、資料流、分流規則、安全邊界。
-- [使用手冊](docs/使用手冊.md):長輩與家人的操作步驟。
-- [部署指南](docs/部署指南.md):GPU 電腦上架、Cloudflare Tunnel + Access、開機自動啟動。
+- [使用手冊](docs/使用手冊.md)：長輩與家人的操作步驟
+- [系統架構](docs/系統架構.md)：模組、資料流、分流規則、安全邊界、設計原則
+- [部署指南](docs/部署指南.md)：家用 GPU 電腦上架、Cloudflare Tunnel + Access、開機自動啟動
 
 ## 授權
 
-授權:Apache-2.0,全文見 [LICENSE](LICENSE)。
-
-開發過程使用 Claude Code 輔助。
+[Apache-2.0](LICENSE)。開發過程使用 Claude Code 輔助。
