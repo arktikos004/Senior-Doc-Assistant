@@ -20,7 +20,7 @@
     # 沒有模型時先用 Mock 驗證整條評測流程跑得通
     python tools/evaluate.py --mock
 
-只評測非中資的開源模型(競賽切結書第 6 點)。
+只評測非中資的開源模型。
 
 樣本:預設 data/samples/einvoice/(合成電子發票,有自己的 labels.csv,欄位與 src/evaluation.py 一致)。
 不要指到 data/samples/ 根目錄:那裡的 labels.csv 可能是真實資料(個資),工具會印警告。

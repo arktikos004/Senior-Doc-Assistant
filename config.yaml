@@ -2,7 +2,7 @@
 # 看有(高齡家庭文書輔助)- 設定檔
 # ============================================
 
-# 模型一律使用非中資的開源模型(競賽切結書第 6 點);預設 Google Gemma 4(Apache 2.0)
+# 模型一律使用非中資的開源模型;預設 Google Gemma 4(Apache 2.0)
 model:
   provider: "ollama"               # ollama(本機)/ workers_ai(Cloudflare 雲端)/ mock
   local_only_doc_types:            # 隱私分流:這些類型永遠只在本機推論,不送雲端

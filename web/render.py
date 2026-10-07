@@ -73,7 +73,7 @@ TYPE_VALUES: tuple[str, ...] = tuple(v for v, _ in DOC_TYPE_CHOICES if v != UNSU
 MEDICATION_DISCLAIMER = "本系統只協助閱讀,不提供醫療建議;用藥請依醫師與藥師指示。"
 
 # 產品名稱集中在這裡(10/1 定案;舊的英文名稱撞名,已棄用)。短名稱「看有」= 台語 khuànn-ū「看得懂」,
-# 副標說明用途;正式題目「結合視覺語言模型與分層核對機制之高齡家庭文書輔助系統」只用在報名與文件
+# 副標說明用途;正式題目「結合視覺語言模型與分層核對機制之高齡家庭文書輔助系統」只用在文件
 BRAND_NAME = "看有"
 BRAND_SUB = "高齡家庭文書輔助"
 BRAND_FULL = f"{BRAND_NAME} {BRAND_SUB}"

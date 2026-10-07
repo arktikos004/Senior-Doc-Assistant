@@ -18,7 +18,7 @@ credentials-file: C:\Users\<使用者名稱>\.cloudflared\00000000-0000-0000-000
 # TCP 7844 也被擋時通道開不起來,要換網路,或請網管開放對外的 7844(TCP)。
 protocol: http2
 
-# 版本更新交給人手動做(winget upgrade Cloudflare.cloudflared),避免比賽展示中途自己重啟
+# 版本更新交給人手動做(winget upgrade Cloudflare.cloudflared),避免家人使用途中自己重啟
 no-autoupdate: true
 
 ingress:
