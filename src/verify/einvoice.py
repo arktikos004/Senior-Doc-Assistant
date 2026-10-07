@@ -84,7 +84,7 @@ class LeftQR:
 def parse_left_qr(text: str) -> LeftQR:
     """解析左側 QR 字串;不是合法的左側 QR(長度、欄位格式或日期不對)丟 ValueError。"""
     if not isinstance(text, str) or len(text) < LEFT_QR_LENGTH:
-        raise ValueError("不足 77 碼,不是電子發票左側 QR")
+        raise ValueError("不足 77 碼，不是電子發票左側 QR")
     m = _LEFT_QR.match(text)
     if not m:
         raise ValueError("前 77 碼的欄位格式不符財政部規格")
@@ -113,7 +113,7 @@ def build_left_qr(
     text = (f"{invoice_number}{roc_date}{random_code}{sales_amount:08X}{total_amount:08X}"
             f"{buyer_tax_id}{seller_tax_id}{encrypted:<24}")
     if len(text) != LEFT_QR_LENGTH:
-        raise ValueError(f"欄位長度不符規格,組出 {len(text)} 碼")
+        raise ValueError(f"欄位長度不符規格，組出 {len(text)} 碼")
     return text + tail
 
 
@@ -240,11 +240,11 @@ def find_left_qr(texts: list[str]) -> LeftQR | None:
 def _compare(label: str, field_name: str, qr_value: str, model_value: Any,
              normalize=lambda v: str(v).strip()) -> dict[str, Any]:
     if is_blank(model_value):
-        return entry("skip", f"模型沒有讀到{label}(QR 記載 {qr_value})", [field_name])
+        return entry("skip", f"模型沒有讀到{label}（QR 記載 {qr_value}）", [field_name])
     got = normalize(model_value)
     if got == qr_value:
-        return entry("pass", f"QR 記載{label} {qr_value},與辨識結果相符", [field_name])
-    return entry("fail", f"QR 記載{label} {qr_value},辨識結果為 {got}", [field_name])
+        return entry("pass", f"QR 記載{label} {qr_value}，與辨識結果相符", [field_name])
+    return entry("fail", f"QR 記載{label} {qr_value}，辨識結果為 {got}", [field_name])
 
 
 def compare_with_result(qr: LeftQR, result: ExtractionResult) -> dict[str, dict[str, Any]]:
@@ -260,29 +260,29 @@ def compare_with_result(qr: LeftQR, result: ExtractionResult) -> dict[str, dict[
                                   parsed.isoformat() if parsed else result.date)
 
     if qr.total_amount == 0:
-        out[CHECK_QR_TOTAL] = entry("skip", "QR 未記載總計額(境外電商以 00000000 記載)", ["amount"])
+        out[CHECK_QR_TOTAL] = entry("skip", "QR 未記載總計額（境外電商以 00000000 記載）", ["amount"])
     elif result.amount is None:
-        out[CHECK_QR_TOTAL] = entry("skip", f"模型沒有讀到金額(QR 記載總計 {qr.total_amount})",
+        out[CHECK_QR_TOTAL] = entry("skip", f"模型沒有讀到金額（QR 記載總計 {qr.total_amount}）",
                                     ["amount"])
     elif abs(float(result.amount) - qr.total_amount) < 0.005:
-        out[CHECK_QR_TOTAL] = entry("pass", f"QR 記載總計 {qr.total_amount},與辨識金額相符",
+        out[CHECK_QR_TOTAL] = entry("pass", f"QR 記載總計 {qr.total_amount}，與辨識金額相符",
                                     ["amount"])
     else:
         out[CHECK_QR_TOTAL] = entry(
-            "fail", f"QR 記載總計 {qr.total_amount},辨識金額為 {float(result.amount):g}", ["amount"])
+            "fail", f"QR 記載總計 {qr.total_amount}，辨識金額為 {float(result.amount):g}", ["amount"])
 
     out[CHECK_QR_SELLER] = _compare("賣方統編", "fields.seller_tax_id", qr.seller_tax_id,
                                     fields.get("seller_tax_id"))
 
     buyer = fields.get("buyer_tax_id")
     if qr.buyer_tax_id == CONSUMER_TAX_ID and (is_blank(buyer) or str(buyer).strip() == CONSUMER_TAX_ID):
-        out[CHECK_QR_BUYER] = entry("skip", "買方為一般消費者,沒有買方統編可比對",
+        out[CHECK_QR_BUYER] = entry("skip", "買方為一般消費者，沒有買方統編可比對",
                                     ["fields.buyer_tax_id"])
     else:
         out[CHECK_QR_BUYER] = _compare("買方統編", "fields.buyer_tax_id", qr.buyer_tax_id, buyer)
 
     if not qr.random_code.strip():
-        out[CHECK_QR_RANDOM] = entry("skip", "B2B 發票的隨機碼為空白,不比對", ["fields.random_code"])
+        out[CHECK_QR_RANDOM] = entry("skip", "B2B 發票的隨機碼為空白，不比對", ["fields.random_code"])
     else:
         out[CHECK_QR_RANDOM] = _compare("隨機碼", "fields.random_code", qr.random_code,
                                         fields.get("random_code"))
@@ -291,7 +291,7 @@ def compare_with_result(qr: LeftQR, result: ExtractionResult) -> dict[str, dict[
 
 def code39_entry() -> dict[str, Any]:
     """一維條碼:OpenCV 不支援 Code 39,固定 skip(見模組說明)。"""
-    return entry("skip", "OpenCV 的條碼模組不支援 Code 39,未檢查;其中的字軌與隨機碼已由 QR 比對涵蓋",
+    return entry("skip", "OpenCV 的條碼模組不支援 Code 39，未檢查；其中的字軌與隨機碼已由 QR 比對涵蓋",
                  ["fields.period", "invoice_number", "fields.random_code"])
 
 
@@ -300,11 +300,11 @@ def verify_einvoice(result: ExtractionResult, file_path: Path) -> dict[str, dict
     (可能是傳統發票、QR 被裁掉或拍得太糊)。"""
     image = load_image(file_path)
     if image is None:
-        return {CHECK_QR: entry("skip", "讀不到原檔影像,無法解碼 QR", [])}
+        return {CHECK_QR: entry("skip", "讀不到原檔影像，無法解碼 QR", [])}
     texts = decode_qr_texts(image)
     qr = find_left_qr(texts)
     if qr is None:
-        detail = ("有解出 QR,但不是電子發票左側 QR(前 77 碼格式不符)" if texts
+        detail = ("有解出 QR，但不是電子發票左側 QR（前 77 碼格式不符）" if texts
                   else "影像中找不到可解碼的電子發票 QR Code")
         return {CHECK_QR: entry("skip", detail, [])}
     return compare_with_result(qr, result)

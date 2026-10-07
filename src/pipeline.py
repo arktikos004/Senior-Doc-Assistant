@@ -139,7 +139,7 @@ class Pipeline:
             # log 與原因都只寫例外的種類:OSError 的訊息帶來源與目的地的完整路徑,目的地檔名有日期、商家與金額
             log.error("搬移檔案失敗:%s(%s)", file_path.name, error_kind(exc))
             decision.action = "failed"
-            decision.reason += f";搬移失敗({error_kind(exc)})"
+            decision.reason += f"；搬移失敗（{error_kind(exc)}）"
             target = file_path
             if result is not None:
                 result.actions = []   # 失敗的文件不產生行動

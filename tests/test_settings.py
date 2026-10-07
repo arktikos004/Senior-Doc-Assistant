@@ -443,7 +443,7 @@ def test_export_error_and_reason_carry_no_local_paths(base, store, tmp_path):
     target = base.paths.archive / "帳單" / "2026-10" / "20261001_帳單_範例電力公司_1286.jpg"
     as_repr = store.add_document({
         "原始檔案": upload.name, "動作": "failed", "目標路徑": str(upload),
-        "原因": f"自動存檔;搬移失敗:[WinError 32] 檔案正由另一個程序使用。: {str(upload)!r} -> {str(target)!r}",
+        "原因": f"自動存檔；搬移失敗：[WinError 32] 檔案正由另一個程序使用。： {str(upload)!r} -> {str(target)!r}",
         "錯誤": f"UnreadableImageError: 無法讀取影像 {upload.name}:cannot identify image file {str(upload)!r}"})
     plain = store.add_document({
         "原始檔案": "b.pdf", "動作": "failed", "原因": f"找不到 {base.paths.review / 'b.pdf'}",

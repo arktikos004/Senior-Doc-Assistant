@@ -53,7 +53,7 @@ def verify_result(result: ExtractionResult, file_path: Path) -> None:
 
 
 # 核對程式本身出錯時的說明;web 的轉人工原因也認這句(src.verify 是唯一定義處)
-VERIFY_ERROR_SUMMARY = "核對程式發生錯誤,沒有完成核對"
+VERIFY_ERROR_SUMMARY = "核對程式發生錯誤，沒有完成核對"
 
 
 def verify_or_flag(result: ExtractionResult, file_path: Path, *, log_name: str | None = None) -> None:
@@ -96,7 +96,7 @@ def collect_checks(result: ExtractionResult, file_path: Path, today: date) -> di
             found.update(einvoice.verify_einvoice(result, file_path))
         except Exception as exc:  # 解碼器壞掉只是少一項證據,不能讓其他檢查跟著失敗
             log.error("QR 驗證失敗:%s(%s)", log_label(file_path), type(exc).__name__)
-            found[einvoice.CHECK_QR] = c.entry("skip", f"QR 解碼發生錯誤:{type(exc).__name__}", [])
+            found[einvoice.CHECK_QR] = c.entry("skip", f"QR 解碼發生錯誤：{type(exc).__name__}", [])
         found[einvoice.CHECK_CODE39] = einvoice.code39_entry()
         found[c.CHECK_INVOICE_FORMAT] = c.check_invoice_number_format(result.invoice_number)
         found[c.CHECK_SELLER_TAX_ID] = c.check_tax_id(
@@ -179,15 +179,15 @@ def score_verification(
         base = min(base + QR_EXTRA_BONUS * len(extras), QR_MAX)
         matched = [name for name in (einvoice.CHECK_QR_INVOICE, einvoice.CHECK_QR_DATE,
                                      einvoice.CHECK_QR_TOTAL) if active.get(name, {}).get("status") == "pass"]
-        summary = f"QR 相符:{'、'.join(n.removeprefix('QR ') for n in matched)}"
+        summary = f"QR 相符：{'、'.join(n.removeprefix('QR ') for n in matched)}"
     else:
         covered = [f for f in required if f in passed_fields and f not in failed_fields]
         ratio = len(covered) / len(required) if required else 0.0
         ceiling = RULE_FLOOR + RULE_SPAN * ratio
         base = min(float(model_confidence), ceiling)
-        summary = f"規則檢查,必要欄位覆蓋 {len(covered)}/{len(required)}"
+        summary = f"規則檢查，必要欄位覆蓋 {len(covered)}/{len(required)}"
         if model_confidence < ceiling:
-            summary += f",受模型自評 {model_confidence:.2f} 限制"
+            summary += f"，受模型自評 {model_confidence:.2f} 限制"
 
     # 2. 上限
     score = base
@@ -197,11 +197,11 @@ def score_verification(
     other_fails = [name for name in failed if name not in qr_conflicts and name not in required_fails]
     if qr_conflicts:
         score = min(score, CAP_QR_CONFLICT)
-        summary = f"與 QR 不符:{'、'.join(n.removeprefix('QR ') for n in qr_conflicts)}"
+        summary = f"與 QR 不符：{'、'.join(n.removeprefix('QR ') for n in qr_conflicts)}"
     elif required_fails:
         score = min(score, CAP_REQUIRED_FAIL)
-        summary = f"必要欄位檢查不通過:{'、'.join(required_fails)}"
+        summary = f"必要欄位檢查不通過：{'、'.join(required_fails)}"
     elif other_fails:
         score = min(score, CAP_OTHER_FAIL)
-        summary = f"檢查不通過:{'、'.join(other_fails)}"
+        summary = f"檢查不通過：{'、'.join(other_fails)}"
     return round(score, 4), summary

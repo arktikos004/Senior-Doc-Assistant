@@ -5,7 +5,7 @@
 <header class="page-head">
   <div class="page-head__text">
     <h1>首頁</h1>
-    <p class="lede">拍下帳單、藥袋、公文或發票,「{{ BRAND_NAME }}」幫您讀懂、核對,並提醒要做的事。</p>
+    <p class="lede">拍下帳單、藥袋、公文或發票，「{{ BRAND_NAME }}」幫您讀懂、核對，並提醒要做的事。</p>
   </div>
 </header>
 
@@ -17,7 +17,7 @@
       <span class="drop__icon">{{ icon("camera") }}</span>
       <div class="drop__text">
         <h2 id="upload-title">拍照或選一張照片</h2>
-        <p class="muted" id="file-hint">手機會打開相機;電腦請選照片或 PDF,15MB 以內。</p>
+        <p class="muted" id="file-hint">手機會打開相機；電腦請選照片或 PDF，15MB 以內。</p>
       </div>
       <div class="drop__btns">
         <input class="visually-hidden capture__input" id="file" name="file" type="file"
@@ -30,7 +30,7 @@
       </div>
     </div>
     <div class="chosen" data-file-chosen hidden>
-      <p class="chosen__name">{{ icon("check") }}<span>已選好:<span data-file-name></span></span></p>
+      <p class="chosen__name">{{ icon("check") }}<span>已選好：<span data-file-name></span></span></p>
     </div>
     <p class="field-error" id="file-error" role="alert" data-file-error{% if not error %} hidden{% endif %}>
       {{ icon("alert") }}<span data-file-error-text>{{ error or "" }}</span>
@@ -38,7 +38,7 @@
 
     <div class="upload__row">
       <fieldset class="kinds">
-        <legend>這是哪一類?<span>不確定可以不選,AI 會自己判斷</span></legend>
+        <legend>這是哪一類？<span>不確定可以不選，AI 會自己判斷</span></legend>
         <div class="chips">
           {% for c in category_choices %}
           <label class="chip"><input class="chip__input" type="radio" name="category" value="{{ c.value }}"{% if c.value == selected_category %} checked{% endif %} data-kinds="{{ c.kinds }}" data-kinds-legend="{{ c.legend }}">{{ icon(c.icon) }}<span>{{ c.value }}</span></label>
@@ -61,7 +61,7 @@
       </div>
     </div>
     {% if local_only %}
-    <p class="upload__note">{{ icon("lock") }}<span>醫療與保險、身分證明兩類只在這台電腦處理,不會送到雲端。</span></p>
+    <p class="upload__note">{{ icon("lock") }}<span>醫療與保險、身分證明兩類只在這台電腦處理，不會送到雲端。</span></p>
     {% endif %}
     <div class="progress" data-progress role="progressbar" aria-label="辨識進度" hidden><span class="progress__bar"></span></div>
     <p class="status-line" role="status" aria-live="polite" data-upload-status></p>
@@ -88,7 +88,7 @@
     </ul>
   </div>
   {% else %}
-  <p class="empty">還沒有要記得的事。拍下帳單或藥袋,期限和服藥時間會列在這裡。</p>
+  <p class="empty">還沒有要記得的事。拍下帳單或藥袋，期限和服藥時間會列在這裡。</p>
   {% endif %}
 </section>
 
@@ -97,7 +97,7 @@
   {% if recent %}
   {{ doc_table(recent) }}
   {% else %}
-  <p class="empty">還沒有文件。拍下第一張,結果會出現在這裡。</p>
+  <p class="empty">還沒有文件。拍下第一張，結果會出現在這裡。</p>
   {% endif %}
 </section>
 {% endblock %}

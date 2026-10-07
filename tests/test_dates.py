@@ -20,7 +20,7 @@ BASE = date(2026, 8, 3)  # 民國 115 年 8 月 3 日
         "１１５年８月３日",                 # 全形數字
         "中華民國一百一十五年八月三日",     # 國字數字
         "中華民國一一五年八月三日",
-        "發文日期:中華民國115年8月3日",   # 前後有其他文字
+        "發文日期：中華民國115年8月3日",   # 前後有其他文字
         "2026-08-03",
         "2026/8/3",
         "2026年8月3日",
@@ -112,4 +112,4 @@ def test_plausibility_boundaries():
 
 def test_resolve_deadline_rejects_overlong_text():
     # 模型把整段公文抄進 deadline_text 時,寧可不算也不要從中亂抓一個數字
-    assert resolve_deadline("說明:" + "依規定辦理。" * 50 + "收到本函後15日內", BASE) is None
+    assert resolve_deadline("說明：" + "依規定辦理。" * 50 + "收到本函後15日內", BASE) is None

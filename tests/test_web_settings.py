@@ -149,7 +149,7 @@ def test_injected_analyzer_is_always_used(cfg, store, form_client, monkeypatch, 
 def test_privacy_notes_follow_the_current_mode(local_client, store, cloud_keys):
     """安心說明與上傳區的藥袋提示說的是目前的辨識模式,不是 config.yaml 寫的(原則 7)。"""
     html = local_client.get("/").text
-    assert "文件都在這台電腦上辨識,不會送到雲端。" in html and "兩類只在這台電腦處理" not in html
+    assert "文件都在這台電腦上辨識，不會送到雲端。" in html and "兩類只在這台電腦處理" not in html
     store.set_setting(PROVIDER, "workers_ai")
     html = local_client.get("/").text
     assert "其他文件會交給雲端模型讀取" in html and "醫療與保險、身分證明兩類只在這台電腦處理" in html
@@ -183,10 +183,10 @@ def test_settings_page_is_in_the_menu_and_has_four_parts(client):
 
 def test_status_in_local_mode(local_client):
     text = _text(local_client.get("/settings").text)
-    assert "辨識模式 本機(這台電腦) 模型連得上" in text
-    assert "使用的模型 Gemma 4 12B(本機)" in text
-    assert "只在本機處理 藥袋、醫療與保險、身分證明,以及沒選類型的文件" in text
-    assert "自動存檔門檻 驗證信心 80% 以上才自動存檔,其餘交給家人複核" in text
+    assert "辨識模式 本機（這台電腦） 模型連得上" in text
+    assert "使用的模型 Gemma 4 12B（本機）" in text
+    assert "只在本機處理 藥袋、醫療與保險、身分證明，以及沒選類型的文件" in text
+    assert "自動存檔門檻 驗證信心 80% 以上才自動存檔，其餘交給家人複核" in text
     assert f"版本 {web_app.APP_VERSION}" in text
 
 
@@ -201,8 +201,8 @@ def test_status_in_cloud_mode_lists_both_models(local_client, store, cloud_keys)
     store.set_setting(PROVIDER, "workers_ai")
     store.set_setting(THRESHOLD, "0.90")
     text = _text(local_client.get("/settings").text)
-    assert "辨識模式 雲端備援(敏感文件仍在這台電腦) 本機模型連得上" in text
-    assert "使用的模型 Gemma 4 26B(雲端)、Gemma 4 12B(本機)" in text
+    assert "辨識模式 雲端備援（敏感文件仍在這台電腦） 本機模型連得上" in text
+    assert "使用的模型 Gemma 4 26B（雲端）、Gemma 4 12B（本機）" in text
     assert "驗證信心 90% 以上才自動存檔" in text
 
 
@@ -212,8 +212,8 @@ def test_status_in_demo_mode_never_probes_ollama(cfg, form_client):
     html = form_client(create_app(cfg, analyzer=MockAnalyzer(cfg),
                                   ollama_transport=httpx.MockTransport(fail))).get("/settings").text
     text = _text(html)
-    assert "辨識模式 展示模式(使用模擬讀值)" in text and "模型連" not in text
-    assert "只在本機處理 全部文件(展示模式不會把文件送出這台電腦)" in text
+    assert "辨識模式 展示模式（使用模擬讀值）" in text and "模型連" not in text
+    assert "只在本機處理 全部文件（展示模式不會把文件送出這台電腦）" in text
 
 
 # ---- 設定頁:這台裝置的偏好 ---------------------------------------------------------------
@@ -229,7 +229,7 @@ def test_device_preferences_are_disabled_defaults_without_js(client):
     assert [(name, value) for name, value, _ in found] == [
         ("font", "standard"), ("font", "large"), ("font", "xlarge"), ("rate", "slow"), ("rate", "standard")]
     assert [(name, value) for name, value, checked in found if checked] == [("font", "standard"), ("rate", "standard")]
-    assert "<noscript>" in html and "改了馬上生效,不影響家裡其他人的手機。" in html
+    assert "<noscript>" in html and "改了馬上生效，不影響家裡其他人的手機。" in html
 
 
 def test_font_and_rate_values_match_css_js_and_speech():
@@ -255,14 +255,14 @@ _PROVIDER_INPUT = re.compile(r'<input class="chip__input" type="radio" name="pro
 def test_threshold_choices_mark_the_default(client):
     html = client.get("/settings").text
     options = re.findall(r'<option value="([\d.]+)"( selected)?>([^<]+)</option>', html)
-    assert options == [("0.80", " selected", "80%(預設)"), ("0.85", "", "85%"), ("0.90", "", "90%"), ("0.95", "", "95%")]
-    assert "只能調得更嚴,不能低於 80%" in html
+    assert options == [("0.80", " selected", "80%（預設）"), ("0.85", "", "85%"), ("0.90", "", "90%"), ("0.95", "", "95%")]
+    assert "只能調得更嚴，不能低於 80%" in html
 
 
 def test_demo_mode_only_shows_the_mode(client):
     html = client.get("/settings").text
     assert not _PROVIDER_INPUT.search(html) and "data-save-confirm" not in html
-    assert "展示模式<span class=\"muted\">(使用模擬讀值,不能切換)</span>" in html
+    assert "展示模式<span class=\"muted\">（使用模擬讀值，不能切換）</span>" in html
 
 
 def test_cloud_option_is_disabled_without_keys(local_client, no_cloud_keys):
@@ -270,7 +270,7 @@ def test_cloud_option_is_disabled_without_keys(local_client, no_cloud_keys):
     inputs = dict(_PROVIDER_INPUT.findall(html))
     assert inputs["ollama"].strip() == "checked"
     assert "disabled" in inputs["workers_ai"]
-    assert "這台電腦還沒有設定雲端模型的帳號與金鑰,所以不能選" in html
+    assert "這台電腦還沒有設定雲端模型的帳號與金鑰，所以不能選" in html
 
 
 def test_switching_to_cloud_asks_first(local_client, cloud_keys):
@@ -281,8 +281,8 @@ def test_switching_to_cloud_asks_first(local_client, cloud_keys):
     assert "data-needs-confirm" not in inputs["ollama"]
     button = re.search(r"<button[^>]*data-save-confirm[^>]*>", html).group(0)
     assert " hidden disabled" in button
-    assert 'data-confirm-title="確定要開啟雲端備援嗎?"' in button and 'data-confirm-ok="確定開啟"' in button
-    assert 'data-confirm="開啟後,藥袋、醫療與保險、身分證明,以及沒選類型的文件仍只在這台電腦處理;' in button
+    assert 'data-confirm-title="確定要開啟雲端備援嗎？"' in button and 'data-confirm-ok="確定開啟"' in button
+    assert 'data-confirm="開啟後，藥袋、醫療與保險、身分證明，以及沒選類型的文件仍只在這台電腦處理；' in button
     assert 'data-confirm-field="confirm_cloud"' in button      # 按了「確定開啟」,app.js 才補上伺服器要看的確認欄位
     assert "data-confirm" not in re.search(r"<button[^>]*data-save>", html).group(0)
 
@@ -294,7 +294,7 @@ def test_already_in_cloud_mode_needs_no_confirmation(local_client, store, cloud_
 
 
 def test_lock_line_says_medication_bags_stay_local(client):
-    assert "藥袋、醫療與保險、身分證明一律只在這台電腦處理,這一項不能關。" in client.get("/settings").text
+    assert "藥袋、醫療與保險、身分證明一律只在這台電腦處理，這一項不能關。" in client.get("/settings").text
 
 
 # ---- 設定頁:存檔 --------------------------------------------------------------------------
@@ -333,12 +333,12 @@ def test_nothing_changed_is_said_and_not_logged(client, store, flash_text):
 
 def test_cloud_mode_needs_keys(local_client, store, no_cloud_keys):
     r = save(local_client, provider="workers_ai", auto_threshold="0.90")
-    assert r.status_code == 400 and "這台電腦還沒有設定雲端模型的帳號與金鑰,不能開啟雲端備援。" in r.text
+    assert r.status_code == 400 and "這台電腦還沒有設定雲端模型的帳號與金鑰，不能開啟雲端備援。" in r.text
     assert store.get_settings() == {}                          # 一欄有錯,整份不存(門檻也沒存)
     inputs = dict(_PROVIDER_INPUT.findall(r.text))
     assert '<option value="0.90" selected>' in r.text           # 剛剛的選擇留著,改好再送
     assert "checked" in inputs["ollama"]
-    assert "確定要開啟雲端備援嗎?</h1>" not in r.text             # 不能開的不必問要不要開
+    assert "確定要開啟雲端備援嗎？</h1>" not in r.text             # 不能開的不必問要不要開
 
 
 def test_switching_to_cloud_with_keys(local_client, store, cloud_keys):
@@ -358,8 +358,8 @@ def test_switching_to_cloud_without_confirmation_asks_on_a_page(local_client, st
     字和確認框一樣;按「確定開啟」才生效,「先不要」回設定頁。門檻和辨識模式同一張表單,也等確認後一起存。"""
     r = save(local_client, provider="workers_ai", auto_threshold="0.90")
     assert r.status_code == 400 and store.get_settings() == {} and store.list_setting_changes() == []
-    assert "<h1>確定要開啟雲端備援嗎?</h1>" in r.text
-    assert "開啟後,藥袋、醫療與保險、身分證明,以及沒選類型的文件仍只在這台電腦處理;其他文件會交給雲端模型讀取。" in r.text
+    assert "<h1>確定要開啟雲端備援嗎？</h1>" in r.text
+    assert "開啟後，藥袋、醫療與保險、身分證明，以及沒選類型的文件仍只在這台電腦處理；其他文件會交給雲端模型讀取。" in r.text
     assert '<a class="btn btn--secondary btn--lg" href="/settings">先不要</a>' in r.text
     assert "確定開啟</button>" in r.text and "取消" not in _text(r.text)
     assert r.text.index(">先不要</a>") < r.text.index("確定開啟</button>")      # 不做的那一顆在前面
@@ -373,7 +373,7 @@ def test_switching_to_cloud_without_confirmation_asks_on_a_page(local_client, st
 @pytest.mark.parametrize("value", ["", "0", "yes", "on"])
 def test_cloud_confirmation_field_must_be_the_expected_value(local_client, store, cloud_keys, value):
     r = save(local_client, provider="workers_ai", confirm_cloud=value)
-    assert r.status_code == 400 and "<h1>確定要開啟雲端備援嗎?</h1>" in r.text and store.get_settings() == {}
+    assert r.status_code == 400 and "<h1>確定要開啟雲端備援嗎？</h1>" in r.text and store.get_settings() == {}
 
 
 def test_only_switching_to_cloud_needs_confirmation(local_client, store, cloud_keys):
@@ -407,7 +407,7 @@ def test_who_changed_it_is_recorded_but_not_trusted(client, store):
     actors = [c["actor"] for c in store.list_setting_changes()]
     assert actors == [None, None, "family@example.com"]
     html = client.get("/settings").text
-    assert "自動存檔門檻改成 85%<span class=\"log__who\">(family@example.com)</span>" in html
+    assert "自動存檔門檻改成 85%<span class=\"log__who\">（family@example.com）</span>" in html
     assert "<script>alert" not in html
 
 
@@ -462,7 +462,7 @@ def test_export_link_and_delete_button_on_the_page(client):
     html = client.get("/settings").text
     assert '<a class="btn btn--secondary btn--lg" href="/settings/export" download>' in html
     button = re.search(r'<button class="btn btn--danger btn--lg"[^>]*>', html).group(0)
-    assert 'data-confirm-title="確定要刪除全部資料嗎?"' in button and 'data-confirm-ok="確定刪除"' in button
+    assert 'data-confirm-title="確定要刪除全部資料嗎？"' in button and 'data-confirm-ok="確定刪除"' in button
     assert "無法復原" in button and 'data-confirm-field="understood"' in button   # 確認後 app.js 補上的欄位
     # 沒有 JS 就沒有確認框:要先勾「我知道刪除後無法復原」才送得出去
     assert re.search(r'<noscript><label class="check-line"><input type="checkbox" name="understood" value="1" '
@@ -483,8 +483,8 @@ def test_delete_without_confirmation_asks_on_a_page(cfg, client, store, filled):
     records = cfg.paths.logs / "records.jsonl"
     records.write_text("{}\n", encoding="utf-8")
     r = client.post("/settings/delete")
-    assert r.status_code == 400 and "<h1>確定要刪除全部資料嗎?</h1>" in r.text
-    assert "所有文件的照片、讀值、提醒與更正紀錄都會刪除,無法復原;設定與設定變更紀錄會保留。" in r.text
+    assert r.status_code == 400 and "<h1>確定要刪除全部資料嗎？</h1>" in r.text
+    assert "所有文件的照片、讀值、提醒與更正紀錄都會刪除，無法復原；設定與設定變更紀錄會保留。" in r.text
     assert '<a class="btn btn--secondary btn--lg" href="/settings">先不要</a>' in r.text
     assert "確定刪除</button>" in r.text and "取消" not in _text(r.text)
     assert len(store.list_documents()) == 1 and filled.exists() and records.exists()
@@ -518,13 +518,13 @@ def test_delete_all_data(cfg, client, store, filled, tmp_path, flash_text):
     assert store.get_settings()[THRESHOLD] == "0.85"            # 設定與設定紀錄保留,刪除本身也記一筆
     latest = store.list_setting_changes()[0]
     assert latest["key"] == "purged" and latest["actor"] == "family@example.com"
-    assert "刪除全部資料<span class=\"log__who\">(family@example.com)</span>" in client.get("/settings").text
+    assert "刪除全部資料<span class=\"log__who\">（family@example.com）</span>" in client.get("/settings").text
 
 
 def test_delete_says_when_some_files_are_stuck(client, cfg, store, filled, monkeypatch, flash_text):
     monkeypatch.setattr(web_app, "delete_data_files", lambda c: (0, 1))
     r = delete_all(client, follow_redirects=False)
-    assert flash_text(client.get(r.headers["location"]).text) == "資料已刪除,但有些照片檔刪不掉,請管理者檢查資料夾。"
+    assert flash_text(client.get(r.headers["location"]).text) == "資料已刪除，但有些照片檔刪不掉，請管理者檢查資料夾。"
 
 
 def _refuse(*args, **kwargs):
@@ -543,7 +543,7 @@ def test_delete_goes_on_when_the_processing_log_is_stuck(client, cfg, store, fil
     monkeypatch.setattr(web_app, "clear_records", _refuse)
     r = delete_all(client)
     assert r.status_code == 500 and "<h1>有些資料還沒刪掉</h1>" in r.text and "系統出了點問題" not in r.text
-    assert "文件、提醒、更正紀錄與照片都已經刪除,但處理紀錄檔(裡面有讀值)刪不掉" in r.text
+    assert "文件、提醒、更正紀錄與照片都已經刪除，但處理紀錄檔（裡面有讀值）刪不掉" in r.text
     assert "再按一次「刪除全部資料」" in r.text and 'href="/settings"' in r.text and "回設定</a>" in r.text
     assert store.list_documents() == [] and not filled.exists()     # 資料庫與原件照樣刪掉
     assert _purge_logged(store)
@@ -555,7 +555,7 @@ def test_delete_says_when_both_photos_and_the_processing_log_are_stuck(client, s
     monkeypatch.setattr(web_app, "delete_data_files", lambda c: (0, 2))
     r = delete_all(client)
     assert r.status_code == 500 and "<h1>有些資料還沒刪掉</h1>" in r.text
-    assert "文件、提醒與更正紀錄已經刪除,但處理紀錄檔(裡面有讀值)和有些照片檔刪不掉" in r.text
+    assert "文件、提醒與更正紀錄已經刪除，但處理紀錄檔（裡面有讀值）和有些照片檔刪不掉" in r.text
     assert "照片都已經刪除" not in r.text                         # 沒刪掉的不寫成刪了
     assert store.list_documents() == [] and _purge_logged(store)
 
@@ -566,7 +566,7 @@ def test_delete_survives_an_error_while_removing_photos(client, cfg, store, fill
     records.write_text("{}\n", encoding="utf-8")
     monkeypatch.setattr(web_app, "delete_data_files", _refuse)
     r = delete_all(client, follow_redirects=False)
-    assert flash_text(client.get(r.headers["location"]).text) == "資料已刪除,但有些照片檔刪不掉,請管理者檢查資料夾。"
+    assert flash_text(client.get(r.headers["location"]).text) == "資料已刪除，但有些照片檔刪不掉，請管理者檢查資料夾。"
     assert store.list_documents() == [] and not records.exists() and _purge_logged(store)
 
 
@@ -576,7 +576,7 @@ def test_delete_with_the_processing_log_really_open(client, cfg, store, filled, 
     records.write_text('{"AI辨識結果": {"vendor": "示範電力公司"}}\n', encoding="utf-8")
     with records.open("rb"):
         r = delete_all(client)
-    assert r.status_code == 500 and "處理紀錄檔(裡面有讀值)刪不掉" in r.text
+    assert r.status_code == 500 and "處理紀錄檔（裡面有讀值）刪不掉" in r.text
     assert records.exists() and not filled.exists() and _purge_logged(store)
     again = delete_all(client, follow_redirects=False)     # 關掉那個程式後再按一次就補刪
     assert flash_text(client.get(again.headers["location"]).text) == "已刪除全部資料" and not records.exists()

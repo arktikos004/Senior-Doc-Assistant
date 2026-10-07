@@ -153,7 +153,7 @@ def test_workers_ai_accepts_fenced_json_and_legacy_response_shape(cf_env, image_
 
 
 def test_workers_ai_retries_once_when_reply_is_not_json(cf_env, image_file):
-    replies = ["抱歉,我無法確定這張文件的內容。", json.dumps(GOOD_REPLY)]
+    replies = ["抱歉，我無法確定這張文件的內容。", json.dumps(GOOD_REPLY)]
     analyzer, seen = _workers(
         AppConfig(), lambda req, n: httpx.Response(200, json=_chat_completion(replies[n - 1]))
     )

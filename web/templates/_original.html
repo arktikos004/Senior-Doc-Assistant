@@ -12,9 +12,9 @@
   {% elif url %}
   <figure class="original"><img src="{{ url }}" alt="{{ alt }}" loading="lazy" decoding="async"
     {%- if size %} width="{{ size[0] }}" height="{{ size[1] }}"{% endif %}></figure>
-  <a class="btn btn--secondary btn--block" href="{{ url }}" target="_blank" rel="noopener">{{ icon("external") }}放大看原件(另開新頁)</a>
+  <a class="btn btn--secondary btn--block" href="{{ url }}" target="_blank" rel="noopener">{{ icon("external") }}放大看原件（另開新頁）</a>
   {% else %}
-  <p class="empty">原件已經移走或不存在(例如複核後已改名存檔)。</p>
+  <p class="empty">原件已經移走或不存在（例如複核後已改名存檔）。</p>
   {% endif %}
 </aside>
 {% endmacro %}

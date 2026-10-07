@@ -46,7 +46,7 @@ def test_clean_currency(raw, expected):
     [
         '{"doc_type": "發票"}',
         '```json\n{"doc_type": "發票"}\n```',          # 結構化輸出沒擋住的 Markdown 圍欄
-        '以下是結果:{"doc_type": "發票"} 以上。',
+        '以下是結果：{"doc_type": "發票"} 以上。',
         {"doc_type": "發票"},                          # Workers AI 舊格式已是 dict
     ],
 )

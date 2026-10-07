@@ -39,10 +39,10 @@ def test_unsupported_type_shows_common_fields_but_requires_nothing():
 
 
 def test_missing_fields_are_named_in_required_order():
-    assert review_reason({"doc_type": "公文", "fields": {}}) == "有必要的欄位沒讀到(發文日期、主旨),請對照原件補上。"
+    assert review_reason({"doc_type": "公文", "fields": {}}) == "有必要的欄位沒讀到（發文日期、主旨），請對照原件補上。"
 
 
 def test_medication_bag_without_its_list_says_so_in_chinese():
     """藥袋讀不到藥品清單時,原因原本寫出英文鍵名「items」;改用 src.models.FIELD_LABELS 的「藥品清單」。"""
     result = {"doc_type": "藥袋", "date": "2026-09-30", "fields": {}}
-    assert review_reason(result) == "有必要的欄位沒讀到(藥品清單),請對照原件補上。"
+    assert review_reason(result) == "有必要的欄位沒讀到（藥品清單），請對照原件補上。"

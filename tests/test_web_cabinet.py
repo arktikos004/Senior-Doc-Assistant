@@ -17,7 +17,7 @@ from test_web_security import assert_security_headers
 from test_web_static import _problems
 from web.app import create_app
 
-IDENTITY_NOTE = "身分證明類(身分證、健保卡、戶口名簿)拍了會交給家人複核"
+IDENTITY_NOTE = "身分證明類（身分證、健保卡、戶口名簿）拍了會交給家人複核"
 
 
 @pytest.fixture
@@ -95,12 +95,12 @@ def test_empty_category_says_how_to_fill_it(client, filed):
     filed("帳單", "生活契約")
     html = client.get("/cabinet?cat=財產資產").text
     assert _sections(html) == [("財產資產", 0)] and _links(html) == []
-    assert "這一類還沒有文件。上傳時選「財產資產」,文件就會放在這裡。" in html
+    assert "這一類還沒有文件。上傳時選「財產資產」，文件就會放在這裡。" in html
 
 
 def test_empty_cabinet_invites_first_upload(client):
     html = client.get("/cabinet").text
-    assert "還沒有文件。拍下第一張,結果會出現在這裡。" in html
+    assert "還沒有文件。拍下第一張，結果會出現在這裡。" in html
     assert [count for _, count, _ in _cards(html)] == [0, 0, 0, 0]
 
 
@@ -121,7 +121,7 @@ def test_cloud_mode_says_identity_documents_stay_local(tmp_path):
     cfg = AppConfig(paths=paths, provider="workers_ai")
     cfg.ensure_dirs()
     html = TestClient(create_app(cfg, analyzer=MockAnalyzer(cfg))).get("/cabinet").text
-    assert f"{IDENTITY_NOTE},而且只在這台電腦處理。" in html
+    assert f"{IDENTITY_NOTE}，而且只在這台電腦處理。" in html
 
 
 def test_cabinet_page_is_safe_and_only_has_links(client, filed):
@@ -325,7 +325,7 @@ def test_family_confirm_card_names_the_chosen_document(client, store):
     doc_id = _labelled(store, "管理費", "生活契約", {**BILL, "fields": {"due_date": "2099-10-15", "bill_kind": "其他"}},
                        action="review")
     store.add_action(doc_id, "calendar", "confirm", dict(REMINDER))
-    assert '<p class="muted">管理費,' in client.get("/confirm").text
+    assert '<p class="muted">管理費，' in client.get("/confirm").text
 
 
 @pytest.mark.parametrize("label", ["<script>alert(1)</script>", "亂填的名稱", "保單 "])

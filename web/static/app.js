@@ -233,7 +233,7 @@
       if (file && maxBytes && file.size > maxBytes) {
         input.value = "";
         showChosen(null);
-        showError("檔案超過 15MB。請改拍一張,或選較小的檔案。");
+        showError("檔案超過 15MB。請改拍一張，或選較小的檔案。");
         return;
       }
       showChosen(file || null);
@@ -282,7 +282,7 @@
   form.addEventListener("submit", function (event) {
     if (!selectedFile()) {
       event.preventDefault();
-      showError("請先拍照,或選一個檔案。");
+      showError("請先拍照，或選一個檔案。");
       primaryInput.focus();
       return;
     }
@@ -291,7 +291,7 @@
     if (submitLabel) submitLabel.textContent = "辨識中…";
     form.setAttribute("aria-busy", "true");
     progress.hidden = false;
-    status.textContent = "正在辨識,請不要關閉這個畫面。";
+    status.textContent = "正在辨識，請不要關閉這個畫面。";
     // 等候秒數放在非 live 區,避免讀屏每秒唸一次
     var started = Date.now();
     wait.hidden = false;

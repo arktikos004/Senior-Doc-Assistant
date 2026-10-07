@@ -35,7 +35,7 @@ _TYPE_ALIASES: dict[str, dict[str, str]] = {
 _MORE_LABELS: dict[str, str] = {
     "fields.seller_tax_id": "賣方統編", "fields.buyer_tax_id": "買方統編", "fields.random_code": "隨機碼",
     "fields.period": "期別", "fields.bill_kind": "帳單種類", "fields.doc_number": "發文字號",
-    "fields.deadline_text": "期限原文", "fields.deadline": "期限(推算)", "fields.required_actions": "應辦事項",
+    "fields.deadline_text": "期限原文", "fields.deadline": "期限（推算）", "fields.required_actions": "應辦事項",
     "fields.pharmacist_phone": "藥師電話",
 }
 _KINDS: dict[str, FieldKind] = {

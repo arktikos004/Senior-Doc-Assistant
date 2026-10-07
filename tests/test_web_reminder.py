@@ -38,7 +38,7 @@ def test_reminders_needing_family_have_no_toggle(raw):
 
 def test_bill_deadline_says_it_was_read_by_ai():
     """期限是 AI 讀的,提醒旁邊要請長輩對照帳單;公文維持自己的推算說明。"""
-    assert _answer(BILL)["footer"] == "期限由 AI 讀取,請對照帳單。"
+    assert _answer(BILL)["footer"] == "期限由 AI 讀取，請對照帳單。"
     assert _answer(dict(BILL, fields={"bill_kind": "電費"}, amount=None))["footer"] == ""   # 沒讀到期限就不說
     assert "以公文原文為準" in _answer(LETTER)["footer"]
 

@@ -39,7 +39,7 @@ def _describe_score(result: ExtractionResult) -> str:
         basis = result.verification.get("_summary") if isinstance(result.verification, dict) else None
         label = f"驗證信心 {score:.2f}"
         return f"{label}({basis})" if basis else label
-    return f"模型自評信心 {score:.2f}(未經驗證)"
+    return f"模型自評信心 {score:.2f}（未經驗證）"
 
 
 def decide(result: ExtractionResult | None, cfg: AppConfig) -> Decision:
@@ -58,24 +58,24 @@ def decide(result: ExtractionResult | None, cfg: AppConfig) -> Decision:
     if result.doc_type not in cfg.target_doc_types:
         return Decision(
             action="review",
-            reason=f"文件類型「{result.doc_type}」不在目標範圍,需人工判斷",
+            reason=f"文件類型「{result.doc_type}」不在目標範圍，需人工判斷",
         )
 
     score, described = effective_score(result), _describe_score(result)
     if score < cfg.auto_threshold:
         return Decision(
             action="review",
-            reason=f"{described}低於門檻 {cfg.auto_threshold:.2f},需人工確認",
+            reason=f"{described}低於門檻 {cfg.auto_threshold:.2f}，需人工確認",
         )
 
     missing = _missing_required(result)
     if missing:
         return Decision(
             action="review",
-            reason=f"缺少必要欄位:{'、'.join(missing)},需人工補齊",
+            reason=f"缺少必要欄位：{'、'.join(missing)}，需人工補齊",
         )
 
-    return Decision(action="archive", reason=f"{described}達標,自動歸檔")
+    return Decision(action="archive", reason=f"{described}達標，自動歸檔")
 
 
 def decide_manual(result: ExtractionResult | None, cfg: AppConfig, label: str | None = None) -> Decision:

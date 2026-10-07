@@ -66,27 +66,27 @@ def test_invoice_answer_is_a_summary_not_a_todo():
 
 def test_failed_verification_raises_alert():
     result = dict(INVOICE, verification={"QR 總計額": {"status": "fail", "detail": "金額不同", "fields": ["amount"]}})
-    assert _answer(result)["alert"] == "有 1 項不符,請對照原件"
+    assert _answer(result)["alert"] == "有 1 項不符，請對照原件"
     rule_only = dict(INVOICE, verification={"日期合理性": {"status": "fail", "detail": "日期太舊", "fields": ["date"]}})
-    assert _answer(rule_only)["alert"] == "有 1 項沒通過,請對照原件"     # 規則沒過不說成「不符」
+    assert _answer(rule_only)["alert"] == "有 1 項沒通過，請對照原件"     # 規則沒過不說成「不符」
 
 
 def test_review_reason_when_verifier_crashed():
     """核對程式出錯而轉人工時照實說,不說成「AI 沒把握」。"""
     from src.verify import VERIFY_ERROR_SUMMARY
     crashed = dict(INVOICE, verification={"_summary": VERIFY_ERROR_SUMMARY}, verified_confidence=0.0)
-    assert review_reason(crashed) == "這次的核對沒有完成(核對程式出錯),請對照原件確認。"
+    assert review_reason(crashed) == "這次的核對沒有完成（核對程式出錯），請對照原件確認。"
 
 
 def test_review_reason_is_plain_language():
     """轉人工原因用白話,不出現「驗證信心 0.10、門檻 0.80」;順序比照 src/decision.py。"""
     qr = dict(INVOICE, verification={"QR 總計額": {"status": "fail", "fields": ["amount"]},
                                      "QR 開立日期": {"status": "fail", "fields": ["date"]}})
-    assert review_reason(qr) == "讀到的金額、日期和發票上的 QR Code 不一樣,請對照原件確認。"
+    assert review_reason(qr) == "讀到的金額、日期和發票上的 QR Code 不一樣，請對照原件確認。"
     rule = dict(INVOICE, verification={"日期合理性": {"status": "fail", "fields": ["date"]}})
-    assert review_reason(rule) == "有 1 項檢查沒通過,請對照原件確認。"
+    assert review_reason(rule) == "有 1 項檢查沒通過，請對照原件確認。"
     missing = {"doc_type": "帳單", "amount": 1854.0, "fields": {}, "unreadable": []}
-    assert review_reason(missing) == "有必要的欄位沒讀到(繳費期限),請對照原件補上。"
+    assert review_reason(missing) == "有必要的欄位沒讀到（繳費期限），請對照原件補上。"
     assert "沒有把握" in review_reason(INVOICE)                    # 欄位齊全、只是分數不夠
     assert "不在支援範圍" in review_reason({"doc_type": "其他"})
     for text in (review_reason(qr), review_reason(rule), review_reason(missing), review_reason(INVOICE)):
@@ -101,7 +101,7 @@ def _docs_and_actions():
         {"id": 1, "document_id": 1, "kind": "calendar", "tier": "auto", "status": "pending",
          "payload": {"title": "繳電費", "date": "2099-10-15"}},
         {"id": 2, "document_id": 2, "kind": "calendar", "tier": "auto", "status": "pending",
-         "payload": {"title": "公文期限:請補繳文件", "date": "2099-10-10"}},
+         "payload": {"title": "公文期限：請補繳文件", "date": "2099-10-10"}},
         {"id": 3, "document_id": 1, "kind": "calendar", "tier": "auto", "status": "pending",
          "payload": {"title": "去年的帳單", "date": "2025-10-15"}},                  # 已過期
         {"id": 4, "document_id": 1, "kind": "calendar", "tier": "auto", "status": "rejected",
@@ -117,11 +117,11 @@ def _docs_and_actions():
 def test_reminders_order_waiting_then_upcoming_then_alerts_then_done():
     docs, actions = _docs_and_actions()
     rows = reminder_rows(docs, actions, today=date(2026, 9, 30))
-    assert [r["title"] for r in rows] == ["示範診所的服藥時間表", "公文期限:請補繳文件", "繳電費", "發票", "已確認的服藥表"]
+    assert [r["title"] for r in rows] == ["示範診所的服藥時間表", "公文期限：請補繳文件", "繳電費", "發票", "已確認的服藥表"]
     waiting, letter, bill, alert, done = rows
     assert waiting["href"] == "/confirm" and waiting["state"] == "等待家人確認"
-    assert (bill["month"], bill["day"], bill["sub"], bill["amount"]) == ("10月", "15", "示範電力公司,10月15日前", "1,854 元")
-    assert letter["sub"] == "示範區公所,10月10日前" and letter["amount"] == ""   # 公文的金額欄不接到提醒上
+    assert (bill["month"], bill["day"], bill["sub"], bill["amount"]) == ("10月", "15", "示範電力公司，10月15日前", "1,854 元")
+    assert letter["sub"] == "示範區公所，10月10日前" and letter["amount"] == ""   # 公文的金額欄不接到提醒上
     assert alert["alert"] is True and alert["state"] == "核對不符"           # 清單欄位窄,只放短狀態
     assert done["sub"] == "晚、需要時"
 

@@ -21,7 +21,7 @@
 {% if m.note or m.extra %}
 <div class="med-info">
   {% if m.note %}<p>{{ m.note }}</p>{% endif %}
-  {% for key, value in m.extra %}<p>{{ key }}:{{ value }}</p>{% endfor %}
+  {% for key, value in m.extra %}<p>{{ key }}：{{ value }}</p>{% endfor %}
 </div>
 {% endif %}
 {% if on_card %}

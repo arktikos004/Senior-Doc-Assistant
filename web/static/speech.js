@@ -92,8 +92,8 @@
     if (!voice) {
       if (status) {
         status.textContent = voices.length
-          ? "這台裝置沒有內建的中文語音。為了不把文件內容傳到網路上,這裡不朗讀。"
-          : "語音還在準備,請過幾秒再按一次。";
+          ? "這台裝置沒有內建的中文語音。為了不把文件內容傳到網路上，這裡不朗讀。"
+          : "語音還在準備，請過幾秒再按一次。";
       }
       return;
     }
@@ -111,7 +111,7 @@
       if (i === parts.length - 1) {
         u.onend = function () { if (speaking) setIdle("朗讀結束"); };
       }
-      u.onerror = function () { if (speaking) setIdle("朗讀中斷了,可以再按一次"); };
+      u.onerror = function () { if (speaking) setIdle("朗讀中斷了，可以再按一次"); };
       synth.speak(u);
     });
   }

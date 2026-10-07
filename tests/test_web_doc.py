@@ -50,7 +50,7 @@ def test_result_page_shows_summary_fields_and_speak_button(client, add_doc):
     doc_id = add_doc(BILL)
     html = client.get(f"/doc/{doc_id}").text
     assert "AI 白話解說" in html
-    assert "這是電費帳單,要在10月15日前繳1854元。" in html
+    assert "這是電費帳單，要在10月15日前繳1854元。" in html
     assert "1,854 元" in html
     assert "2099年10月15日" in html                  # 繳費期限用長輩看得懂的寫法
     assert "繳費期限" in html and "示範電力公司" in html
@@ -113,7 +113,7 @@ def test_rule_checks_are_not_shown_as_proven(client, add_doc):
 
 def test_qr_match_is_the_only_thing_called_a_match(client, add_doc):
     result = dict(BILL, verification={
-        "QR 總計額": {"status": "pass", "detail": "QR 記載總計 1854,與辨識金額相符", "fields": ["amount"]},
+        "QR 總計額": {"status": "pass", "detail": "QR 記載總計 1854，與辨識金額相符", "fields": ["amount"]},
         "日期合理性": {"status": "pass", "detail": "日期合理", "fields": ["date"]},
     }, verified_confidence=0.9)
     html = client.get(f"/doc/{add_doc(result)}").text
@@ -140,7 +140,7 @@ def test_medication_doc_always_shows_disclaimer(client, add_doc):
               "fields": {"items": [{"name": "示範藥甲", "dose_text": "1顆", "frequency_text": "睡前",
                                     "timing": ["睡前"], "prn": False, "days": 7}]}}
     html = client.get(f"/doc/{add_doc(result)}").text
-    assert "本系統只協助閱讀,不提供醫療建議;用藥請依醫師與藥師指示。" in html
+    assert "本系統只協助閱讀，不提供醫療建議；用藥請依醫師與藥師指示。" in html
     assert "示範藥甲" in html and "7 天" in html
     assert "醫療院所" in html                         # 藥袋的 vendor 顯示為醫療院所
 
@@ -149,7 +149,7 @@ def test_review_doc_explains_in_plain_words(client, add_doc):
     """轉人工的文件:狀態寫「等待複核」,原因用白話,不出現門檻數字。"""
     result = dict(BILL, verification={"QR 總計額": {"status": "fail", "detail": "不同", "fields": ["amount"]}},
                   verified_confidence=0.1)
-    html = client.get(f"/doc/{add_doc(result, action='review', reason='驗證信心 0.10(與 QR 不符:總計額)低於門檻 0.80,需人工確認')}").text
+    html = client.get(f"/doc/{add_doc(result, action='review', reason='驗證信心 0.10（與 QR 不符：總計額）低於門檻 0.80，需人工確認')}").text
     assert "等待複核" in html and "讀到的金額和發票上的 QR Code 不一樣" in html
     assert "低於門檻" not in html
     assert "已存檔" in client.get(f"/doc/{add_doc(BILL)}").text
@@ -175,8 +175,8 @@ def test_unreadable_accepts_both_field_spellings(spelling):
     """欄位名寫 'due_date' 或 'fields.due_date' 都是同一個欄位,讀不清與核對結果用同一條規則。"""
     result = {"doc_type": "帳單", "amount": 1854.0, "fields": {"due_date": "2099-10-15"}, "unreadable": [spelling]}
     rows = {r["key"]: r for r in field_rows(result)}
-    assert rows["fields.due_date"]["missing"] == "讀不清楚,請看原件" and rows["amount"]["missing"] == ""
-    assert review_reason(result) == "有必要的欄位沒讀到(繳費期限),請對照原件補上。"
+    assert rows["fields.due_date"]["missing"] == "讀不清楚，請看原件" and rows["amount"]["missing"] == ""
+    assert review_reason(result) == "有必要的欄位沒讀到（繳費期限），請對照原件補上。"
 
 
 def test_is_pdf_is_the_single_rule_for_originals(tmp_path):
@@ -372,22 +372,22 @@ def test_w1c_calendar_description_lines_are_separate(client, store, add_doc):
     doc_id = add_doc(BILL)
     store.add_action(doc_id, "calendar", "auto", {
         "title": "繳電費", "date": "2099-10-15",
-        "description": "電費 1,854 元\n<b>繳費期限</b> 2099-10-15\n本系統只提醒,不會替您付款或回覆。",
+        "description": "電費 1,854 元\n<b>繳費期限</b> 2099-10-15\n本系統只提醒，不會替您付款或回覆。",
         "remind_days_before": 3,
     })
     html = client.get(f"/doc/{doc_id}").text
     assert '<p class="todo-item__line">電費 1,854 元</p>' in html
-    assert '<p class="todo-item__line">本系統只提醒,不會替您付款或回覆。</p>' in html
+    assert '<p class="todo-item__line">本系統只提醒，不會替您付款或回覆。</p>' in html
     assert "&lt;b&gt;繳費期限&lt;/b&gt;" in html
 
 
 def test_official_letter_shows_computed_and_original_deadline(client, add_doc):
     html = client.get(f"/doc/{add_doc(LETTER)}").text
-    assert "期限(推算)" in html and "2099年10月10日" in html
+    assert "期限（推算）" in html and "2099年10月10日" in html
     assert "期限原文" in html and "收到本函後15日內" in html
     assert "發文機關" in html and "示範區公所" in html
     assert "<li>補繳身分證影本</li>" in html
-    assert "主旨:請補繳文件" in html                # 沒有 AI 解說時的重點整理
+    assert "主旨：請補繳文件" in html                # 沒有 AI 解說時的重點整理
 
 
 def test_medication_action_on_result_page_uses_slots(client, store, add_doc):
@@ -395,7 +395,7 @@ def test_medication_action_on_result_page_uses_slots(client, store, add_doc):
             "timing": [], "prn": False, "days": 7}
     payload = {"title": "示範診所的服藥時間表", "hospital": "示範診所", "slots": [],
                "prn": [], "unscheduled": [item], "items": [item],
-               "disclaimer": "本系統只協助閱讀,不提供醫療建議;用藥請依醫師與藥師指示。"}
+               "disclaimer": "本系統只協助閱讀，不提供醫療建議；用藥請依醫師與藥師指示。"}
     result = {"doc_type": "藥袋", "date": "2026-09-30", "vendor": "示範診所", "plain_summary": "",
               "fields": {"items": [item]}}
     doc_id = add_doc(result)
@@ -403,4 +403,4 @@ def test_medication_action_on_result_page_uses_slots(client, store, add_doc):
     html = client.get(f"/doc/{doc_id}").text
     assert "等待家人確認" in html and "示範診所的服藥時間表" in html
     assert "時段請依藥袋或詢問藥師" in html
-    assert html.count("本系統只協助閱讀,不提供醫療建議") == 1   # 結果頁只放一次固定聲明
+    assert html.count("本系統只協助閱讀，不提供醫療建議") == 1   # 結果頁只放一次固定聲明

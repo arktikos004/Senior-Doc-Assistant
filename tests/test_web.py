@@ -72,7 +72,7 @@ def test_review_shows_verified_confidence_not_self_rating(client, review_doc):
     listing = client.get("/review").text
     assert "驗證信心" in listing and "10%" in listing and "沒有可核對的項目" in listing
     assert "0.86" not in listing and "AI 自評" not in listing
-    assert "有必要的欄位沒讀到(日期、金額)" in listing and "低於門檻" not in listing
+    assert "有必要的欄位沒讀到（日期、金額）" in listing and "低於門檻" not in listing
     assert "a.png" not in listing and "上傳" in listing            # 列上傳時間,不列系統產生的檔名
 
 

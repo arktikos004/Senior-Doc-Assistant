@@ -37,7 +37,7 @@ ALWAYS_LOCAL = "藥袋"                          # 特種個資:不論設定,一
 
 MSG_DEMO = "展示模式不能切換辨識模式。"
 MSG_PROVIDER = "辨識模式只能選「只用這台電腦」或「可以用雲端備援」。"
-MSG_NO_CLOUD_KEY = "這台電腦還沒有設定雲端模型的帳號與金鑰,不能開啟雲端備援。"
+MSG_NO_CLOUD_KEY = "這台電腦還沒有設定雲端模型的帳號與金鑰，不能開啟雲端備援。"
 MSG_THRESHOLD_LOW = "自動存檔門檻不能低於 80%。"
 MSG_THRESHOLD = "自動存檔門檻要在 80% 到 98% 之間。"
 
@@ -250,7 +250,7 @@ def export_records(store: Store, cfg: AppConfig, *, version: str) -> dict[str, A
     return {
         "exported_at": datetime.now().isoformat(timespec="seconds"),
         "version": version,
-        "note": "看有匯出的全部紀錄:文件與讀值、提醒與服藥時間表、更正、設定變更。不含照片與 PDF 原件。",
+        "note": "看有匯出的全部紀錄：文件與讀值、提醒與服藥時間表、更正、設定變更。不含照片與 PDF 原件。",
         "documents": documents,
         "actions": store.list_actions(),
         "corrections": store.list_corrections(verified_only=False, limit=_ALL_ROWS),

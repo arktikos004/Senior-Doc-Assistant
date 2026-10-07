@@ -70,7 +70,7 @@ DOC_TYPE_CHOICES: tuple[tuple[str, str], ...] = (
 )
 TYPE_VALUES: tuple[str, ...] = tuple(v for v, _ in DOC_TYPE_CHOICES if v != UNSURE and v in DOC_TYPES)
 
-MEDICATION_DISCLAIMER = "本系統只協助閱讀,不提供醫療建議;用藥請依醫師與藥師指示。"
+MEDICATION_DISCLAIMER = "本系統只協助閱讀，不提供醫療建議；用藥請依醫師與藥師指示。"
 
 # 產品名稱集中在這裡(10/1 定案;舊的英文名稱撞名,已棄用)。短名稱「看有」= 台語 khuànn-ū「看得懂」,
 # 副標說明用途;正式題目「結合視覺語言模型與分層核對機制之高齡家庭文書輔助系統」只用在文件
@@ -325,7 +325,7 @@ def field_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
         row: dict[str, Any] = {"key": key, "label": spec.label,
                                "value": "", "value_list": None, "missing": ""}
         if is_unreadable:
-            row["missing"] = "讀不清楚,請看原件"
+            row["missing"] = "讀不清楚，請看原件"
         elif _is_empty(value):
             row["missing"] = "沒有讀到"
         elif spec.kind == "amount":
@@ -368,7 +368,7 @@ def med_item(raw: Any) -> dict[str, Any]:
         timing = [t for t in re.split(r"[、,,/\s]+", timing) if t]
     days = raw.get("days")
     return {
-        "name": _plain(raw.get("name") or raw.get("drug") or "(藥名讀不清)"),
+        "name": _plain(raw.get("name") or raw.get("drug") or "（藥名讀不清）"),
         "dose_text": _plain(raw.get("dose_text") or ""),
         "frequency_text": _plain(raw.get("frequency_text") or ""),
         "timing": [_timing_label(t) for t in timing if not _is_empty(t)],
@@ -464,7 +464,7 @@ def medication_view(payload: dict[str, Any]) -> dict[str, Any]:
                        ("pharmacist_phone", "藥師電話")):
         if not _is_empty(payload.get(key)):
             value = fmt_date(payload[key]) if key == "dispensed_date" else _plain(payload[key])
-            info.append(f"{label}:{value}")
+            info.append(f"{label}：{value}")
     ordered = [(t, slots.pop(t)) for t in TIMINGS if t in slots] + list(slots.items())
     extra = [
         (str(k), _plain(v)) for k, v in payload.items()
@@ -511,7 +511,7 @@ def verification_view(result: dict[str, Any]) -> dict[str, Any]:
     if not checks:
         overall, text = "none", "未核對"
     elif counts["fail"]:
-        overall, text = "fail", f"有 {counts['fail']} 項{'不符' if conflict else '沒通過'},請對照原件"
+        overall, text = "fail", f"有 {counts['fail']} 項{'不符' if conflict else '沒通過'}，請對照原件"
     elif matched:
         overall, text = "pass", f"QR Code 相符 {matched} 項"
     elif counts["pass"]:
@@ -520,15 +520,15 @@ def verification_view(result: dict[str, Any]) -> dict[str, Any]:
         overall, text = "skip", "這份文件沒有能自動核對的項目"
 
     if evidence:
-        note = "核對由程式比對發票上的 QR Code,並檢查格式與檢查碼,不是 AI 自己打分數。"
+        note = "核對由程式比對發票上的 QR Code，並檢查格式與檢查碼，不是 AI 自己打分數。"
     elif counts["pass"] or counts["fail"]:
-        note = "這份文件沒有 QR Code 可以比對,程式只檢查格式與合理性,不能證明讀對,請對照原件。"
+        note = "這份文件沒有 QR Code 可以比對，程式只檢查格式與合理性，不能證明讀對，請對照原件。"
     else:
         note = ""
     vc = result.get("verified_confidence")
     confidence_text = ""
     if _is_number(vc):
-        confidence_text = f"驗證信心 {vc * 100:.0f}%(依核對結果計算,不是 AI 自評)"
+        confidence_text = f"驗證信心 {vc * 100:.0f}%（依核對結果計算，不是 AI 自評）"
     return {"checks": checks, "counts": counts, "overall": overall,
             "overall_text": text, "overall_icon": _STATUS_ICON.get(overall, "dash"),
             "conflict": conflict, "evidence": evidence, "note": note,
@@ -542,7 +542,7 @@ _KIND_ICONS = {CALENDAR: "calendar", MEDICATION_SCHEDULE: "pill"}
 
 # 取消/恢復提醒(F8)的表單值;按鈕文字與圖示依提醒目前是否生效決定
 REMINDER_CANCEL, REMINDER_RESTORE = "cancel", "restore"
-BILL_DEADLINE_NOTE = "期限由 AI 讀取,請對照帳單。"   # 自動提醒的期限沒有人看過
+BILL_DEADLINE_NOTE = "期限由 AI 讀取，請對照帳單。"   # 自動提醒的期限沒有人看過
 
 
 def is_auto_reminder(action: dict[str, Any]) -> bool:
@@ -583,7 +583,7 @@ def action_view(action: dict[str, Any]) -> dict[str, Any]:
         # 提醒只列在網頁上(2026-10-01 拿掉 .ics):沒有東西會提前通知,所以不顯示 remind_days_before
         view["title"] = _plain(payload.get("title") or "期限提醒")
         if payload.get("date"):
-            view["lines"].append(f"日期:{fmt_date(payload['date'])}")
+            view["lines"].append(f"日期：{fmt_date(payload['date'])}")
         # description 是多行文字(W1-C:最後一行是「只提醒,不會替您付款或回覆」),逐行顯示
         for line in str(payload.get("description") or "").splitlines():
             if line.strip():
@@ -629,22 +629,22 @@ def review_reason(result: dict[str, Any] | None) -> str:
     doc_type = result.get("doc_type") or ""
     required = required_specs(doc_type)
     if not required:   # 支援的類型都有必要欄位(REQUIRED_FIELDS),沒有就是不支援
-        return "這類文件不在支援範圍(發票、收據、帳單、公文、藥袋),請對照原件確認。"
+        return "這類文件不在支援範圍（發票、收據、帳單、公文、藥袋），請對照原件確認。"
     verification = result.get("verification")
     if isinstance(verification, dict) and verification.get("_summary") == VERIFY_ERROR_SUMMARY:
-        return "這次的核對沒有完成(核對程式出錯),請對照原件確認。"
+        return "這次的核對沒有完成（核對程式出錯），請對照原件確認。"
     failed = [name for name, check in _checks(result.get("verification")) if check.get("status") == "fail"]
     conflicts = [name for name in failed if name in INDEPENDENT_CHECKS]
     if conflicts:
         words = "、".join(dict.fromkeys(_QR_PLAIN.get(n, n.removeprefix("QR ")) for n in conflicts))
-        return f"讀到的{words}和發票上的 QR Code 不一樣,請對照原件確認。"
+        return f"讀到的{words}和發票上的 QR Code 不一樣，請對照原件確認。"
     if failed:
-        return f"有 {len(failed)} 項檢查沒通過,請對照原件確認。"
+        return f"有 {len(failed)} 項檢查沒通過，請對照原件確認。"
     missing = [spec.label for spec in required
                if _is_empty(_field_value(result, spec.key)) or _is_unreadable(spec.key, result.get("unreadable"))]
     if missing:
-        return f"有必要的欄位沒讀到({'、'.join(missing)}),請對照原件補上。"
-    return "AI 對這份文件的讀值沒有把握,請對照原件確認。"
+        return f"有必要的欄位沒讀到（{'、'.join(missing)}），請對照原件補上。"
+    return "AI 對這份文件的讀值沒有把握，請對照原件確認。"
 
 
 def doc_review_reason(doc: dict[str, Any]) -> str:
@@ -666,15 +666,15 @@ def fallback_summary(result: dict[str, Any]) -> str:
     if doc_type == "藥袋":
         names = [it["name"] for it in med_items(result)]
         if names:
-            parts.append(f"上面有 {len(names)} 種藥:{'、'.join(names)}。")
+            parts.append(f"上面有 {len(names)} 種藥：{'、'.join(names)}。")
         return "".join(parts)
     def label(key: str) -> str:
         return field_spec(doc_type, key).label
 
     if doc_type == "公文" and fields.get("subject"):
-        parts.append(f"{label('fields.subject')}:{_plain(fields['subject'])}。")
+        parts.append(f"{label('fields.subject')}：{_plain(fields['subject'])}。")
     if result.get("vendor"):
-        parts.append(f"{label('vendor')}:{result['vendor']}。")
+        parts.append(f"{label('vendor')}：{result['vendor']}。")
     if _amount_text(result):
         parts.append(f"{label('amount')} {_amount_text(result)}。")
     if fields.get("due_date"):
@@ -810,7 +810,7 @@ def answer_view(result: dict[str, Any], actions: list[dict[str, Any]],
         if deadline:
             rows.append(_fact("辦理期限", f"{deadline}前", tone="due"))
             if fields.get("deadline_text"):
-                ans["footer"] = f"依公文上的「{_plain(fields['deadline_text'])}」推算,期限以公文原文為準。"
+                ans["footer"] = f"依公文上的「{_plain(fields['deadline_text'])}」推算，期限以公文原文為準。"
         if result.get("vendor") and rows:
             rows.append(_fact("發文機關", _plain(result["vendor"])))
         if todos:
@@ -827,7 +827,7 @@ def answer_view(result: dict[str, Any], actions: list[dict[str, Any]],
         medication = (primary or {}).get("medication") or medication_view({"items": fields.get("items") or []})
         if medication["slots"] or medication["prn"] or medication["unscheduled"]:
             ans.update(tone="todo", header="服藥時間表", medication=medication,
-                       footer="照藥袋上印的字整理,請對照藥袋。")
+                       footer="照藥袋上印的字整理，請對照藥袋。")
         else:
             rows.extend(_fact_rows(result, "藥袋"))
     else:
@@ -863,15 +863,15 @@ def trust_notes(provider: str, local_only: tuple[str, ...] | list[str]) -> list[
     sensitive = "、".join(local_only) or "敏感文件"
     if provider == "workers_ai":
         # 敏感大類(src.models.SENSITIVE_CATEGORIES)不論類型都在本機,和首頁上傳區的說明同一句話
-        privacy = f"醫療與保險、身分證明兩類,以及{sensitive}和沒選類型的文件只在這台電腦上辨識;其他文件會交給雲端模型讀取。"
+        privacy = f"醫療與保險、身分證明兩類，以及{sensitive}和沒選類型的文件只在這台電腦上辨識；其他文件會交給雲端模型讀取。"
     elif provider == "mock":
-        privacy = "展示模式:使用模擬讀值,文件不會送出這台電腦。"
+        privacy = "展示模式：使用模擬讀值，文件不會送出這台電腦。"
     else:
-        privacy = "文件都在這台電腦上辨識,不會送到雲端。"
+        privacy = "文件都在這台電腦上辨識，不會送到雲端。"
     return [
         ("lock", f"{privacy}照片與結果存在這台電腦。"),
-        ("shield", "只協助閱讀:只提醒,不會替您付款、回覆或做醫療判斷。"),
-        ("check", "核對結果由程式依規則檢查,不是 AI 自己打分數。"),
+        ("shield", "只協助閱讀：只提醒，不會替您付款、回覆或做醫療判斷。"),
+        ("check", "核對結果由程式依規則檢查，不是 AI 自己打分數。"),
     ]
 
 
@@ -908,12 +908,12 @@ def reminder_rows(docs: list[dict[str, Any]], actions: list[dict[str, Any]], tod
                 continue
             parts = date_parts(str(day)) or ("", "")
             row.update(month=parts[0], day=parts[1], sort=due.isoformat(),
-                       sub=",".join(x for x in (vendor, f"{parts[0]}{parts[1]}日前") if x),
+                       sub="，".join(x for x in (vendor, f"{parts[0]}{parts[1]}日前") if x),
                        amount=_amount_text(result) if result.get("doc_type") == "帳單" else "")
         elif v["kind"] == MEDICATION_SCHEDULE and v["status"] == "done":
             m = v["medication"] or {}
             slots = [s for s, _ in m.get("slots", [])] + (["需要時"] if m.get("prn") else [])
-            row["sub"] = ",".join(x for x in (vendor, "、".join(slots)) if x)
+            row["sub"] = "，".join(x for x in (vendor, "、".join(slots)) if x)
             done.append(row)
             continue
         if v["state_class"] == "wait":
@@ -938,10 +938,10 @@ def reminder_rows(docs: list[dict[str, Any]], actions: list[dict[str, Any]], tod
 def _summary_note(summary_is_ai: bool, corrected: bool) -> str:
     """白話解說下面那句說明:寫清楚這段是誰整理的(原則 7)。家人更正後不留 AI 的舊解說,改由系統依欄位整理。"""
     if summary_is_ai:
-        return "這段是 AI 讀完整理的,重要的日期與金額請對照原件。"
+        return "這段是 AI 讀完整理的，重要的日期與金額請對照原件。"
     if corrected:
-        return "家人更正過讀值,這段是系統依更正後的欄位整理的。"
-    return "AI 沒有提供解說,這段是系統依讀到的欄位整理的。"
+        return "家人更正過讀值，這段是系統依更正後的欄位整理的。"
+    return "AI 沒有提供解說，這段是系統依讀到的欄位整理的。"
 
 
 def doc_view(doc: dict[str, Any], *, file_url: str | None, hint: str | None = None,
@@ -992,7 +992,7 @@ def review_row(doc: dict[str, Any]) -> dict[str, Any]:
         "href": f"/doc/{doc['id']}/correct",
         "title": doc_title(doc),
         "icon": doc_icon(doc),
-        "reason": doc_review_reason(doc) if result else (doc.get("reason") or "(沒有說明)"),
+        "reason": doc_review_reason(doc) if result else (doc.get("reason") or "（沒有說明）"),
         "when": fmt_when(doc.get("created_at")),
         "confidence": vc if _is_number(vc) else None,
     }
@@ -1018,7 +1018,7 @@ ASSIGNABLE_CATEGORIES: tuple[str, ...] = (*CATEGORIES, UNCATEGORIZED)   # 家人
 # 文件櫃卡片上的例子:說明這一類放什麼,不代表都能自動判讀(身分證明類交給家人確認)
 CATEGORY_EXAMPLES: dict[str, str] = {"身分證明": "身分證、健保卡、戶口名簿", "財產資產": "發票、收據、稅單",
                                      "醫療與保險": "藥袋、保單、醫療收據", "生活契約": "水電瓦斯、電信、租約"}
-KINDS_LEGEND = "是哪一種文件?"   # 上傳第二列沒選大類(或沒有 JS)時的標題
+KINDS_LEGEND = "是哪一種文件？"   # 上傳第二列沒選大類(或沒有 JS)時的標題
 
 
 def id_note(cloud: bool, examples: bool = False) -> str:
@@ -1027,8 +1027,8 @@ def id_note(cloud: bool, examples: bool = False) -> str:
     「只在這台電腦處理」只在雲端模式寫:本機模式所有文件都在這台電腦,特別寫出來反而像別的文件會送出去
     (同首頁藥袋提示的規則,10/2 決定)。examples:名稱後面加上例子(文件櫃用)。
     """
-    name = f"身分證明類({CATEGORY_EXAMPLES['身分證明']})" if examples else "身分證明類"
-    return f"{name}拍了會交給家人複核{',而且只在這台電腦處理' if cloud else ''}。"
+    name = f"身分證明類（{CATEGORY_EXAMPLES['身分證明']}）" if examples else "身分證明類"
+    return f"{name}拍了會交給家人複核{'，而且只在這台電腦處理' if cloud else ''}。"
 
 
 def kind_choices() -> list[dict[str, Any]]:
@@ -1054,7 +1054,7 @@ def category_choices() -> list[dict[str, Any]]:
     rows = [{"value": UNSURE, "icon": TYPE_ICONS[UNSURE], "legend": KINDS_LEGEND, "kinds": shown}]
     for category in CATEGORIES:
         names = [name for name, _ in CATEGORY_DOCS[category]]
-        rows.append({"value": category, "icon": CATEGORY_ICONS[category], "legend": f"{category}裡的哪一種?",
+        rows.append({"value": category, "icon": CATEGORY_ICONS[category], "legend": f"{category}裡的哪一種？",
                      "kinds": " ".join((*names, UNSURE))})
     return rows
 
@@ -1085,7 +1085,7 @@ def cabinet_href(category: str) -> str:
 def _cabinet_empty(category: str) -> str:
     if category == UNCATEGORIZED:
         return "沒有未分類的文件。"
-    return f"這一類還沒有文件。上傳時選「{category}」,文件就會放在這裡。"
+    return f"這一類還沒有文件。上傳時選「{category}」，文件就會放在這裡。"
 
 
 def cabinet_view(docs: list[dict[str, Any]], selected: str | None = None, *, cloud: bool = False) -> dict[str, Any]:
@@ -1130,11 +1130,11 @@ _FORM_KEYS: dict[str, tuple[str, ...]] = {
 }
 _FORM_DEFAULT_KEYS = ("date", "vendor", "amount", "currency", "invoice_number")   # 不支援的類型:共通欄位
 # 表單上和結果頁不同的標籤:帳單金額寫明單位;幣別在 web/fields.py 沒有中文名
-_FORM_LABELS = {("帳單", "amount"): "應繳金額(元)", ("", "currency"): "幣別"}
+_FORM_LABELS = {("帳單", "amount"): "應繳金額（元）", ("", "currency"): "幣別"}
 _FORM_HINTS = {
     "amount": "只填數字",
     "currency": "台幣填 NTD",
-    "fields.deadline_text": "照公文上的寫法,例如「收到本函後15日內」;日期由系統計算",
+    "fields.deadline_text": "照公文上的寫法，例如「收到本函後15日內」；日期由系統計算",
     "fields.required_actions": "一行一項",
 }
 # 輸入方式:choice 選項膠囊、lines 多行(一行一項)、currency 幣別代碼;其餘照 FieldSpec.kind(date/amount/text)
@@ -1143,13 +1143,13 @@ _NO_SPELLCHECK = {"invoice_number", "currency", "fields.doc_number"}   # 代碼�
 # 存檔後會重新計算什麼(頁首說明只寫系統真的會做的事,原則 7)
 _RECOMPUTED = {"帳單": "並重新計算提醒", "公文": "並重新計算提醒", "藥袋": "並重新整理服藥時間表"}
 
-MSG_REQUIRED = "這一欄必填,請對照原件填上。"
-MSG_DATE = "請填正確的日期,例如 2026-10-20。"
-MSG_AMOUNT = "只填數字,例如 1286。"
+MSG_REQUIRED = "這一欄必填，請對照原件填上。"
+MSG_DATE = "請填正確的日期，例如 2026-10-20。"
+MSG_AMOUNT = "只填數字，例如 1286。"
 MSG_AMOUNT_POSITIVE = "金額要大於 0。"
-MSG_DAYS = "只填天數的數字,例如 7。"
-MSG_CURRENCY = "請填 3 個英文字母,台幣填 NTD。"
-MSG_TOO_LONG = f"太長了,最多 {MAX_FORM_TEXT} 個字。"
+MSG_DAYS = "只填天數的數字，例如 7。"
+MSG_CURRENCY = "請填 3 個英文字母，台幣填 NTD。"
+MSG_TOO_LONG = f"太長了，最多 {MAX_FORM_TEXT} 個字。"
 
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 _ITEM_INPUT = re.compile(r"items-(\d{1,3})-(?:name|usage|timing|days)")
@@ -1180,7 +1180,7 @@ def _form_text(value: Any) -> str:
 
 def _usage_text(raw: dict[str, Any]) -> str:
     """一種藥的「用法」:劑量與用法原文接成一行,和結果頁「用法:」顯示的一樣。"""
-    return ",".join(_plain(raw.get(k)) for k in ("dose_text", "frequency_text") if not _is_empty(raw.get(k)))
+    return "，".join(_plain(raw.get(k)) for k in ("dose_text", "frequency_text") if not _is_empty(raw.get(k)))
 
 
 def _is_prn(value: Any) -> bool:
@@ -1354,7 +1354,7 @@ def _item_view(j: int, entry: dict[str, Any], errors: dict[str, str]) -> dict[st
         "legend": f"第 {j + 1} 種藥",
         "name": _input_view(prefix + "name", base + "name", "藥名", entry.get("name", ""), required=True,
                             error=errors.get(prefix + "name", "")),
-        "usage": _input_view(prefix + "usage", base + "usage", "用法(照藥袋上的字)", entry.get("usage", ""),
+        "usage": _input_view(prefix + "usage", base + "usage", "用法（照藥袋上的字）", entry.get("usage", ""),
                              error=errors.get(prefix + "usage", "")),
         "timing_name": prefix + "timing",
         "timing": entry.get("timing") or [],
@@ -1405,9 +1405,9 @@ def correct_view(doc: dict[str, Any], values: dict[str, Any] | None = None,
         "id": doc["id"],
         "title": doc_title(doc),
         "heading": doc_heading(doc),
-        "lede": f"對照原件,只改讀錯的地方。存檔後會重新核對{',' + recomputed if recomputed else ''}。",
+        "lede": f"對照原件，只改讀錯的地方。存檔後會重新核對{'，' + recomputed if recomputed else ''}。",
         "review_reason": doc_review_reason(doc) if review else "",   # 和待複核清單、結果頁同一句
-        "after_note": f"存檔後程式會再檢查一次;還有問題的話,文件會{'留在' if review else '改放到'}「待複核」並說明原因。",
+        "after_note": f"存檔後程式會再檢查一次；還有問題的話，文件會{'留在' if review else '改放到'}「待複核」並說明原因。",
         "fields": fields,
         "meds": items,   # 藥品(只有藥袋有;鍵不叫 items,Jinja 的 v.items 會先抓到 dict 的方法)
         "category": category,
@@ -1429,17 +1429,17 @@ def correct_view(doc: dict[str, Any], values: dict[str, Any] | None = None,
 # 規則(門檻範圍、雲端要金鑰、藥袋一律本機)在 src/settings.py;這裡只把目前的設定排成畫面文字。
 
 PROVIDER_LABELS = {"ollama": "只用這台電腦", "workers_ai": "可以用雲端備援"}   # 選項與變更紀錄共用
-_MODE_TEXT = {"ollama": "本機(這台電腦)", "workers_ai": "雲端備援(敏感文件仍在這台電腦)",
-              "mock": "展示模式(使用模擬讀值)"}
+_MODE_TEXT = {"ollama": "本機（這台電腦）", "workers_ai": "雲端備援（敏感文件仍在這台電腦）",
+              "mock": "展示模式（使用模擬讀值）"}
 _MODEL_TEXT = {DEFAULT_OLLAMA_MODEL: "Gemma 4 12B", DEFAULT_WORKERS_AI_MODEL: "Gemma 4 26B"}   # 其他照設定原樣
 # 這台裝置的偏好:(name, 標題, ((值, 文字)…), 預設值)。值要和 app.js 的 PREFS、app.css 的 html[data-font] 一致
 DEVICE_PREFS: tuple[tuple[str, str, tuple[tuple[str, str], ...], str], ...] = (
     ("font", "字級", (("standard", "標準"), ("large", "大"), ("xlarge", "特大")), "standard"),
     ("rate", "朗讀速度", (("slow", "慢"), ("standard", "標準")), "standard"),
 )
-CLOUD_CONFIRM_TITLE, CLOUD_CONFIRM_OK = "確定要開啟雲端備援嗎?", "確定開啟"
-PURGE_CONFIRM_TITLE, PURGE_CONFIRM_OK = "確定要刪除全部資料嗎?", "確定刪除"
-PURGE_CONFIRM = "所有文件的照片、讀值、提醒與更正紀錄都會刪除,無法復原;設定與設定變更紀錄會保留。"
+CLOUD_CONFIRM_TITLE, CLOUD_CONFIRM_OK = "確定要開啟雲端備援嗎？", "確定開啟"
+PURGE_CONFIRM_TITLE, PURGE_CONFIRM_OK = "確定要刪除全部資料嗎？", "確定刪除"
+PURGE_CONFIRM = "所有文件的照片、讀值、提醒與更正紀錄都會刪除，無法復原；設定與設定變更紀錄會保留。"
 
 # ---- 要先確認的動作 ----
 # 切到雲端備援、刪除全部資料、兩處「退回」,按下前先問一次:標題、說明、確定鍵,加上確認欄位的名稱。
@@ -1448,13 +1448,13 @@ PURGE_CONFIRM = "所有文件的照片、讀值、提醒與更正紀錄都會刪
 CONFIRM_CLOUD_FIELD, CONFIRM_PURGE_FIELD, CONFIRM_REJECT_FIELD = "confirm_cloud", "understood", "confirm_reject"
 PURGE_ASK = {"title": PURGE_CONFIRM_TITLE, "message": PURGE_CONFIRM, "ok": PURGE_CONFIRM_OK,
              "field": CONFIRM_PURGE_FIELD}
-REJECT_DOC_ASK = {"title": "確定要退回這份文件嗎?", "message": "這份文件會改成「讀不出來」,請長輩重新拍一張。",
+REJECT_DOC_ASK = {"title": "確定要退回這份文件嗎？", "message": "這份文件會改成「讀不出來」，請長輩重新拍一張。",
                   "ok": "確定退回", "field": CONFIRM_REJECT_FIELD}
 
 
 def reject_action_ask(kind_label: str) -> dict[str, str]:
     """家人確認頁退回一個事項前要問的話(kind_label:服藥時間表、期限提醒…)。"""
-    return {"title": f"確定要退回「{kind_label}」嗎?", "message": "退回後就不會生效。", "ok": "確定退回",
+    return {"title": f"確定要退回「{kind_label}」嗎？", "message": "退回後就不會生效。", "ok": "確定退回",
             "field": CONFIRM_REJECT_FIELD}
 
 
@@ -1471,7 +1471,7 @@ def cloud_ask(local_only: tuple[str, ...] | list[str]) -> dict[str, str]:
     """切到雲端備援前要問的話;哪些文件仍只在這台電腦處理,依目前的設定寫。"""
     scope = "、".join(local_only_scope(local_only))
     return {"title": CLOUD_CONFIRM_TITLE, "ok": CLOUD_CONFIRM_OK, "field": CONFIRM_CLOUD_FIELD,
-            "message": f"開啟後,{scope},以及沒選類型的文件仍只在這台電腦處理;其他文件會交給雲端模型讀取。"}
+            "message": f"開啟後，{scope}，以及沒選類型的文件仍只在這台電腦處理；其他文件會交給雲端模型讀取。"}
 
 
 def _model_pill(provider: str, ollama: str) -> dict[str, str] | None:
@@ -1486,9 +1486,9 @@ def _model_pill(provider: str, ollama: str) -> dict[str, str] | None:
 
 def _models_text(models: dict[str, str]) -> str:
     """使用的模型(雲端在前);展示模式沒有模型。"""
-    names = [f"{_MODEL_TEXT.get(models[key], models[key])}({where})"
+    names = [f"{_MODEL_TEXT.get(models[key], models[key])}（{where}）"
              for key, where in (("cloud", "雲端"), ("local", "本機")) if models.get(key)]
-    return "、".join(names) or "不使用模型(展示模式用模擬讀值)"
+    return "、".join(names) or "不使用模型（展示模式用模擬讀值）"
 
 
 def setting_change_text(change: dict[str, Any]) -> str:
@@ -1515,7 +1515,7 @@ def _threshold_options(current: float, default: float, chosen: Any) -> list[dict
         selected = round(float(chosen), 2) if chosen is not None else round(current, 2)
     except ValueError:
         selected = round(current, 2)
-    return [{"value": f"{t:.2f}", "label": f"{fmt_pct(t)}{'(預設)' if t == round(default, 2) else ''}",
+    return [{"value": f"{t:.2f}", "label": f"{fmt_pct(t)}{'（預設）' if t == round(default, 2) else ''}",
              "selected": t == selected} for t in sorted(values)]
 
 
@@ -1534,9 +1534,9 @@ def settings_view(current: AppConfig, *, default_threshold: float, models: dict[
          "pill": _model_pill(current.provider, ollama)},
         {"label": "使用的模型", "value": _models_text(models)},
         {"label": "只在本機處理",
-         "value": "全部文件(展示模式不會把文件送出這台電腦)" if demo else f"{scope},以及沒選類型的文件"},
+         "value": "全部文件（展示模式不會把文件送出這台電腦）" if demo else f"{scope}，以及沒選類型的文件"},
         {"label": "自動存檔門檻",
-         "value": f"驗證信心 {fmt_pct(current.auto_threshold)} 以上才自動存檔,其餘交給家人複核"},
+         "value": f"驗證信心 {fmt_pct(current.auto_threshold)} 以上才自動存檔，其餘交給家人複核"},
         {"label": "版本", "value": version},
     ]
     # 重畫時留住剛剛的選擇;被拒絕的那一欄回到目前的值(例如沒有金鑰時選了雲端)
@@ -1553,8 +1553,8 @@ def settings_view(current: AppConfig, *, default_threshold: float, models: dict[
                   for name, label, options, default in DEVICE_PREFS],
         "demo": demo,
         "providers": providers,
-        "cloud_hint": "" if cloud_ready or demo else "這台電腦還沒有設定雲端模型的帳號與金鑰,所以不能選(設定方法見部署指南)。",
-        "lockline": f"{scope}一律只在這台電腦處理,這一項不能關。",
+        "cloud_hint": "" if cloud_ready or demo else "這台電腦還沒有設定雲端模型的帳號與金鑰，所以不能選（設定方法見部署指南）。",
+        "lockline": f"{scope}一律只在這台電腦處理，這一項不能關。",
         "thresholds": _threshold_options(current.auto_threshold, default_threshold,
                                          None if THRESHOLD in errors else values.get(THRESHOLD)),
         "threshold_error": THRESHOLD in errors,

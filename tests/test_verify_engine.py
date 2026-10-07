@@ -141,7 +141,7 @@ def test_score_is_monotonic(conf):
 
 LEFT = einvoice.build_left_qr("ZX10293847", date(2026, 7, 4), "5847", 333, 350,
                               "00000000", "04595257", "SyntheticTestOnly0000A==",
-                              tail=":**********:1:1:1:鮮乳:2:175:")
+                              tail=":**********:1:1:1：鮮乳：2:175:")
 
 
 def _invoice_png(path: Path, text: str = LEFT) -> Path:

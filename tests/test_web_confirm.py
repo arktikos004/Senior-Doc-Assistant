@@ -46,8 +46,8 @@ def test_reject_asks_before_submitting(client, actions):
     assert html.count('data-confirm="退回後就不會生效。"') == html.count('value="rejected"') == 2
     assert html.count('data-confirm-ok="確定退回"') == 2
     assert html.count('data-confirm-field="confirm_reject"') == 2     # 確認後 app.js 補上伺服器要看的欄位
-    assert 'data-confirm-title="確定要退回「服藥時間表」嗎?"' in html
-    assert 'data-confirm-title="確定要退回「期限提醒」嗎?"' in html
+    assert 'data-confirm-title="確定要退回「服藥時間表」嗎？"' in html
+    assert 'data-confirm-title="確定要退回「期限提醒」嗎？"' in html
     assert 'value="done" data-confirm' not in html
 
 
@@ -80,7 +80,7 @@ def test_reject_without_confirmation_asks_on_a_page(client, store, actions, acti
     字和確認框一樣;按「確定退回」才生效,「先不要」回家人確認。「確認」不必多問。"""
     r = client.post(f"/confirm/{actions['med']}", data={"decision": "rejected"})
     assert r.status_code == 400 and action_status(store, actions["med"]) == "pending"
-    assert "<h1>確定要退回「服藥時間表」嗎?</h1>" in r.text and "退回後就不會生效。" in r.text
+    assert "<h1>確定要退回「服藥時間表」嗎？</h1>" in r.text and "退回後就不會生效。" in r.text
     assert '<a class="btn btn--secondary btn--lg" href="/confirm">先不要</a>' in r.text
     assert "確定退回</button>" in r.text and r.text.index(">先不要</a>") < r.text.index("確定退回</button>")
     assert '<a class="side__link" href="/confirm" aria-current="page">' in r.text
@@ -192,7 +192,7 @@ W1C_MEDICATION = {
     "items": [_item("示範藥甲", ["早", "晚"]), _item("示範藥乙", prn=True),
               _item("示範藥丙", ["睡前"]), _item("示範藥丁")],
     "pharmacist_phone": "02-0000-0000",
-    "disclaimer": "本系統只協助閱讀,不提供醫療建議;用藥請依醫師與藥師指示。",
+    "disclaimer": "本系統只協助閱讀，不提供醫療建議；用藥請依醫師與藥師指示。",
 }
 
 
@@ -205,15 +205,15 @@ def test_w1c_medication_payload_on_confirm_card(client, store, add_doc):
     assert html.count("示範藥甲") == 2               # 早、晚各一次;items 不重複列
     assert "未標時段" in html and "時段請依藥袋或詢問藥師" in html
     assert "需要時" in html
-    assert "本系統只協助閱讀,不提供醫療建議" in html   # 卡片上也有聲明
+    assert "本系統只協助閱讀，不提供醫療建議" in html   # 卡片上也有聲明
     assert "每次1顆" not in html
 
 
 def test_w1c_calendar_confirm_card_shows_title_and_date(client, store, add_doc):
     store.add_action(add_doc(_result("公文")), "calendar", "confirm", {
-        "title": "公文期限:補繳文件", "date": "2099-10-31",
-        "description": "收到本函後15日內\n本系統只提醒,不會替您付款或回覆。",
+        "title": "公文期限：補繳文件", "date": "2099-10-31",
+        "description": "收到本函後15日內\n本系統只提醒，不會替您付款或回覆。",
         "remind_days_before": 3,
     })
     html = client.get("/confirm").text
-    assert "公文期限:補繳文件" in html and "2099年10月31日" in html
+    assert "公文期限：補繳文件" in html and "2099年10月31日" in html

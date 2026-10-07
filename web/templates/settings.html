@@ -4,14 +4,14 @@
 <header class="page-head">
   <div class="page-head__text">
     <h1>設定</h1>
-    <p class="lede">看系統現在怎麼運作,調整這台裝置的字級與朗讀;會影響全家的設定改動都會留紀錄。</p>
+    <p class="lede">看系統現在怎麼運作，調整這台裝置的字級與朗讀；會影響全家的設定改動都會留紀錄。</p>
   </div>
 </header>
 
 <div class="settings">
   {# 1. 系統狀態:只看。依目前生效的設定與本機模型的連線寫(render.settings_view) #}
   <section class="panel set-card" aria-labelledby="status-title">
-    <h2 id="status-title">系統狀態 <span class="tag">只看,不能改</span></h2>
+    <h2 id="status-title">系統狀態 <span class="tag">只看，不能改</span></h2>
     <dl class="kv">
       {% for row in v.status %}
       <dt>{{ row.label }}</dt>
@@ -33,9 +33,9 @@
       </div>
     </fieldset>
     {% endfor %}
-    <p class="field-hint">改了馬上生效,不影響家裡其他人的手機。</p>
-    <p class="field-hint" role="status" data-pref-unsaved hidden>這個瀏覽器不讓網頁記住設定(例如無痕模式),換頁後會回到預設。</p>
-    <noscript><p class="field-hint">這個瀏覽器沒有開啟 JavaScript,字級與朗讀速度沒辦法調整。</p></noscript>
+    <p class="field-hint">改了馬上生效，不影響家裡其他人的手機。</p>
+    <p class="field-hint" role="status" data-pref-unsaved hidden>這個瀏覽器不讓網頁記住設定（例如無痕模式），換頁後會回到預設。</p>
+    <noscript><p class="field-hint">這個瀏覽器沒有開啟 JavaScript，字級與朗讀速度沒辦法調整。</p></noscript>
   </section>
 
   {# 3. 系統設定:會影響全家。規則在 src/settings.py(門檻不低於 80%、雲端要金鑰、藥袋一律本機),每次改動都留紀錄 #}
@@ -49,7 +49,7 @@
       {% if v.demo %}
       <div class="field-row">
         <span class="field-label">辨識模式</span>
-        <p>展示模式<span class="muted">(使用模擬讀值,不能切換)</span></p>
+        <p>展示模式<span class="muted">（使用模擬讀值，不能切換）</span></p>
       </div>
       {% else %}
       <fieldset class="kinds"{% if v.cloud_hint %} aria-describedby="provider-hint"{% endif %}>
@@ -65,7 +65,7 @@
       <p class="lockline">{{ icon("lock") }}<span>{{ v.lockline }}</span></p>
       <div class="field-row">
         <label class="field-label" for="auto-threshold">自動存檔門檻</label>
-        <span class="field-hint" id="auto-threshold-hint">只能調得更嚴,不能低於 80%</span>
+        <span class="field-hint" id="auto-threshold-hint">只能調得更嚴，不能低於 80%</span>
         <select class="text-input" id="auto-threshold" name="auto_threshold" aria-describedby="auto-threshold-hint"{% if v.threshold_error %} aria-invalid="true"{% endif %}>
           {% for t in v.thresholds %}
           <option value="{{ t.value }}"{% if t.selected %} selected{% endif %}>{{ t.label }}</option>
@@ -88,7 +88,7 @@
     {% if v.changes %}
     <ul class="log">
       {% for c in v.changes %}
-      <li>{{ c.when }} {{ c.text }}{% if c.actor %}<span class="log__who">({{ c.actor }})</span>{% endif %}</li>
+      <li>{{ c.when }} {{ c.text }}{% if c.actor %}<span class="log__who">（{{ c.actor }}）</span>{% endif %}</li>
       {% endfor %}
     </ul>
     {% else %}
@@ -99,7 +99,7 @@
   {# 4. 資料管理:匯出不含影像;刪除只動文件與四個資料夾裡的原件,設定與設定紀錄保留 #}
   <section class="panel set-card danger-zone" aria-labelledby="data-title">
     <h2 id="data-title">資料管理</h2>
-    <p class="field-hint">匯出的檔案含有文件內容,請存在安全的地方。刪除後無法復原。</p>
+    <p class="field-hint">匯出的檔案含有文件內容，請存在安全的地方。刪除後無法復原。</p>
     <form class="set-form" method="post" action="/settings/delete">
       {{ csrf_input() }}
       {# 沒有 JS 就沒有確認框:改成要先勾選才送得出去(瀏覽器內建的必填檢查,不用 JS)。

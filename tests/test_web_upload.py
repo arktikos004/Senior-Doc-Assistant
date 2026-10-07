@@ -39,7 +39,7 @@ class MedicationAnalyzer:
     def analyze(self, file_path, doc_type_hint=None, *, local_only=False):
         return ExtractionResult(
             doc_type="藥袋", date="2026-09-30", vendor="示範診所", confidence=0.9,
-            plain_summary="這是示範診所開的兩種藥,飯後吃。",
+            plain_summary="這是示範診所開的兩種藥，飯後吃。",
             fields={"items": [
                 {"name": "示範藥甲", "dose_text": "每次1顆", "frequency_text": "一天三次",
                  "timing": ["早", "中", "晚"], "prn": False, "days": 7},
@@ -100,7 +100,7 @@ def test_cloud_mode_says_sensitive_categories_stay_local(tmp_path):
 
     cfg = _cloud_cfg(tmp_path)
     html = TestClient(create_app(cfg, analyzer=MockAnalyzer(cfg))).get("/").text
-    assert "醫療與保險、身分證明兩類只在這台電腦處理,不會送到雲端。" in html
+    assert "醫療與保險、身分證明兩類只在這台電腦處理，不會送到雲端。" in html
     # 上傳區不加身分證明類的說明(使用者 10/3);說明留在文件櫃
     assert "拍了會交給家人複核" not in html and "data-kinds-none" not in html
 
@@ -161,7 +161,7 @@ def test_medication_hint_shows_disclaimer(client, upload):
     r = upload(client, doc_type="藥袋")
     assert "?" not in r.headers["location"]   # 提示存在資料庫,不靠網址參數
     html = client.get(r.headers["location"]).text
-    assert "本系統只協助閱讀,不提供醫療建議;用藥請依醫師與藥師指示。" in html
+    assert "本系統只協助閱讀，不提供醫療建議；用藥請依醫師與藥師指示。" in html
     # 重新整理(同一網址再開一次)聲明仍在
     assert "不提供醫療建議" in client.get(r.headers["location"]).text
 
@@ -171,14 +171,14 @@ def test_medication_result_renders_items(cfg, form_client, upload):
     r = upload(client, doc_type="藥袋")
     html = client.get(r.headers["location"]).text
     assert "AI 白話解說" in html
-    assert "這是示範診所開的兩種藥,飯後吃。" in html
+    assert "這是示範診所開的兩種藥，飯後吃。" in html
     assert "示範藥甲" in html and "示範藥乙" in html
     assert "需要時" in html
     assert "不提供醫療建議" in html
 
 
 def test_upload_filename_is_regenerated(cfg, client, upload):
-    r = upload(client, name="我的 帳單(1).png")
+    r = upload(client, name="我的 帳單（1）.png")
     doc_id = int(r.headers["location"].rsplit("/", 1)[1])
     doc = Store(cfg.paths.db_path).get_document(doc_id)
     assert re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{8}\.png", doc["source_file"])
@@ -270,17 +270,17 @@ def test_home_offers_category_first_then_kind(client):
     這一類清單上的名稱,照 CATEGORY_DOCS 的順序,最後是「不確定」)與標題;沒選大類留下五種類型。
     第二列沒有 JS 時只看得到五種類型 + 不確定,各類的常見文件先藏著;上傳區不寫任何說明(使用者 10/3)。"""
     html = client.get("/").text
-    assert "這是哪一類?" in html and "是哪一種文件?" in html
+    assert "這是哪一類？" in html and "是哪一種文件？" in html
     assert re.search(r'name="category" value="不確定" checked', html)
     assert re.search(r'name="doc_type" value="不確定" checked data-kinds-unsure', html)
-    first_row = html.split("這是哪一類?")[1].split("</fieldset>")[0]
+    first_row = html.split("這是哪一類？")[1].split("</fieldset>")[0]
     assert first_row.count("<svg") == 5
     rows = _category_rows(html)
     legends = dict(re.findall(r'name="category" value="([^"]+)"[^>]*data-kinds-legend="([^"]*)"', html))
-    assert rows["不確定"] == ["藥袋", "帳單", "發票", "收據", "公文", "不確定"] and legends["不確定"] == "是哪一種文件?"
+    assert rows["不確定"] == ["藥袋", "帳單", "發票", "收據", "公文", "不確定"] and legends["不確定"] == "是哪一種文件？"
     for category, docs in CATEGORY_DOCS.items():
         assert rows[category] == [name for name, _ in docs] + ["不確定"]
-        assert legends[category] == f"{category}裡的哪一種?"
+        assert legends[category] == f"{category}裡的哪一種？"
     chips = re.findall(r'<label class="chip"( hidden)?><input class="chip__input" type="radio" name="doc_type" '
                        r'value="([^"]+)"', html)
     assert [value for hidden, value in chips if not hidden] == rows["不確定"]    # 沒有 JS 時看得到的
@@ -345,7 +345,7 @@ console.log(JSON.stringify(out));
 _NODE = shutil.which("node")
 
 
-@pytest.mark.skipif(_NODE is None, reason="沒有 node,略過前端流程測試")
+@pytest.mark.skipif(_NODE is None, reason="沒有 node，略過前端流程測試")
 def test_kinds_follow_the_chosen_category_in_app_js(client):
     """app.js 依第一列只留那一類清單上的名稱 + 不確定,標題跟著換;被藏起來的選項正被選著就改回「不確定」,
     兩類都有的(公文)留著;沒選大類回到五種類型。"""
@@ -361,15 +361,15 @@ def test_kinds_follow_the_chosen_category_in_app_js(client):
               .replace("__DATA__", json.dumps(data, ensure_ascii=False)))
     r = json.loads(subprocess.run([_NODE, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=30, check=True).stdout)
     five = ["藥袋", "帳單", "發票", "收據", "公文", "不確定"]
-    assert r["initial"] == {"title": "是哪一種文件?", "shown": five, "checked": "不確定"}
-    assert r["health"] == {"title": "醫療與保險裡的哪一種?", "checked": "不確定",
+    assert r["initial"] == {"title": "是哪一種文件？", "shown": five, "checked": "不確定"}
+    assert r["health"] == {"title": "醫療與保險裡的哪一種？", "checked": "不確定",
                            "shown": ["藥袋", "醫療收據", "保單", "診斷證明", "檢驗報告", "公文", "不確定"]}
-    assert r["living"] == {"title": "生活契約裡的哪一種?", "checked": "不確定",        # 保單被藏起來 → 不確定
+    assert r["living"] == {"title": "生活契約裡的哪一種？", "checked": "不確定",        # 保單被藏起來 → 不確定
                            "shown": ["水電瓦斯費", "電信費", "管理費", "租約", "公文", "不確定"]}
-    assert r["assets"] == {"title": "財產資產裡的哪一種?", "checked": "公文",           # 兩類都有的公文留著
+    assert r["assets"] == {"title": "財產資產裡的哪一種？", "checked": "公文",           # 兩類都有的公文留著
                            "shown": ["發票", "收據", "稅單", "存摺", "房地權狀", "公文", "不確定"]}
-    assert r["none"] == {"title": "是哪一種文件?", "shown": five, "checked": "公文"}
-    assert r["identity"] == {"title": "身分證明裡的哪一種?", "checked": "不確定",
+    assert r["none"] == {"title": "是哪一種文件？", "shown": five, "checked": "公文"}
+    assert r["identity"] == {"title": "身分證明裡的哪一種？", "checked": "不確定",
                              "shown": ["身分證", "健保卡", "戶口名簿", "駕照", "護照", "印鑑證明", "不確定"]}
 
 

@@ -41,7 +41,7 @@ _COMMON_CHANGES = tuple(name for name in COMMON_FIELDS if name != "doc_type")
 _READING_KEYS = ("doc_type", "date", "vendor", "amount", "currency", "invoice_number", "unreadable", "fields")
 _DERIVED_FIELDS = ("deadline",)
 # 原件不見時給核對用的檔名(本系統不會產生這種檔):讀不到影像,QR 一律「無法核對」
-_NO_ORIGINAL = "(原件不存在)"
+_NO_ORIGINAL = "（原件不存在）"
 # 更正與退回都是「讀文件 → 核對 → 搬原檔 → 寫回」一整段,同一個行程裡一次只做一份:連按兩下時
 # 第二個請求等第一個做完才開始,讀到的是更新後的文件(部署是單一 uvicorn 行程)
 _LOCK = threading.Lock()
@@ -70,7 +70,7 @@ def apply_changes(original: ExtractionResult, changes: dict[str, Any]) -> Extrac
     allowed = {*_COMMON_CHANGES, *(f"fields.{name}" for name in TYPE_FIELDS.get(original.doc_type, ()))}
     unknown = sorted(set(changes) - allowed)
     if unknown:
-        raise ValueError(f"不能更正的欄位:{'、'.join(unknown)}")
+        raise ValueError(f"不能更正的欄位：{'、'.join(unknown)}")
     result = copy.deepcopy(original)
     for key, value in changes.items():
         empty = value is None or value == "" or value == []
@@ -118,17 +118,17 @@ def decide_corrected(result: ExtractionResult, cfg: AppConfig) -> Decision:
     驗證信心與門檻是用來判斷「要不要人看」的;家人已對照原件看過,只剩程式核對能把它擋回待複核。
     """
     if result.doc_type not in cfg.target_doc_types:
-        return Decision(action="review", reason=f"文件類型「{result.doc_type}」不在目標範圍,需人工判斷")
+        return Decision(action="review", reason=f"文件類型「{result.doc_type}」不在目標範圍，需人工判斷")
     verification = result.verification if isinstance(result.verification, dict) else {}
     if verification.get("_summary") == VERIFY_ERROR_SUMMARY:
-        return Decision(action="review", reason=f"家人更正後{VERIFY_ERROR_SUMMARY},需人工確認")
+        return Decision(action="review", reason=f"家人更正後{VERIFY_ERROR_SUMMARY}，需人工確認")
     failed = failed_checks(result)
     if failed:
-        return Decision(action="review", reason=f"家人更正後仍有檢查不通過:{'、'.join(failed)}")
+        return Decision(action="review", reason=f"家人更正後仍有檢查不通過：{'、'.join(failed)}")
     missing = [FIELD_LABELS.get(name, name) for name in REQUIRED_FIELDS.get(result.doc_type, ())
                if not result.get_field(name) or name in result.unreadable]
     if missing:
-        return Decision(action="review", reason=f"家人更正後仍缺少必要欄位:{'、'.join(missing)}")
+        return Decision(action="review", reason=f"家人更正後仍缺少必要欄位：{'、'.join(missing)}")
     return Decision(action="archive", reason=CORRECTED_REASON)
 
 
@@ -321,7 +321,7 @@ def reject_document(cfg: AppConfig, store: Store, doc_id: int, original: Path | 
                     target = None   # 原檔已經不在原位:不把這個位置寫回(資料庫記的位置不變)
             else:
                 _drop_sidecar(original, doc_id)
-        record = _record(doc, "failed", f"人工複核判定退回:{reason}", target, doc.get("result"), SOURCE_REJECT)
+        record = _record(doc, "failed", f"人工複核判定退回：{reason}", target, doc.get("result"), SOURCE_REJECT)
         store.update_document(doc_id, record)
         store.replace_actions(doc_id, [])
         append_record(cfg.paths.logs, record)

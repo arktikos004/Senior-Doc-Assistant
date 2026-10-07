@@ -133,7 +133,7 @@ MSG_CATEGORY = "已更新類別"
 MSG_SETTINGS_SAVED = "已儲存設定"
 MSG_SETTINGS_UNCHANGED = "設定沒有變動"
 MSG_PURGED = "已刪除全部資料"
-MSG_PURGED_PARTLY = "資料已刪除,但有些照片檔刪不掉,請管理者檢查資料夾。"
+MSG_PURGED_PARTLY = "資料已刪除，但有些照片檔刪不掉，請管理者檢查資料夾。"
 # 只有這些狀態訊息可以經由 ?msg= 顯示;任意字串不回顯,避免被拿來偽造系統公告
 MSG_UPLOAD_CANCELLED = "已取消上傳"
 _MESSAGES = frozenset({MSG_CORRECTED, MSG_REJECTED, MSG_CONFIRMED, MSG_REMINDER_OFF, MSG_REMINDER_ON,
@@ -150,11 +150,11 @@ _CONFIRM_DECISIONS = {"done": ("done", MSG_CONFIRMED), "rejected": ("rejected", 
 # 取消/恢復提醒:表單值 → (行動狀態, 回到結果頁時的訊息)
 _REMINDER_DECISIONS = {REMINDER_CANCEL: ("rejected", MSG_REMINDER_OFF), REMINDER_RESTORE: ("pending", MSG_REMINDER_ON)}
 
-MSG_NO_FILE = "請先拍照,或選一個檔案。"
-MSG_EMPTY = "這個檔案是空的,請重新拍一張。"
-MSG_BAD_EXT = "只能上傳照片(JPG、PNG、WEBP、BMP、TIFF)或 PDF。"
-MSG_MISMATCH = "檔案內容和副檔名對不上,請直接用相機拍一張,或選原始的照片檔。"
-MSG_TOO_LARGE = "檔案超過 15MB。請改拍一張,或選較小的檔案。"
+MSG_NO_FILE = "請先拍照，或選一個檔案。"
+MSG_EMPTY = "這個檔案是空的，請重新拍一張。"
+MSG_BAD_EXT = "只能上傳照片（JPG、PNG、WEBP、BMP、TIFF）或 PDF。"
+MSG_MISMATCH = "檔案內容和副檔名對不上，請直接用相機拍一張，或選原始的照片檔。"
+MSG_TOO_LARGE = "檔案超過 15MB。請改拍一張，或選較小的檔案。"
 MSG_FORM_TOO_LARGE = "送出的資料太多了"
 
 # 加密 PDF(PDF-PW):上傳後先放進 uploads/pending/ 等家人輸入密碼。旁邊的 .json 只記建立時間、試了幾次、
@@ -163,8 +163,8 @@ PENDING_DIR = "pending"
 PENDING_TTL = 30 * 60          # 秒;放超過就刪,網址也跟著失效
 MAX_PASSWORD_TRIES = 5         # 錯這麼多次就把暫存檔刪掉,請家人重新上傳
 _PENDING_TOKEN = re.compile(r"[A-Za-z0-9_-]{32}")   # secrets.token_urlsafe(24) 的格式
-MSG_PDF_WRONG = "密碼不對,還可以再試 {left} 次。"
-MSG_PDF_GONE = "密碼錯太多次,這份檔案已經刪掉了。請回首頁重新上傳。"
+MSG_PDF_WRONG = "密碼不對，還可以再試 {left} 次。"
+MSG_PDF_GONE = "密碼錯太多次，這份檔案已經刪掉了。請回首頁重新上傳。"
 MSG_PDF_MISSING = "找不到這份等待輸入密碼的檔案"
 
 # 框架預設的英文錯誤訊息換成中文
@@ -190,8 +190,8 @@ _BACK_HINT = "請按瀏覽器的「上一頁」改好後再送出一次。"
 _HOME_STEP = ("可以回首頁重新開始。", "/", "回首頁")
 _NEXT_STEPS = {
     400: (_BACK_HINT, "/", "回首頁"),
-    403: ("為了安全,系統沒有處理這次的操作(可能是頁面開太久了)。請回首頁重新操作一次。", "/", "回首頁"),
-    409: ("這件事可能已經有人處理了,請回「家人確認」看最新狀態。", "/confirm", "回家人確認"),
+    403: ("為了安全，系統沒有處理這次的操作（可能是頁面開太久了）。請回首頁重新操作一次。", "/", "回首頁"),
+    409: ("這件事可能已經有人處理了，請回「家人確認」看最新狀態。", "/confirm", "回家人確認"),
     422: (_BACK_HINT, "/", "回首頁"),
 }
 # 按鈕圖示跟著目的地走,和導覽列同一組
@@ -230,9 +230,9 @@ def _body_limit(path: str) -> int:
 def _too_large(path: str) -> PageError:
     """body 超過上限的 413(中文說明 + 下一步)。"""
     if path == "/upload":
-        return PageError(413, MSG_TOO_LARGE, hint="請回首頁改拍一張,或選較小的檔案。")
+        return PageError(413, MSG_TOO_LARGE, hint="請回首頁改拍一張，或選較小的檔案。")
     return PageError(413, MSG_FORM_TOO_LARGE,
-                     hint="這張表單收不下這麼多內容,所以沒有處理。請按瀏覽器的「上一頁」,把內容改短一點再送出。")
+                     hint="這張表單收不下這麼多內容，所以沒有處理。請按瀏覽器的「上一頁」，把內容改短一點再送出。")
 
 
 class _BodyLimit:
@@ -548,7 +548,7 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
     def get_correctable(doc_id: int) -> dict[str, Any]:
         doc = get_doc(doc_id)
         if not correctable(doc):
-            raise PageError(409, "這份文件沒有可以更正的讀值", hint="讀不出來的文件沒辦法更正,請回首頁重新拍一張。",
+            raise PageError(409, "這份文件沒有可以更正的讀值", hint="讀不出來的文件沒辦法更正，請回首頁重新拍一張。",
                             next_url="/", next_label="回首頁")
         return doc
 
@@ -626,7 +626,7 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
 
     def _pending_missing() -> PageError:
         return PageError(404, MSG_PDF_MISSING, next_url="/", next_label="回首頁重新上傳",
-                         hint="可能已經超過 30 分鐘、密碼錯太多次,或已經處理過了。請回首頁重新上傳一次。")
+                         hint="可能已經超過 30 分鐘、密碼錯太多次，或已經處理過了。請回首頁重新上傳一次。")
 
     def ask_first(ask: dict[str, str], *, action: str, back_url: str, active: str = "",
                   fields: dict[str, str] | None = None) -> HTMLResponse:
@@ -929,11 +929,11 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
             if action["superseded"]:
                 # 家人更正後舊提醒已被新的取代:恢復它會冒出兩個期限(例如從更正前開著的舊頁面按)
                 raise PageError(409, "這個提醒已經換成新的了", next_url=f"/doc/{action['document_id']}",
-                                next_label="回結果頁", hint="家人更正過這份文件,舊的提醒不再使用。請回結果頁看最新的提醒。")
+                                next_label="回結果頁", hint="家人更正過這份文件，舊的提醒不再使用。請回結果頁看最新的提醒。")
             if not is_auto_reminder(action):
                 # 走到這裡只會是要家人確認的事項(取消/恢復本身可以重複按,不會衝突)
                 raise PageError(409, "這個事項要在「家人確認」處理",
-                                hint="要家人點頭的事項不能在這裡取消,請到「家人確認」確認或退回。")
+                                hint="要家人點頭的事項不能在這裡取消，請到「家人確認」確認或退回。")
             status, msg = _REMINDER_DECISIONS[decision]
             store().set_action_status(action_id, status)
             return _redirect_with_msg(f"/doc/{action['document_id']}", msg)
@@ -965,7 +965,7 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         with doc_lock:      # 兩位家人同時按同一個事項:先到的算數,另一位看到「已經處理過了」
             action = get_action(action_id)
             if action["tier"] != "confirm" or action["status"] != "pending":
-                raise HTTPException(status_code=409, detail="這個事項不需要確認,或已經處理過了")
+                raise HTTPException(status_code=409, detail="這個事項不需要確認，或已經處理過了")
             if decision == "rejected" and confirmed != CONFIRMED:
                 # 退回在系統內沒有復原,要先確認(「確認」不必多問):沒帶確認欄位就不退回,回確認頁再問一次
                 return ask_first(reject_action_ask(action_view(action)["kind_label"]), action=f"/confirm/{action_id}",
@@ -1043,8 +1043,8 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
                 # 紀錄只寫例外類型:訊息原文可能帶這台電腦的完整路徑
                 log.error("刪除全部資料:資料庫清不了(%s),沒有刪除任何資料", type(exc).__name__)
                 raise PageError(503, MSG_PURGE_NOT_STARTED, next_url="/settings", next_label="回設定",
-                                hint="資料庫正在忙,文件、照片與紀錄都還在。請稍後回設定頁再按一次"
-                                     "「刪除全部資料」;還是不行,請找管理者。") from exc
+                                hint="資料庫正在忙，文件、照片與紀錄都還在。請稍後回設定頁再按一次"
+                                     "「刪除全部資料」；還是不行，請找管理者。") from exc
             records_stuck = files_stuck = False
             try:
                 clear_records(cfg.paths.logs)
@@ -1059,10 +1059,10 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
             store().set_setting(PURGED, datetime.now().isoformat(), actor=_actor(request))
         if records_stuck:
             gone = "文件、提醒與更正紀錄已經刪除" if files_stuck else "文件、提醒、更正紀錄與照片都已經刪除"
-            still = "處理紀錄檔(裡面有讀值)" + ("和有些照片檔" if files_stuck else "")
+            still = "處理紀錄檔（裡面有讀值）" + ("和有些照片檔" if files_stuck else "")
             raise PageError(500, MSG_PURGE_STUCK, next_url="/settings", next_label="回設定",
-                            hint=f"{gone},但{still}刪不掉,可能正被別的程式開著。"
-                                 "請管理者關掉那個程式後,回設定頁再按一次「刪除全部資料」。")
+                            hint=f"{gone}，但{still}刪不掉，可能正被別的程式開著。"
+                                 "請管理者關掉那個程式後，回設定頁再按一次「刪除全部資料」。")
         return _redirect_with_msg("/", MSG_PURGED_PARTLY if files_stuck else MSG_PURGED)
 
     return app

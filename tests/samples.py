@@ -12,7 +12,7 @@ from PIL import Image
 
 BILL = {
     "doc_type": "帳單", "date": "2026-09-20", "vendor": "示範電力公司", "amount": 1854.0, "currency": "NTD",
-    "plain_summary": "這是電費帳單,要在10月15日前繳1854元。",
+    "plain_summary": "這是電費帳單，要在10月15日前繳1854元。",
     "fields": {"due_date": "2099-10-15", "bill_kind": "電費"},
     "verification": {}, "verified_confidence": None, "unreadable": [],
 }
@@ -27,7 +27,7 @@ LETTER = {
 INVOICE = {"doc_type": "發票", "date": "2026-09-18", "vendor": "示範超市", "amount": 320.0, "currency": "NTD"}
 
 # 帳單自動列入的期限提醒(行動 payload,W1-C 的形狀)
-REMINDER = {"title": "繳電費", "date": "2099-10-15", "description": "繳費期限:2099-10-15"}
+REMINDER = {"title": "繳電費", "date": "2099-10-15", "description": "繳費期限：2099-10-15"}
 
 
 # ---- 加密 PDF(PDF 1.3 Standard Security Handler:RC4 40 位元,R2;規格 Algorithm 3.1–3.4) ----

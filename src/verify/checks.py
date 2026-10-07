@@ -91,10 +91,10 @@ def check_tax_id(value: Any, field_name: str, label: str) -> dict[str, Any]:
         return entry("skip", f"沒有讀到{label}", [field_name])
     text = str(value).strip()
     if text == CONSUMER_TAX_ID:
-        return entry("skip", f"{label}為 {CONSUMER_TAX_ID}(一般消費者),不檢查", [field_name])
+        return entry("skip", f"{label}為 {CONSUMER_TAX_ID}（一般消費者），不檢查", [field_name])
     if tax_id_checksum_ok(text):
         return entry("pass", f"{label} {text} 符合統編檢查碼規則", [field_name])
-    return entry("fail", f"{label} {text} 不符合統編檢查碼規則(應為 8 位數字且加權和可被 5 整除)",
+    return entry("fail", f"{label} {text} 不符合統編檢查碼規則（應為 8 位數字且加權和可被 5 整除）",
                  [field_name])
 
 
@@ -127,9 +127,9 @@ def check_date_plausible(value: Any, today: date, field_name: str = "date") -> d
     if parsed is None:
         return entry("fail", f"日期 {value} 不是有效的 YYYY-MM-DD", [field_name])
     if parsed > today + FUTURE_TOLERANCE:
-        return entry("fail", f"日期 {parsed} 晚於今天 {today},不合理", [field_name])
+        return entry("fail", f"日期 {parsed} 晚於今天 {today}，不合理", [field_name])
     if parsed < EARLIEST_DATE:
-        return entry("fail", f"日期 {parsed} 早於 {EARLIEST_DATE.year} 年,不合理", [field_name])
+        return entry("fail", f"日期 {parsed} 早於 {EARLIEST_DATE.year} 年，不合理", [field_name])
     return entry("pass", f"日期 {parsed} 格式正確且在合理範圍內", [field_name])
 
 
@@ -164,18 +164,18 @@ def check_date_in_period(date_value: Any, period_value: Any) -> dict[str, Any]:
     """發票開立日期必須落在期別的兩個月內(例:115年07-08月 = 2026-07-01 ~ 2026-08-31)。"""
     fields = ["date", "fields.period"]
     if is_blank(date_value) or is_blank(period_value):
-        return entry("skip", "日期或期別沒有讀到,無法比對", fields)
+        return entry("skip", "日期或期別沒有讀到，無法比對", fields)
     period = parse_period(period_value)
     if period is None:
         # 期別本身不合法:是期別讀錯,不牽連日期
         return entry("fail", f"期別「{period_value}」不是合法的雙月期別", ["fields.period"])
     parsed = parse_iso_date(date_value)
     if parsed is None:
-        return entry("skip", f"日期 {date_value} 無法解析,無法與期別比對", fields)
+        return entry("skip", f"日期 {date_value} 無法解析，無法與期別比對", fields)
     year, start, end = period
     if parsed.year == year and start <= parsed.month <= end:
         return entry("pass", f"日期 {parsed} 落在期別 {year} 年 {start}-{end} 月內", fields)
-    return entry("fail", f"日期 {parsed} 不在期別「{period_value}」({year} 年 {start}-{end} 月)內",
+    return entry("fail", f"日期 {parsed} 不在期別「{period_value}」（{year} 年 {start}-{end} 月）內",
                  fields)
 
 
@@ -188,12 +188,12 @@ def check_due_date(due_value: Any, date_value: Any) -> dict[str, Any]:
     if due is None:
         return entry("fail", f"繳費期限 {due_value} 不是有效的 YYYY-MM-DD", fields)
     if due < EARLIEST_DATE:
-        return entry("fail", f"繳費期限 {due} 早於 {EARLIEST_DATE.year} 年,不合理", fields)
+        return entry("fail", f"繳費期限 {due} 早於 {EARLIEST_DATE.year} 年，不合理", fields)
     issued = parse_iso_date(date_value)
     if issued is None:
-        return entry("pass", f"繳費期限 {due} 格式正確(沒有出帳日可比對)", fields)
+        return entry("pass", f"繳費期限 {due} 格式正確（沒有出帳日可比對）", fields)
     if due < issued:
-        return entry("fail", f"繳費期限 {due} 早於出帳日 {issued},不合理", fields)
+        return entry("fail", f"繳費期限 {due} 早於出帳日 {issued}，不合理", fields)
     return entry("pass", f"繳費期限 {due} 格式正確且不早於出帳日 {issued}", fields)
 
 
@@ -211,11 +211,11 @@ def check_amount_plausible(amount: Any, currency: str = "NTD") -> dict[str, Any]
     if value <= 0:
         return entry("fail", f"金額 {amount} 必須大於 0", fields)
     if value >= AMOUNT_MAX:
-        return entry("fail", f"金額 {value:,.0f} 超過家用文件的合理範圍,請人工確認", fields)
+        return entry("fail", f"金額 {value:,.0f} 超過家用文件的合理範圍，請人工確認", fields)
     decimals = 0 if (currency or "NTD") == "NTD" else 2
     if abs(value * 10 ** decimals - round(value * 10 ** decimals)) > 1e-6:
         rule = "新臺幣金額應為整數" if decimals == 0 else "金額最多 2 位小數"
-        return entry("fail", f"金額 {amount}:{rule}", fields)
+        return entry("fail", f"金額 {amount}：{rule}", fields)
     return entry("pass", f"金額 {value:g} {currency} 在合理範圍內", fields)
 
 
@@ -228,11 +228,11 @@ def check_amount_sum(total: Any, line_amounts: list[float] | None) -> dict[str, 
     """
     fields = ["amount"]
     if total is None or not line_amounts:
-        return entry("skip", "沒有明細可加總(算術通過也不能當唯一證據,模型可能湊數讓總額對上)",
+        return entry("skip", "沒有明細可加總（算術通過也不能當唯一證據，模型可能湊數讓總額對上）",
                      fields)
     subtotal = sum(float(x) for x in line_amounts)
     if abs(subtotal - float(total)) < 0.005:
-        return entry("pass", f"明細加總 {subtotal:g} 等於總計(僅為弱證據)", fields)
+        return entry("pass", f"明細加總 {subtotal:g} 等於總計（僅為弱證據）", fields)
     return entry("fail", f"明細加總 {subtotal:g} 不等於總計 {float(total):g}", fields)
 
 
@@ -245,10 +245,10 @@ def check_subject(value: Any) -> dict[str, Any]:
         return entry("skip", "沒有讀到主旨", fields)
     text = str(value).strip()
     if len(text) < SUBJECT_MIN_CHARS:
-        return entry("fail", f"主旨只有 {len(text)} 字,可能沒讀完整", fields)
+        return entry("fail", f"主旨只有 {len(text)} 字，可能沒讀完整", fields)
     if len(text) > SUBJECT_MAX_CHARS:
-        return entry("fail", f"主旨長達 {len(text)} 字,可能混進了說明段落", fields)
-    return entry("pass", f"主旨讀出 {len(text)} 字,長度合理", fields)
+        return entry("fail", f"主旨長達 {len(text)} 字，可能混進了說明段落", fields)
+    return entry("pass", f"主旨讀出 {len(text)} 字，長度合理", fields)
 
 
 def check_medication_items(items: Any) -> dict[str, Any]:
@@ -270,5 +270,5 @@ def check_medication_items(items: Any) -> dict[str, Any]:
         if not has_usage:
             incomplete.append(f"第 {i} 項沒有讀到用法")
     if incomplete:
-        return entry("fail", "藥品清單不完整:" + "、".join(incomplete), fields)
-    return entry("pass", f"讀出 {len(items)} 項藥品,每項都有藥名與用法", fields)
+        return entry("fail", "藥品清單不完整：" + "、".join(incomplete), fields)
+    return entry("pass", f"讀出 {len(items)} 項藥品，每項都有藥名與用法", fields)

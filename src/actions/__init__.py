@@ -43,7 +43,7 @@ REMIND_DAYS_BEFORE = 3   # 期限前 3 天提醒:長輩要有時間去超商繳�
 BILL_TITLES = {"電費": "繳電費", "水費": "繳水費", "瓦斯": "繳瓦斯費", "電信": "繳電信費"}
 BILL_DEFAULT_TITLE = "繳費期限"
 OFFICIAL_TITLE = "公文期限"
-NO_PAYMENT_NOTE = "本系統只提醒,不會替您付款或回覆。"
+NO_PAYMENT_NOTE = "本系統只提醒，不會替您付款或回覆。"
 
 
 def _calendar_tier(decision: Decision) -> str:
@@ -85,9 +85,9 @@ def _plan_bill(result: ExtractionResult, decision: Decision, received_on: date) 
         return []
     title = BILL_TITLES.get(str(fields.get("bill_kind") or "").strip(), BILL_DEFAULT_TITLE)
     lines = [
-        f"開單單位:{clip(result.vendor)}" if result.vendor else "",
-        f"應繳金額:{_money(result.amount, result.currency)}" if result.amount else "",
-        f"繳費期限:{due.isoformat()}",
+        f"開單單位：{clip(result.vendor)}" if result.vendor else "",
+        f"應繳金額：{_money(result.amount, result.currency)}" if result.amount else "",
+        f"繳費期限：{due.isoformat()}",
     ]
     return [_calendar(title, due, lines, decision)]
 
@@ -112,19 +112,19 @@ def _plan_official(result: ExtractionResult, decision: Decision, received_on: da
     subject = clip(fields.get("subject"), 30)
     title = f"{OFFICIAL_TITLE}:{subject}" if subject else OFFICIAL_TITLE
     basis = (
-        f"以發文日期 {base.isoformat()} 起算;實際收到日可能較晚,期限以公文原文為準。"
+        f"以發文日期 {base.isoformat()} 起算；實際收到日可能較晚，期限以公文原文為準。"
         if issued else
-        f"文件上沒有可讀的發文日期,以上傳日期 {base.isoformat()} 起算;期限以公文原文為準。"
+        f"文件上沒有可讀的發文日期，以上傳日期 {base.isoformat()} 起算；期限以公文原文為準。"
     )
     required = fields.get("required_actions")
     todo = "、".join(clip(x, 40) for x in required[:10] if clip(x)) if isinstance(required, list) else ""
     lines = [
-        f"發文機關:{clip(result.vendor)}" if result.vendor else "",
-        f"發文字號:{clip(fields.get('doc_number'))}" if fields.get("doc_number") else "",
-        f"期限原文:「{clip(fields.get('deadline_text'), MAX_DEADLINE_TEXT)}」",
+        f"發文機關：{clip(result.vendor)}" if result.vendor else "",
+        f"發文字號：{clip(fields.get('doc_number'))}" if fields.get("doc_number") else "",
+        f"期限原文：「{clip(fields.get('deadline_text'), MAX_DEADLINE_TEXT)}」",
         basis,
-        f"應辦事項:{todo}" if todo else "",
-        f"應繳金額:{_money(result.amount, result.currency)}" if result.amount else "",
+        f"應辦事項：{todo}" if todo else "",
+        f"應繳金額：{_money(result.amount, result.currency)}" if result.amount else "",
     ]
     return [_calendar(title, deadline, lines, decision)]
 

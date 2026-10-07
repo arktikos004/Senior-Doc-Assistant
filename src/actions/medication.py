@@ -24,7 +24,7 @@ from typing import Any
 from ..models import ExtractionResult
 
 TITLE = "服藥時間表"
-DISCLAIMER = "本系統只協助閱讀,不提供醫療建議;用藥請依醫師與藥師指示。"
+DISCLAIMER = "本系統只協助閱讀，不提供醫療建議；用藥請依醫師與藥師指示。"
 SLOTS: tuple[str, ...] = ("早", "中", "晚", "睡前")
 # 結構化輸出沒擋住時(例如雲端 JSON 模式不強制 enum)的常見寫法;不認得的一律丟掉
 _SLOT_ALIASES = {

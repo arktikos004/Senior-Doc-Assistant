@@ -54,7 +54,7 @@
       {% endif %}
       <h2>{{ v.heading }}</h2>
       {% if v.error_count %}
-      <p class="field-error" role="alert">{{ icon("alert") }}<span>有 {{ v.error_count }} 個地方要修改,請看下面紅字的說明。</span></p>
+      <p class="field-error" role="alert">{{ icon("alert") }}<span>有 {{ v.error_count }} 個地方要修改，請看下面紅字的說明。</span></p>
       {% endif %}
       {% for f in v.fields %}
       {% if f.kind == "choice" %}
@@ -77,7 +77,7 @@
       {% if v.can_add_item %}
       <button class="btn btn--secondary" type="submit" name="add_item" value="1" data-send-quiet>{{ icon("plus") }}再加一種藥</button>
       {% endif %}
-      <p class="disclaimer disclaimer--compact" role="note">{{ icon("info") }}<span>只照抄藥袋上印的字;系統不判斷劑量或用法。存檔後服藥時間表仍要家人確認。</span></p>
+      <p class="disclaimer disclaimer--compact" role="note">{{ icon("info") }}<span>只照抄藥袋上印的字；系統不判斷劑量或用法。存檔後服藥時間表仍要家人確認。</span></p>
       {% endif %}
       {# 家人指定大類(例如沒選類別的公文):只決定放在文件櫃的哪一類,存檔時一併寫入 #}
       <fieldset class="kinds">
@@ -93,7 +93,7 @@
         <button class="btn btn--primary btn--lg" type="submit">{{ icon("check") }}<span data-submit-label data-busy-label="存檔中…">存檔並重新核對</span></button>
         <a class="btn btn--secondary btn--lg" href="/doc/{{ v.id }}">不改了</a>
       </div>
-      <p class="status-line" role="status" aria-live="polite" data-send-status="正在存檔並重新核對,請不要關閉這個畫面。"></p>
+      <p class="status-line" role="status" aria-live="polite" data-send-status="正在存檔並重新核對，請不要關閉這個畫面。"></p>
     </form>
     {% if v.can_reject %}
     {# 退回在系統內沒有復原,按下前先用確認框問一次(app.js 的 form[data-confirm];框在 base.html)。
@@ -102,7 +102,7 @@
           data-confirm-title="{{ v.reject_ask.title }}" data-confirm="{{ v.reject_ask.message }}"
           data-confirm-ok="{{ v.reject_ask.ok }}" data-confirm-field="{{ v.reject_ask.field }}">
       {{ csrf_input() }}
-      <button class="btn btn--danger btn--lg btn--block" type="submit">{{ icon("x") }}退回(品質不足)</button>
+      <button class="btn btn--danger btn--lg btn--block" type="submit">{{ icon("x") }}退回（品質不足）</button>
     </form>
     {% endif %}
   </div>

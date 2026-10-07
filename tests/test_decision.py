@@ -103,7 +103,7 @@ def test_unreadable_required_field_goes_to_review():
 def test_verified_confidence_overrides_low_self_confidence():
     # QR 相符:模型自評只有 0.6 也能自動歸檔
     r = make_result(confidence=0.6, verified_confidence=0.95,
-                    verification={"_summary": "QR 相符:字軌號碼、開立日期、總計額"})
+                    verification={"_summary": "QR 相符：字軌號碼、開立日期、總計額"})
     decision = decide(r, CFG)
     assert decision.action == "archive"
     assert decision.reason.startswith("驗證信心 0.95(QR 相符")
@@ -112,7 +112,7 @@ def test_verified_confidence_overrides_low_self_confidence():
 def test_verified_confidence_overrides_high_self_confidence():
     # QR 不符:模型自評 0.99 也要轉人工
     r = make_result(confidence=0.99, verified_confidence=0.10,
-                    verification={"_summary": "與 QR 不符:總計額"})
+                    verification={"_summary": "與 QR 不符：總計額"})
     decision = decide(r, CFG)
     assert decision.action == "review"
     assert "驗證信心 0.10" in decision.reason and "QR 不符" in decision.reason

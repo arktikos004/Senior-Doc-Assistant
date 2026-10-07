@@ -129,7 +129,7 @@ def review_doc(cfg, add_doc):
         path = cfg.paths.review / name
         path.write_bytes(content if content is not None else _png_bytes())
         return add_doc(result if result is not None else {"doc_type": "發票", "confidence": 0.5},
-                       action="review", target=path, reason="驗證信心 0.50 低於門檻 0.80,需人工確認")
+                       action="review", target=path, reason="驗證信心 0.50 低於門檻 0.80，需人工確認")
     return add
 
 
