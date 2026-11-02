@@ -1,6 +1,7 @@
 {# 「原件」欄(結果頁與待複核共用):照片直接顯示,先佔好寬高(size),延遲載入時版面不跳;
-   PDF 沒辦法在頁面裡預覽,只給另開連結;url 是空的表示原件已經不在。alt 是照片的替代文字。 #}
-{% macro original(url, is_pdf, size, alt) %}
+   PDF 沒辦法在頁面裡預覽,只給另開連結;url 是空的表示原件已經不在。alt 是照片的替代文字。
+   prepared_url:「系統處理後送給 AI 的影像」,收在 <details> 裡、延遲載入,打開才產生(PDF 也看得到轉出來的那張)。 #}
+{% macro original(url, is_pdf, size, alt, prepared_url=None) %}
 <aside class="doc-side" id="original" aria-labelledby="original-title">
   <h2 id="original-title">原件</h2>
   {% if url and is_pdf %}
@@ -15,6 +16,13 @@
   <a class="btn btn--secondary btn--block" href="{{ url }}" target="_blank" rel="noopener">{{ icon("external") }}放大看原件（另開新頁）</a>
   {% else %}
   <p class="empty">原件已經移走或不存在（例如複核後已改名存檔）。</p>
+  {% endif %}
+  {% if url and prepared_url %}
+  <details class="fold prepared">
+    <summary class="fold__head"><span>系統處理後送給 AI 的影像</span>{{ icon("chevron-right", "fold__chev") }}</summary>
+    <figure class="original"><img src="{{ prepared_url }}" alt="系統處理後送給 AI 的影像" loading="lazy" decoding="async"></figure>
+    <p class="field-hint">這是系統送給 AI 讀的影像，依目前的設定重新產生。</p>
+  </details>
   {% endif %}
 </aside>
 {% endmacro %}

@@ -19,6 +19,9 @@ https://www.einvoice.nat.gov.tw/static/ptl/ein_upload/attachments/1575448081679_
 
 QR 解碼先用 OpenCV;解不開時再用 zxing-cpp(Apache-2.0,源自 Google ZXing):掃描器存成黑白二值的
 證明聯,OpenCV 的兩種偵測器都解不開,zxing-cpp 解得開(10/5 實測)。zxing-cpp 沒安裝時照舊只用 OpenCV。
+zxing 找得到 QR 卻解不開時(照片上的陰影、褪色、雜訊),以那個 QR 的大小定範圍做局部二值化再試(11/2 實測)。
+還是找不到左側 QR 時,再試 alternate_images 的版本:掃描 PDF 的原解析度影像(200 DPI 的掃描檔放大成
+288 DPI 反而解不開,10/30 實測),以及照片找到紙張、拉正、補光後的影像(與 src/preprocess.py 同一套做法)。
 """
 from __future__ import annotations
 
@@ -51,6 +54,16 @@ INDEPENDENT_CHECKS = frozenset({
 
 LEFT_QR_LENGTH = 77
 PDF_RENDER_SCALE = 4.0   # 約 288 DPI;送模型用 2 倍即可,但 QR 模組要更細才解得出來
+
+# 找得到卻解不開的 QR:局部二值化(比周圍平均暗才算黑),範圍取 QR 寬度的一半。zxing 內建的二值化範圍
+# 只有約 40 像素,照片上褪色或有陰影的 QR 會讀錯好幾格;家人拍的發票有 1 張因此解開(11/2 實測)
+QR_RETRY_SIZES = 3        # 最多試幾個候選大小(由大到小)
+QR_MIN_SYMBOL = 40        # 比這個小(像素)的候選不試:左側 QR 至少 41×41 格
+QR_THRESHOLD_OFFSET = 5   # 比周圍平均暗這麼多才算黑;紙上的雜訊不會被當成黑格
+
+# QR 記載買方是一般消費者(買方統編 00000000)時,買方統編那一項的說明;對獎靠這句認出「沒有打統編」
+# (src/lottery.py),已經存的核對結果也是這句,不要改字
+QR_BUYER_CONSUMER = "買方為一般消費者，沒有買方統編可比對"
 
 _LEFT_QR = re.compile(
     r"(?P<invoice_number>[A-Z]{2}\d{8})"
@@ -145,6 +158,37 @@ def load_image(file_path: Path):
         return None
 
 
+def alternate_images(file_path: Path, image):
+    """第一次解不開時再試的影像(OpenCV BGR):掃描 PDF 的原解析度影像、照片找到紙張並拉正補光後的影像。
+
+    沒有適用的版本就什麼都不產生;任何一步出錯只記種類、跳過那個版本(只是少一次機會)。
+    QR(einvoice)與帳單條碼(billcode)共用。
+    """
+    try:
+        import cv2
+        import numpy as np
+        from PIL import Image
+
+        from ..preprocess import even_light, find_document, scanned_page_image, warp_document
+    except ImportError:
+        return
+    try:
+        native = scanned_page_image(file_path)
+        if native is not None:
+            yield cv2.cvtColor(np.asarray(native.convert("RGB")), cv2.COLOR_RGB2BGR)
+    except Exception as exc:
+        log.info("掃描檔原解析度影像讀不到:%s(%s)", log_label(file_path), type(exc).__name__)
+    try:
+        photo = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB) if image.ndim == 3 else image)
+        quad = find_document(photo)
+        flat = warp_document(photo, quad) if quad is not None else photo
+        lit = even_light(flat)
+        if quad is not None or lit is not None:
+            yield cv2.cvtColor(np.asarray((lit if lit is not None else flat).convert("RGB")), cv2.COLOR_RGB2BGR)
+    except Exception as exc:
+        log.info("找紙張與補光失敗,略過:%s(%s)", log_label(file_path), type(exc).__name__)
+
+
 def _variants(image):
     """依序產生較難解的前處理版本:原圖 → 拉對比(褪色)→ 銳化(模糊)→ 二值化 → 放大(太小)。"""
     import cv2
@@ -186,6 +230,7 @@ def _decode_once(image) -> list[str]:
 def _decode_zxing(image) -> list[str]:
     """用 zxing-cpp 解 QR:黑白二值的掃描檔,OpenCV 兩種偵測器都解不開、zxing 解得開(10/5 實測)。
 
+    找得到 QR 卻沒解出左側 QR 時,用 _decode_local_threshold 再試。
     沒安裝 zxing-cpp 或解碼出錯都回空清單——只是少一次機會,不影響其他檢查。
     """
     try:
@@ -193,11 +238,50 @@ def _decode_zxing(image) -> list[str]:
     except ImportError:
         return []
     try:
-        codes = zxingcpp.read_barcodes(image, formats=zxingcpp.BarcodeFormat.QRCode)
+        codes = zxingcpp.read_barcodes(image, formats=zxingcpp.BarcodeFormat.QRCode, return_errors=True)
     except Exception as exc:
         log.info("zxing 解碼出錯:%s", type(exc).__name__)
         return []
-    return [code.text for code in codes if code.text]
+    texts = [code.text for code in codes if code.valid and code.text]
+    if find_left_qr(texts) is None:
+        texts += [text for text in _decode_local_threshold(image, codes) if text not in texts]
+    return texts
+
+
+def _decode_local_threshold(image, codes) -> list[str]:
+    """zxing 偵測到卻解不開的 QR:以它寬度的一半為範圍做局部二值化,由大到小試最多 QR_RETRY_SIZES 個。
+
+    沒有這種候選(沒有 QR、或都解開了)就不做;出錯回目前解到的,只是少一次機會。
+    """
+    import cv2
+    import zxingcpp
+
+    sizes = sorted({_symbol_width(code.position) for code in codes if not code.valid}, reverse=True)
+    sizes = [size for size in sizes if size >= QR_MIN_SYMBOL][:QR_RETRY_SIZES]
+    found: list[str] = []
+    if not sizes:
+        return found
+    try:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)       # 先壓掉拍照與 JPEG 的細雜訊
+        for size in sizes:
+            binary = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY,
+                                           max(31, size // 2) | 1, QR_THRESHOLD_OFFSET)
+            for code in zxingcpp.read_barcodes(binary, formats=zxingcpp.BarcodeFormat.QRCode):
+                if code.text and code.text not in found:
+                    found.append(code.text)
+            if find_left_qr(found) is not None:
+                break
+    except Exception as exc:
+        log.info("局部二值化再試出錯:%s", type(exc).__name__)
+    return found
+
+
+def _symbol_width(position) -> int:
+    """zxing 回報的四角 → 外框的寬或高(取大的,像素)。"""
+    corners = (position.top_left, position.top_right, position.bottom_right, position.bottom_left)
+    xs, ys = [p.x for p in corners], [p.y for p in corners]
+    return max(max(xs) - min(xs), max(ys) - min(ys))
 
 
 def decode_qr_texts(image) -> list[str]:
@@ -244,7 +328,9 @@ def _compare(label: str, field_name: str, qr_value: str, model_value: Any,
     got = normalize(model_value)
     if got == qr_value:
         return entry("pass", f"QR 記載{label} {qr_value}，與辨識結果相符", [field_name])
-    return entry("fail", f"QR 記載{label} {qr_value}，辨識結果為 {got}", [field_name])
+    # 附上 QR 上的值:更正頁用它給「改成這個」(家人按了才填進欄位)
+    return {**entry("fail", f"QR 記載{label} {qr_value}，辨識結果為 {got}", [field_name]),
+            "expected": {field_name: qr_value}}
 
 
 def compare_with_result(qr: LeftQR, result: ExtractionResult) -> dict[str, dict[str, Any]]:
@@ -268,16 +354,16 @@ def compare_with_result(qr: LeftQR, result: ExtractionResult) -> dict[str, dict[
         out[CHECK_QR_TOTAL] = entry("pass", f"QR 記載總計 {qr.total_amount}，與辨識金額相符",
                                     ["amount"])
     else:
-        out[CHECK_QR_TOTAL] = entry(
-            "fail", f"QR 記載總計 {qr.total_amount}，辨識金額為 {float(result.amount):g}", ["amount"])
+        out[CHECK_QR_TOTAL] = {**entry(
+            "fail", f"QR 記載總計 {qr.total_amount}，辨識金額為 {float(result.amount):g}", ["amount"]),
+            "expected": {"amount": qr.total_amount}}
 
     out[CHECK_QR_SELLER] = _compare("賣方統編", "fields.seller_tax_id", qr.seller_tax_id,
                                     fields.get("seller_tax_id"))
 
     buyer = fields.get("buyer_tax_id")
     if qr.buyer_tax_id == CONSUMER_TAX_ID and (is_blank(buyer) or str(buyer).strip() == CONSUMER_TAX_ID):
-        out[CHECK_QR_BUYER] = entry("skip", "買方為一般消費者，沒有買方統編可比對",
-                                    ["fields.buyer_tax_id"])
+        out[CHECK_QR_BUYER] = entry("skip", QR_BUYER_CONSUMER, ["fields.buyer_tax_id"])
     else:
         out[CHECK_QR_BUYER] = _compare("買方統編", "fields.buyer_tax_id", qr.buyer_tax_id, buyer)
 
@@ -303,6 +389,12 @@ def verify_einvoice(result: ExtractionResult, file_path: Path) -> dict[str, dict
         return {CHECK_QR: entry("skip", "讀不到原檔影像，無法解碼 QR", [])}
     texts = decode_qr_texts(image)
     qr = find_left_qr(texts)
+    if qr is None:
+        for extra in alternate_images(file_path, image):
+            texts += [text for text in decode_qr_texts(extra) if text not in texts]
+            qr = find_left_qr(texts)
+            if qr is not None:
+                break
     if qr is None:
         detail = ("有解出 QR，但不是電子發票左側 QR（前 77 碼格式不符）" if texts
                   else "影像中找不到可解碼的電子發票 QR Code")

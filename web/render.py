@@ -19,6 +19,9 @@ from markupsafe import Markup
 from src.actions import BILL_TITLES, CALENDAR, MEDICATION_SCHEDULE
 from src.config import DEFAULT_OLLAMA_MODEL, DEFAULT_WORKERS_AI_MODEL, AppConfig
 from src.dates import parse_date
+from src.duplicates import SAME_FILE, SAME_INVOICE, verified_invoice_number
+from src.lottery import SETTING_PREFIX as LOTTERY_PREFIX
+from src.lottery import Numbers, claim_hint, match, period_label, period_of, prize_text, qr_buyer_has_tax_id
 from src.models import (
     CATEGORIES,
     CATEGORY_DOCS,
@@ -31,8 +34,11 @@ from src.models import (
     catalog_entry,
 )
 from src.parsing import clean_currency
+from src.store import CONSENT_PREFIX, DOCUMENT_DELETED
 from src.settings import PROVIDER, PURGED, THRESHOLD, THRESHOLD_CHOICES, THRESHOLD_MAX, THRESHOLD_MIN
-from src.verify import VERIFY_ERROR_SUMMARY
+from src.pipeline import model_unavailable
+from src.verify import INDEPENDENT_CHECKS, VERIFY_ERROR_SUMMARY
+from src.verify.billcode import CHECK_BARCODE_AMOUNT
 from src.verify.einvoice import (
     CHECK_QR_BUYER,
     CHECK_QR_DATE,
@@ -40,7 +46,6 @@ from src.verify.einvoice import (
     CHECK_QR_RANDOM,
     CHECK_QR_SELLER,
     CHECK_QR_TOTAL,
-    INDEPENDENT_CHECKS,
 )
 from web.fields import field_spec, field_specs, required_specs
 
@@ -91,6 +96,7 @@ _ICON_PATHS: dict[str, str] = {
     "check": '<path d="M20 6 9 17l-5-5"/>',
     "x": '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
     "undo": '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+    "refresh": '<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v6h-6"/>',
     "dash": '<path d="M5 12h14"/>',
     "clock": '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     "calendar": '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4"/>'
@@ -283,7 +289,7 @@ _CHECK_RANK = {"pass": 1, "match": 2, "fail": 3}
 def _field_checks(verification: dict[str, Any]) -> dict[str, str]:
     """欄位 → 最嚴重的驗證狀態;欄位名同時接受 'due_date' 與 'fields.due_date'。
 
-    fail 優先;pass 再分兩種:match 是與 QR 等獨立證據相符,pass 只通過格式或合理性規則(弱證據)。
+    fail 優先;pass 再分兩種:match 是與 QR、帳單條碼等獨立證據相符,pass 只通過格式或合理性規則(弱證據)。
     """
     status: dict[str, str] = {}
     for name, check in _checks(verification):
@@ -339,7 +345,7 @@ def field_rows(result: dict[str, Any]) -> list[dict[str, Any]]:
         st = checks.get(key)
         row["check"] = "pass" if st == "match" else st
         # 只過規則的欄位寫「已檢查」,不寫成被證實
-        row["check_text"] = {"match": "與 QR 相符", "pass": "已檢查", "fail": "不符"}.get(st or "", "")
+        row["check_text"] = {"match": _match_text(result), "pass": "已檢查", "fail": "不符"}.get(st or "", "")
         rows.append(row)
     return rows
 
@@ -478,8 +484,24 @@ def medication_view(payload: dict[str, Any]) -> dict[str, Any]:
 
 # ---- 自我驗證 ---------------------------------------------------------------
 
-# 與獨立證據(電子發票 QR)比對的檢查說「相符/不符」;格式、檢查碼、合理性只是規則,
+# 與獨立證據(電子發票 QR、帳單條碼的應繳金額)比對的檢查說「相符/不符」;格式、檢查碼、合理性只是規則,
 # 通過不代表讀對,說「通過/沒通過」(弱證據不得呈現成已證實)
+_BILL_EVIDENCE_NOTE = ("核對由程式比對帳單上的超商條碼，並檢查格式與合理性，不是 AI 自己打分數。"
+                      "條碼只能證明金額和條碼上的一樣，不能證明帳單屬實。")
+_BILL_RULES_NOTE = "這張帳單沒有讀到超商條碼，程式只檢查格式與合理性，不能證明讀對，請對照原件。"
+
+
+def _by_barcode(result: dict[str, Any]) -> bool:
+    """獨立證據是帳單的超商條碼(條碼應繳金額有比對出結果),不是電子發票的 QR。"""
+    check = dict(_checks(result.get("verification"))).get(CHECK_BARCODE_AMOUNT) or {}
+    return check.get("status") in ("pass", "fail")
+
+
+def _match_text(result: dict[str, Any]) -> str:
+    """欄位旁「與獨立證據相符」的寫法:比的是帳單條碼就說條碼,否則是電子發票的 QR。"""
+    return "與條碼相符" if _by_barcode(result) else "與 QR 相符"
+
+
 _STATUS_TEXT = {"pass": "相符", "fail": "不符", "skip": "無法核對"}
 _RULE_STATUS_TEXT = {"pass": "通過", "fail": "沒通過", "skip": "無法核對"}
 _STATUS_ICON = {"pass": "check", "fail": "x", "skip": "dash"}
@@ -491,6 +513,7 @@ def verification_view(result: dict[str, Any]) -> dict[str, Any]:
     conflict:有與獨立證據矛盾的檢查;evidence:有任何與獨立證據比對過的檢查(相符或不符)。
     沒有 evidence 時整份只有弱證據,note 要講清楚「不能證明讀對」。
     """
+    is_bill = result.get("doc_type") == "帳單"
     checks = []
     for name, check in _checks(result.get("verification")):
         status = check.get("status") if check.get("status") in _STATUS_TEXT else "skip"
@@ -513,16 +536,16 @@ def verification_view(result: dict[str, Any]) -> dict[str, Any]:
     elif counts["fail"]:
         overall, text = "fail", f"有 {counts['fail']} 項{'不符' if conflict else '沒通過'}，請對照原件"
     elif matched:
-        overall, text = "pass", f"QR Code 相符 {matched} 項"
+        overall, text = "pass", f"{'條碼相符' if _by_barcode(result) else 'QR Code 相符'} {matched} 項"
     elif counts["pass"]:
         overall, text = "pass", f"檢查通過 {counts['pass']} 項"
     else:
         overall, text = "skip", "這份文件沒有能自動核對的項目"
 
     if evidence:
-        note = "核對由程式比對發票上的 QR Code，並檢查格式與檢查碼，不是 AI 自己打分數。"
+        note = _BILL_EVIDENCE_NOTE if _by_barcode(result) else "核對由程式比對發票上的 QR Code，並檢查格式與檢查碼，不是 AI 自己打分數。"
     elif counts["pass"] or counts["fail"]:
-        note = "這份文件沒有 QR Code 可以比對，程式只檢查格式與合理性，不能證明讀對，請對照原件。"
+        note = _BILL_RULES_NOTE if is_bill else "這份文件沒有 QR Code 可以比對，程式只檢查格式與合理性，不能證明讀對，請對照原件。"
     else:
         note = ""
     vc = result.get("verified_confidence")
@@ -554,7 +577,9 @@ def _action_state(action: dict[str, Any]) -> tuple[str, str, str]:
     """(畫面文字, 樣式, 圖示):依分級與狀態。自動行動建立時就已完成,只看是否被退回。"""
     tier, status, kind = action.get("tier"), action.get("status"), action.get("kind")
     if status == "rejected":
-        return ("家人已退回" if tier == "confirm" else "已取消", "off", "x")
+        return ("已退回" if tier == "confirm" else "已取消", "off", "x")
+    if status == "completed":
+        return ("已完成", "auto", "check")
     if tier == "auto":
         return ("已列入提醒" if kind == CALENDAR else "已自動處理", "auto", "check")
     if tier == "confirm":
@@ -612,8 +637,15 @@ _DECISION_STATE = {
 
 
 def _decision_state(doc: dict[str, Any]) -> tuple[str, str, str]:
-    """文件狀態 (畫面文字, 樣式, 圖示);還沒有決策結果時是「處理中」。"""
+    """文件狀態 (畫面文字, 樣式, 圖示);還沒有決策結果時是「處理中」。模型沒回應的不是照片讀不出來:「還沒讀」。"""
+    if doc_busy(doc):
+        return ("還沒讀", "wait", "clock")
     return _DECISION_STATE.get(doc.get("action"), ("處理中", "wait", "clock"))
+
+
+def doc_busy(doc: dict[str, Any]) -> bool:
+    """沒讀成是因為模型沒回應(服務沒開、逾時、忙碌):照片沒問題,可以重新辨識(src.pipeline.model_unavailable)。"""
+    return doc.get("action") == "failed" and model_unavailable(doc.get("error"))
 # 轉人工的白話原因:QR 比對項目 → 看得懂的欄位名
 _QR_PLAIN = {CHECK_QR_TOTAL: "金額", CHECK_QR_DATE: "日期", CHECK_QR_INVOICE: "發票號碼",
              CHECK_QR_SELLER: "賣方統編", CHECK_QR_BUYER: "買方統編", CHECK_QR_RANDOM: "隨機碼"}
@@ -622,7 +654,7 @@ _QR_PLAIN = {CHECK_QR_TOTAL: "金額", CHECK_QR_DATE: "日期", CHECK_QR_INVOICE
 def review_reason(result: dict[str, Any] | None) -> str:
     """為什麼要複核,用白話說;不寫「驗證信心 0.10、門檻 0.80」這類工程用語(數字留在核對區)。
 
-    順序比照 src/decision.py:不支援的類型 → 核對程式出錯 → 與 QR 矛盾 → 規則沒通過 → 必要欄位沒讀到 → AI 沒把握。
+    順序比照 src/decision.py:不支援的類型 → 核對程式出錯 → 與 QR/條碼矛盾 → 規則沒通過 → 必要欄位沒讀到 → AI 沒把握。
     只依讀值與核對結果組句,不推論。
     """
     result = result or {}
@@ -635,6 +667,8 @@ def review_reason(result: dict[str, Any] | None) -> str:
         return "這次的核對沒有完成（核對程式出錯），請對照原件確認。"
     failed = [name for name, check in _checks(result.get("verification")) if check.get("status") == "fail"]
     conflicts = [name for name in failed if name in INDEPENDENT_CHECKS]
+    if CHECK_BARCODE_AMOUNT in conflicts:
+        return "讀到的金額和帳單上的超商條碼不一樣，請對照原件確認。"
     if conflicts:
         words = "、".join(dict.fromkeys(_QR_PLAIN.get(n, n.removeprefix("QR ")) for n in conflicts))
         return f"讀到的{words}和發票上的 QR Code 不一樣，請對照原件確認。"
@@ -696,6 +730,8 @@ def doc_label(doc: dict[str, Any]) -> str | None:
 def doc_title(doc: dict[str, Any]) -> str:
     """文件標題(清單、家人確認、待複核都用):家人上傳時選了清單上的名稱就用它,否則用讀到的文件類型。"""
     result = doc.get("result") or {}
+    if doc_busy(doc) and not doc_label(doc):
+        return "還沒讀的文件"   # 模型沒回應:不是讀不出來
     return doc_label(doc) or result.get("doc_type") or doc.get("doc_type") or (
         "無法辨識的文件" if doc.get("action") == "failed" else "文件")
 
@@ -832,15 +868,19 @@ def answer_view(result: dict[str, Any], actions: list[dict[str, Any]],
             rows.extend(_fact_rows(result, "藥袋"))
     else:
         rows.extend(_fact_rows(result, doc_type))
+        if doc_type == "發票":
+            primary = _primary_action(actions, CALENDAR)   # 對獎頁加的領獎提醒:在這裡取消/恢復
     _pair_halves(rows)
 
     if primary:
         # 生效中的期限提醒在到期前都列在首頁(reminder_rows 會略過已過期的),所以只說「到期前」
-        listed = primary.get("kind") == CALENDAR and primary["state_class"] == "auto"
+        completed = primary.get("status") == "completed"
+        listed = primary.get("kind") == CALENDAR and primary["state_class"] == "auto" and not completed
         ans["status"] = {"text": primary["state_text"], "icon": primary["state_icon"],
                          "class": primary["state_class"],
-                         "sub": "到期前會列在首頁「要記得的事」" if listed else "", "toggle": None}
-        if is_auto_reminder(primary):
+                         "sub": "到期前會列在首頁「要記得的事」" if listed
+                         else ("移到首頁「已完成」，按錯了可以在那裡改回" if completed else ""), "toggle": None}
+        if is_auto_reminder(primary) and not completed:
             # 自動提醒在這裡取消;取消後同一個位置可以恢復(不跳確認框,按錯能馬上救回)
             cancelled = primary.get("status") == "rejected"
             if cancelled:
@@ -886,8 +926,8 @@ def reminder_rows(docs: list[dict[str, Any]], actions: list[dict[str, Any]], tod
     waiting, upcoming, alerts, done = [], [], [], []
     for raw in actions:
         # 被家人更正取代的舊行動不列(和結果頁同一條規則),不管它現在的狀態:只看狀態的話,舊期限可能和新的一起冒出來
-        if raw.get("superseded"):
-            continue
+        if raw.get("superseded") or raw.get("status") == "completed":
+            continue      # 按了「繳好了/辦好了」的改列在「已完成」(completed_rows)
         v = action_view(raw)
         if v["state_class"] == "off":
             continue
@@ -909,7 +949,8 @@ def reminder_rows(docs: list[dict[str, Any]], actions: list[dict[str, Any]], tod
             parts = date_parts(str(day)) or ("", "")
             row.update(month=parts[0], day=parts[1], sort=due.isoformat(),
                        sub="，".join(x for x in (vendor, f"{parts[0]}{parts[1]}日前") if x),
-                       amount=_amount_text(result) if result.get("doc_type") == "帳單" else "")
+                       amount=_amount_text(result) if result.get("doc_type") == "帳單" else "",
+                       done={"id": v["id"], "label": done_words(result)[0]})
         elif v["kind"] == MEDICATION_SCHEDULE and v["status"] == "done":
             m = v["medication"] or {}
             slots = [s for s, _ in m.get("slots", [])] + (["需要時"] if m.get("prn") else [])
@@ -935,6 +976,49 @@ def reminder_rows(docs: list[dict[str, Any]], actions: list[dict[str, Any]], tod
     return (waiting + upcoming + alerts + done)[:limit]
 
 
+DONE_COMPLETE, DONE_UNDO = "complete", "undo"     # 「繳好了/辦好了」與改回(POST /reminder/{id}/done 的 decision)
+COMPLETED_DAYS = 7                                 # 「已完成」列幾天內按的
+
+
+def done_words(result: dict[str, Any]) -> tuple[str, str]:
+    """(按鈕, 改回) 的說法:帳單說「繳好了/還沒繳」,其他期限(公文)說「辦好了/還沒辦」。"""
+    return ("繳好了", "還沒繳") if (result or {}).get("doc_type") == "帳單" else ("辦好了", "還沒辦")
+
+
+def completed_rows(docs: list[dict[str, Any]], actions: list[dict[str, Any]], events: list[dict[str, Any]],
+                   today: date, names: dict[str, str]) -> list[dict[str, Any]]:
+    """首頁「已完成」:COMPLETED_DAYS 天內按了「繳好了/辦好了」的期限提醒,寫出誰、哪天按的與「改回」。
+
+    events 是 Store.list_audit_events(新的在前),取每個行動最近一次 complete_reminder;
+    names 是登入 email → 家庭成員的稱呼。只是記下來,不代表系統查過或付過款。
+    """
+    by_id = {d["id"]: d for d in docs}
+    pressed: dict[int, dict[str, Any]] = {}
+    for event in events:
+        if event.get("event") == "complete_reminder" and event.get("action_id") not in pressed:
+            pressed[event["action_id"]] = event
+    rows = []
+    for raw in actions:
+        event = pressed.get(raw.get("id"))
+        if raw.get("status") != "completed" or raw.get("superseded") or event is None:
+            continue
+        try:
+            when = datetime.fromisoformat(str(event.get("created_at")))
+        except ValueError:
+            continue
+        if (today - when.date()).days > COMPLETED_DAYS:
+            continue
+        result = (by_id.get(raw.get("document_id")) or {}).get("result") or {}
+        actor = event.get("actor")
+        button, undo = done_words(result)
+        rows.append({"id": raw["id"], "title": action_view(raw)["title"],
+                     "amount": _amount_text(result) if result.get("doc_type") == "帳單" else "",
+                     "who": "這台電腦" if actor == "local" else names.get(actor or "") or actor or "未記錄身分",
+                     "when": f"{when.month}/{when.day}", "button": button, "undo": undo, "sort": when.isoformat()})
+    rows.sort(key=lambda r: r["sort"], reverse=True)
+    return rows
+
+
 def _summary_note(summary_is_ai: bool, corrected: bool) -> str:
     """白話解說下面那句說明:寫清楚這段是誰整理的(原則 7)。家人更正後不留 AI 的舊解說,改由系統依欄位整理。"""
     if summary_is_ai:
@@ -944,13 +1028,47 @@ def _summary_note(summary_is_ai: bool, corrected: bool) -> str:
     return "AI 沒有提供解說，這段是系統依讀到的欄位整理的。"
 
 
+def _lottery_url(result: dict[str, Any]) -> str | None:
+    """發票結果頁的「統一發票對獎」連到這張發票的那一期;讀不到日期就連到對獎頁預設的那一期。
+
+    不是發票,或 QR 記載有買方統編(打統編的發票不能兌獎)回 None。
+    """
+    if result.get("doc_type") != "發票" or qr_buyer_has_tax_id(result):
+        return None
+    try:
+        return f"/lottery?period={period_of(date.fromisoformat(str(result.get('date') or '')))}"
+    except ValueError:
+        return "/lottery"
+
+
+_DUPLICATE_REASONS = {SAME_FILE: "上傳的檔案一模一樣", SAME_INVOICE: "發票號碼一樣（兩份都經過 QR Code 核對）"}
+
+
+def duplicate_view(dup: dict[str, Any] | None) -> dict[str, str] | None:
+    """「這張可能已經上傳過」提示框的文字(src.duplicates.find_duplicate 的結果);另一份比較早寫「之前」,比較晚寫「之後」。"""
+    if not dup:
+        return None
+    day = fmt_short_date(str(dup.get("created_at") or "")[:10])
+    reason = _DUPLICATE_REASONS[dup["reason"]]
+    if dup["earlier"]:
+        text, link = f"{day}上傳的那一份，{reason}。", "看之前那一份"
+    else:
+        text, link = f"{day}又上傳了一份，{reason}。", "看之後那一份"
+    return {"text": text, "link": link, "href": f"/doc/{int(dup['id'])}"}
+
+
 def doc_view(doc: dict[str, Any], *, file_url: str | None, hint: str | None = None,
              actions: list[dict[str, Any]] | None = None,
              file_size: tuple[int, int] | None = None,
-             correct_url: str | None = None, corrected: bool = False) -> dict[str, Any]:
+             correct_url: str | None = None, corrected: bool = False,
+             retry_url: str | None = None, duplicate: dict[str, Any] | None = None,
+             prepared_url: str | None = None) -> dict[str, Any]:
     """結果頁的畫面資料。hint 是上傳時使用者選的類型(只用來決定是否顯示藥袋聲明);
     actions 是這份文件的 action_view 清單,用來組摘要上的提醒/家人確認狀態。
-    correct_url:「更正讀值」的連結(不能更正的文件是 None);corrected:家人更正過這份文件的讀值。"""
+    correct_url:「更正讀值」的連結(不能更正的文件是 None);corrected:家人更正過這份文件的讀值。
+    retry_url:模型沒回應而沒讀成時「重新辨識」送去哪裡(看的人不能上傳就是 None,只寫說明)。
+    duplicate:可能是同一張的另一份(src.duplicates.find_duplicate;沒有是 None),標題下面提示,不自動刪。
+    prepared_url:「系統處理後送給 AI 的影像」(原件不在就是 None)。"""
     result = doc.get("result") or {}
     state_text, state_class, state_icon = _decision_state(doc)
     summary = (result.get("plain_summary") or "").strip()
@@ -968,6 +1086,10 @@ def doc_view(doc: dict[str, Any], *, file_url: str | None, hint: str | None = No
         "when": fmt_when(doc.get("created_at")),
         "review_reason": doc_review_reason(doc) if doc.get("action") == "review" else "",
         "failed": doc.get("action") == "failed" or not result,
+        "busy": doc_busy(doc),
+        "retry_url": retry_url,
+        "duplicate": duplicate_view(duplicate),
+        "lottery_url": _lottery_url(result) if doc.get("action") != "failed" else None,
         "state_text": state_text, "state_class": state_class, "state_icon": state_icon,
         "summary": summary or (fallback_summary(result) if result else ""),
         "summary_is_ai": bool(summary),
@@ -980,6 +1102,7 @@ def doc_view(doc: dict[str, Any], *, file_url: str | None, hint: str | None = No
         "file_url": file_url,
         "file_size": file_size,   # (寬, 高):<img> 先佔位,延遲載入時版面不跳
         "is_pdf": is_pdf(doc.get("target_path")),
+        "prepared_url": prepared_url,
         "source_model": result.get("source_model") or "",
     }
 
@@ -1363,6 +1486,53 @@ def _item_view(j: int, entry: dict[str, Any], errors: dict[str, str]) -> dict[st
     }
 
 
+# 「改成機讀碼上的值」那一句的欄位說法:只列更正表單上有的欄位(發票的統編、隨機碼不在表單上);
+# 帳單條碼只有應繳金額
+_QR_FIX_LABELS = {"amount": "總計", "date": "開立日期", "invoice_number": "發票號碼"}
+_BARCODE_FIX_LABELS = {"amount": "應繳金額"}
+
+
+def evidence_fixes(result: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """與 QR 或帳單條碼矛盾的欄位 → 機讀碼上的值,給更正頁「改成這個」:{欄位: {value, shown, lead}}。
+
+    value 是填進表單的字、shown 是畫面上的寫法、lead 是那一句的開頭。只取獨立證據的檢查附上的
+    expected(src/verify);值一律當資料(截短,畫面上跳脫)。按了只填進欄位,存檔後一樣重新核對。
+    """
+    fixes: dict[str, dict[str, str]] = {}
+    for name, check in _checks(result.get("verification")):
+        expected = check.get("expected")
+        if check.get("status") != "fail" or name not in INDEPENDENT_CHECKS or not isinstance(expected, dict):
+            continue
+        barcode = name == CHECK_BARCODE_AMOUNT
+        labels = _BARCODE_FIX_LABELS if barcode else _QR_FIX_LABELS
+        for key, raw in expected.items():
+            if key in fixes or key not in labels or _is_empty(raw) or (key == "amount" and not _is_number(raw)):
+                continue
+            value = _form_text(raw)[:40]
+            shown = fmt_amount(raw) if key == "amount" else fmt_date(value) if key == "date" else value
+            source = "帳單上的超商條碼記的" if barcode else "發票上的 QR Code 記的"
+            fixes[key] = {"value": value, "shown": shown, "lead": f"{source}{labels[key]}是"}
+    return fixes
+
+
+def _fix_for(fix: dict[str, str] | None, current: Any, key: str) -> dict[str, str] | None:
+    """欄位現在填的已經是機讀碼上的值(家人改好了、表單重畫)就不再提;current 是表單上的字。"""
+    if fix is None:
+        return None
+    text = str(current).strip()
+    same = text == fix["value"]
+    if key == "amount" and text and not same:
+        amount, _ = _parse_amount(text)
+        same = amount is not None and abs(amount - float(fix["value"])) < 0.005
+    if same:
+        return None
+    if not text:
+        now = "空白"
+    else:
+        now = f"{text[:40]} 元" if key == "amount" else fmt_date(text[:40]) if key == "date" else text[:40]
+    return dict(fix, current=now)
+
+
 def correct_view(doc: dict[str, Any], values: dict[str, Any] | None = None,
                  errors: dict[str, str] | None = None, *, file_url: str | None,
                  file_size: tuple[int, int] | None = None, add_item: bool = False) -> dict[str, Any]:
@@ -1381,6 +1551,7 @@ def correct_view(doc: dict[str, Any], values: dict[str, Any] | None = None,
     category = chosen if chosen in ASSIGNABLE_CATEGORIES else doc_category(doc)
     fields: list[dict[str, Any]] = []
     items: list[dict[str, Any]] | None = None
+    fixes = evidence_fixes(result)
     for key in _form_keys(doc_type):
         if key == "fields.items":
             entries = list(values.get("items") or [_blank_item()])
@@ -1394,6 +1565,7 @@ def correct_view(doc: dict[str, Any], values: dict[str, Any] | None = None,
                           kind=kind, required=field_spec(doc_type, key).required, hint=_FORM_HINTS.get(key, ""),
                           error=errors.get(key, ""), spellcheck=key not in _NO_SPELLCHECK),
             "options": BILL_KINDS if kind == "choice" else (),
+            "fix": _fix_for(fixes.get(key), values.get(key, ""), key),
         })
     inputs = fields + [f for it in items or [] for f in (it["name"], it["usage"], it["days"])]
     focus = next((f["id"] for f in inputs if f["error"]), None)
@@ -1424,6 +1596,72 @@ def correct_view(doc: dict[str, Any], values: dict[str, Any] | None = None,
     }
 
 
+# ---- 上傳後的進度頁(UX-3) ------------------------------------------------------------
+# 四步和 web/jobs.py 的 STAGES 同順序;伺服器真的做完的那一步才是 done,正在做的是 now,其餘 todo。
+# 「AI 照抄文字」寫誰在讀(依上傳當下的辨識模式);排隊時寫前面還有幾張
+
+_PROGRESS_STEPS = (
+    ("received", "收到照片", "檢查過格式，也拿掉了拍攝地點"),
+    ("read", "AI 照抄文字", "AI 讀字，只照抄、不換算"),
+    ("checked", "程式核對", "比對 QR Code 或帳單條碼，檢查日期與金額的格式"),
+    ("decided", "決定怎麼處理", "照固定規則：收進文件櫃、列入提醒，或交給家人確認"),
+)
+_READ_HINTS = {"ollama": "Gemma 4 在這台電腦讀字，只照抄、不換算",
+               "workers_ai": "Gemma 4 讀字，只照抄、不換算",
+               "mock": "展示模式：使用模擬讀值"}
+_STEP_STATE_TEXT = {"done": "（做完了）", "now": "（正在做）", "todo": "（還沒開始）"}
+PROGRESS_NOW_SECONDS = 2   # 正在做的那一步超過這麼多秒才寫「已 N 秒」,不會一開頭就閃「已 0 秒」
+
+
+def _step_seconds(seconds: float) -> str:
+    if seconds < 0.05:
+        return "不到 0.1 秒"   # 寫「0.0 秒」看起來像沒做
+    return f"{seconds:.1f} 秒" if seconds < 10 else f"{seconds:.0f} 秒"
+
+
+def progress_view(snap: dict[str, Any], *, token: str, provider: str, is_pdf: bool, label: str,
+                  has_photo: bool) -> dict[str, Any]:
+    """進度頁(與每秒一次的狀態查詢)的畫面資料;snap 是 JobBoard.snapshot。label 是家人選的類型或文件名稱。"""
+    seconds = snap.get("seconds") or {}
+    current = next((key for key, _, _ in _PROGRESS_STEPS if key not in seconds), None)
+    steps = []
+    for key, title, hint in _PROGRESS_STEPS:
+        if key == "received" and is_pdf:
+            title, hint = "收到檔案", "檢查過格式"
+        elif key == "read":
+            hint = _READ_HINTS.get(provider, hint)
+        time_text = ""
+        if key in seconds:
+            state, time_text = "done", _step_seconds(seconds[key])
+        elif key == current:
+            state = "now"
+            if snap.get("queued"):
+                ahead = snap.get("ahead") or 0
+                hint = f"前面還有 {ahead} 份，輪到這份就開始" if ahead else "馬上開始"
+            elif snap.get("elapsed", 0) >= PROGRESS_NOW_SECONDS:
+                time_text = f"已 {int(snap['elapsed'])} 秒"
+        else:
+            state = "todo"
+        steps.append({"id": key, "title": title, "hint": hint, "state": state, "time": time_text,
+                      "state_text": _STEP_STATE_TEXT[state]})
+    now = next((s for s in steps if s["state"] == "now"), None)
+    if now is None:
+        say = "快好了"
+    elif snap.get("queued") and snap.get("ahead"):
+        say = f"排隊中，前面還有 {snap['ahead']} 份"
+    else:
+        say = f"現在：{now['title']}"
+    uploaded = "剛上傳的 PDF 檔" if is_pdf else "剛上傳的照片"
+    return {
+        "token": token,
+        "title": "正在讀這份文件" if is_pdf else "正在讀這張文件",
+        "photo_text": f"{uploaded}：{label}" if label else uploaded,
+        "has_photo": has_photo,
+        "steps": steps,
+        "say": say,
+    }
+
+
 # ---- 設定頁(SET) -------------------------------------------------------------------
 # 四塊:系統狀態(唯讀)、這台裝置的偏好(存在瀏覽器,app.js 讀寫)、會影響全家的系統設定、資料管理。
 # 規則(門檻範圍、雲端要金鑰、藥袋一律本機)在 src/settings.py;這裡只把目前的設定排成畫面文字。
@@ -1446,8 +1684,11 @@ PURGE_CONFIRM = "所有文件的照片、讀值、提醒與更正紀錄都會刪
 # 有 JS 時用 base.html 的確認框,按了「確定…」app.js 才把確認欄位(值是 "1")補進表單;伺服器沒收到這個欄位
 # 就不做(沒有 JS、或 app.js 沒跑起來),改回一頁確認頁(ask.html)問同樣的字
 CONFIRM_CLOUD_FIELD, CONFIRM_PURGE_FIELD, CONFIRM_REJECT_FIELD = "confirm_cloud", "understood", "confirm_reject"
+CONFIRM_DELETE_FIELD = "confirm_delete"
 PURGE_ASK = {"title": PURGE_CONFIRM_TITLE, "message": PURGE_CONFIRM, "ok": PURGE_CONFIRM_OK,
              "field": CONFIRM_PURGE_FIELD}
+DELETE_DOC_ASK = {"title": "確定要刪除這份文件嗎？", "ok": "確定刪除", "field": CONFIRM_DELETE_FIELD,
+                  "message": "照片、讀到的內容、提醒和這份文件的操作紀錄都會刪掉，不能復原。"}
 REJECT_DOC_ASK = {"title": "確定要退回這份文件嗎？", "message": "這份文件會改成「讀不出來」，請長輩重新拍一張。",
                   "ok": "確定退回", "field": CONFIRM_REJECT_FIELD}
 
@@ -1503,6 +1744,17 @@ def setting_change_text(change: dict[str, Any]) -> str:
             return f"自動存檔門檻改成 {value}"
     if key == PURGED:
         return "刪除全部資料"
+    if isinstance(key, str) and key.startswith(CONSENT_PREFIX):
+        return f"{key.removeprefix(CONSENT_PREFIX)} 看過資料使用說明"
+    if key == DOCUMENT_DELETED:
+        return f"刪除一份文件（第 {change.get('old_value')} 號）"
+    if isinstance(key, str) and key.startswith(LOTTERY_PREFIX):
+        return f"更新統一發票對獎號碼（{period_label(key.removeprefix(LOTTERY_PREFIX))}）"
+    if isinstance(key, str) and key.startswith("member:"):
+        email = key.removeprefix("member:")
+        if value == "removed":
+            return f"移除家庭成員 {email}"
+        return f"更新家庭成員 {email}（{'家人' if value == 'family' else '長輩' if value == 'elder' else value}）"
     return f"{key} 改成 {value}"
 
 
@@ -1562,7 +1814,71 @@ def settings_view(current: AppConfig, *, default_threshold: float, models: dict[
         "cloud_confirm": cloud_ask(current.local_only_doc_types),
         "purge_confirm": PURGE_ASK,
         "changes": [{"when": fmt_when(c.get("created_at")), "text": setting_change_text(c),
-                     "actor": c.get("actor") or ""} for c in changes],
+                     "actor": "這台電腦" if c.get("actor") == "local" else c.get("actor") or ""} for c in changes],
+    }
+
+
+# ---- 統一發票對獎(/lottery) ---------------------------------------------------
+# 號碼由家人照公告輸入;只比對號碼經 QR Code 核對相符的發票,其他只算張數。比對規則在 src/lottery.py。
+
+_ICON_PATHS.update({
+    "star": '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+})
+LOTTERY_FIELDS: tuple[tuple[str, str], ...] = (
+    ("special", "特別獎（1,000 萬元）"), ("grand", "特獎（200 萬元）"),
+    ("first1", "頭獎（第 1 組）"), ("first2", "頭獎（第 2 組）"), ("first3", "頭獎（第 3 組）"),
+)
+
+
+def lottery_view(period: str, periods: list[tuple[str, int]], invoices: list[dict[str, Any]],
+                 numbers: Numbers | None, *, can_edit: bool, can_remind: bool,
+                 reminded: frozenset[int] | set[int] = frozenset(),
+                 values: dict[str, Any] | None = None, errors: dict[str, str] | None = None) -> dict[str, Any]:
+    """對獎頁的畫面資料。
+
+    periods:(期別, 這一期的發票張數),給上面的期別連結;invoices:這一期的發票(Store 的文件)。
+    numbers:這一期存好的號碼(還沒輸入是 None);reminded:已經加過領獎提醒的文件編號。
+    values/errors:存檔沒過時重畫表單用,留住家人剛填的值、寫出哪一欄不對。文件文字一律當資料顯示。
+    """
+    errors = errors or {}
+    if values is not None:
+        shown = {name: str(values.get(name) or "") for name, _ in LOTTERY_FIELDS} | {
+            "claim_by": str(values.get("claim_by") or "")}
+    elif numbers is not None:
+        shown = {"special": numbers.special, "grand": numbers.grand,
+                 **{f"first{i}": n for i, n in enumerate(numbers.first, 1)}, "claim_by": numbers.claim_by.isoformat()}
+    else:
+        shown = {name: "" for name, _ in LOTTERY_FIELDS} | {"claim_by": ""}
+    rows, skipped, taxed = [], 0, 0
+    for doc in sorted(invoices, key=lambda d: (str((d.get("result") or {}).get("date") or ""), d["id"])):
+        result = doc.get("result") or {}
+        number = verified_invoice_number(result)
+        if number is None:
+            skipped += 1
+            continue
+        buyer = qr_buyer_has_tax_id(result)     # 打統編的發票不能兌獎(src/lottery.py)
+        if buyer is not False:
+            taxed += buyer is True
+            skipped += buyer is None
+            continue
+        hit = match(number, numbers) if numbers else None
+        meta = "・".join(x for x in (_plain(result.get("vendor") or ""), fmt_short_date(result.get("date")),
+                                     _amount_text(result)) if x)
+        rows.append({"number": f"{number[:2]}-{number[2:]}", "meta": meta, "href": f"/doc/{doc['id']}",
+                     "hit": prize_text(hit) if hit else "",
+                     "hint": claim_hint(numbers.claim_by) if hit and numbers else "",
+                     "remind": ({"doc_id": doc["id"], "done": doc["id"] in reminded}
+                                if hit and can_remind else None)})
+    return {
+        "period": period, "period_label": period_label(period),
+        "periods": [{"label": period_label(key), "count": count, "href": f"/lottery?period={key}",
+                     "current": key == period} for key, count in periods],
+        "fields": [{"name": name, "label": label, "value": shown[name], "error": errors.get(name, "")}
+                   for name, label in LOTTERY_FIELDS],
+        "claim_by": shown["claim_by"], "claim_error": errors.get("claim_by", ""),
+        "has_numbers": numbers is not None, "can_edit": can_edit,
+        "rows": rows, "skipped": skipped, "taxed": taxed,
+        "hits": sum(1 for r in rows if r["hit"]),
     }
 
 

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}資料怎麼用 - {{ BRAND_FULL }}{% endblock %}
+{% block content %}
+<header class="page-head"><div class="page-head__text"><h1>資料怎麼用</h1>
+  <p class="lede">「看有」會存下您上傳的文件。這一頁說明存了什麼、放在哪裡、誰看得到，以及怎麼刪。</p></div></header>
+
+<section class="panel set-card" aria-labelledby="du-what"><h2 id="du-what">存了什麼</h2>
+  <ul class="plain-list">
+    <li>您拍的照片或上傳的檔案。存檔前會拿掉拍攝地點和手機型號。</li>
+    <li>AI 讀到的內容、程式核對的結果、提醒與服藥時間表。</li>
+    <li>家人更正前後的內容，以及誰在什麼時候確認、更正、退回或刪除（操作紀錄）。</li>
+  </ul>
+</section>
+
+<section class="panel set-card" aria-labelledby="du-where"><h2 id="du-where">放在哪裡、會不會送出去</h2>
+  <ul class="plain-list">
+    <li>全部存在家裡這台電腦，不放在雲端硬碟。</li>
+    {% if trust %}<li>{{ trust[0][1] }}</li>{% endif %}
+    <li>從外面用手機連回來時，畫面和照片會經過 Cloudflare 加密轉送。</li>
+  </ul>
+</section>
+
+<section class="panel set-card" aria-labelledby="du-who"><h2 id="du-who">誰看得到</h2>
+  <ul class="plain-list">
+    <li>只有家庭名單上的人能登入。家人可以確認、更正和管理資料；長輩可以查看、退回和取消提醒。</li>
+  </ul>
+</section>
+
+<section class="panel set-card" aria-labelledby="du-delete"><h2 id="du-delete">怎麼刪</h2>
+  <ul class="plain-list">
+    <li>家人可以在文件頁刪除單份文件，也可以在設定頁匯出全部紀錄或刪除全部資料。刪除後不能復原。</li>
+  </ul>
+</section>
+
+<section class="panel set-card" aria-labelledby="du-not"><h2 id="du-not">不會做的事</h2>
+  <ul class="plain-list">
+    <li>不會替您付款、送出回覆或簽名。</li>
+    <li>不提供醫療建議；吃藥請照醫師和藥師的說明。</li>
+  </ul>
+</section>
+
+{% if needs_ack %}
+<form class="section" method="post" action="/data-use">{{ csrf_input() }}
+  <input type="hidden" name="next" value="{{ next_url }}">
+  <button class="btn btn--primary btn--lg" type="submit">{{ icon("check") }}我看過了，開始使用</button>
+  <p class="field-hint">按了會記下您看過這一頁的時間，家人可以在設定頁看到。</p>
+</form>
+{% endif %}
+{% endblock %}

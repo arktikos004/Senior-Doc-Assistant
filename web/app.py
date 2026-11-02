@@ -30,6 +30,7 @@
 """
 from __future__ import annotations
 
+import io
 import json
 import logging
 import re
@@ -38,33 +39,49 @@ import sqlite3
 import sys
 import threading
 import time
+from contextlib import asynccontextmanager
 from contextvars import ContextVar
+from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote
 
 import httpx
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from markupsafe import Markup
-from PIL import Image
+from PIL import Image, ImageOps
 from starlette.datastructures import FormData
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.concurrency import run_in_threadpool
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.config import AppConfig, load_config  # noqa: E402
+from src.duplicates import file_sha256, find_duplicate, verified_invoice_number  # noqa: E402
+from src.lottery import SETTING_PREFIX as LOTTERY_PREFIX  # noqa: E402
+from src.lottery import (  # noqa: E402
+    Numbers,
+    is_lottery_reminder,
+    latest_drawn,
+    match,
+    parse_form as parse_lottery_form,
+    parse_period,
+    period_of,
+    qr_buyer_has_tax_id,
+    reminder_action,
+)
 from src.models import CATEGORIES  # noqa: E402
-from src.pipeline import Pipeline  # noqa: E402
-from src.preprocess import decrypt_pdf, pdf_needs_password  # noqa: E402
+from src.pipeline import Pipeline, Redo, model_unavailable  # noqa: E402
+from src.preprocess import decrypt_pdf, pdf_needs_password, prepare_image, strip_metadata  # noqa: E402
 from src.providers import create_analyzer  # noqa: E402
 from src.models import ExtractionResult  # noqa: E402
 from src.record_log import clear_records  # noqa: E402
-from src.review import correct_document, correctable, reading_unchanged, reject_document  # noqa: E402
+from src.review import correct_document, correctable, delete_document, reading_unchanged, reject_document  # noqa: E402
 from src.settings import (  # noqa: E402
     PROVIDER,
     PURGED,
@@ -75,22 +92,30 @@ from src.settings import (  # noqa: E402
     export_records,
     form_changes,
 )
-from src.store import Store  # noqa: E402
+from src.store import CONSENT_PREFIX, Store  # noqa: E402
+from web.access import AccessIdentityResolver, Identity, IdentityError  # noqa: E402
+from web.jobs import JobBoard  # noqa: E402
+from web.roles import Principal, principal_for, member_values, audit_rows  # noqa: E402
 from web.render import (  # noqa: E402
     ASSIGNABLE_CATEGORIES,
     BRAND_FULL,
     CONFIRM_CLOUD_FIELD,
     CONFIRM_PURGE_FIELD,
+    CONFIRM_DELETE_FIELD,
     CONFIRM_REJECT_FIELD,
+    DELETE_DOC_ASK,
     KINDS_LEGEND,
     PURGE_ASK,
     REJECT_DOC_ASK,
+    DONE_COMPLETE,
+    DONE_UNDO,
     REMINDER_CANCEL,
     REMINDER_RESTORE,
     STATIC_DIR,
     UNSURE,
     action_view,
     cabinet_view,
+    completed_rows,
     category_choices,
     cloud_ask,
     correct_view,
@@ -102,7 +127,9 @@ from web.render import (  # noqa: E402
     is_pdf,
     kind_choice,
     kind_choices,
+    lottery_view,
     parse_correction,
+    progress_view,
     reject_action_ask,
     reminder_rows,
     render,
@@ -136,12 +163,31 @@ MSG_PURGED = "已刪除全部資料"
 MSG_PURGED_PARTLY = "資料已刪除，但有些照片檔刪不掉，請管理者檢查資料夾。"
 # 只有這些狀態訊息可以經由 ?msg= 顯示;任意字串不回顯,避免被拿來偽造系統公告
 MSG_UPLOAD_CANCELLED = "已取消上傳"
+MSG_DOC_DELETED = "已刪除這份文件"
+MSG_REMINDER_DONE = "已記下，移到「已完成」"
+MSG_REMINDER_UNDONE = "已改回，放回「要記得的事」"
+MSG_LOTTERY_SAVED = "已存好這一期的號碼"
+MSG_LOTTERY_REMINDED = "已加進「要記得的事」"
+MSG_LOTTERY_ALREADY = "這張已經加過了"
 _MESSAGES = frozenset({MSG_CORRECTED, MSG_REJECTED, MSG_CONFIRMED, MSG_REMINDER_OFF, MSG_REMINDER_ON,
                        MSG_CATEGORY, MSG_SETTINGS_SAVED, MSG_SETTINGS_UNCHANGED, MSG_PURGED, MSG_PURGED_PARTLY,
-                       MSG_UPLOAD_CANCELLED})
+                       MSG_UPLOAD_CANCELLED, MSG_DOC_DELETED, MSG_REMINDER_DONE, MSG_REMINDER_UNDONE,
+                       MSG_LOTTERY_SAVED, MSG_LOTTERY_REMINDED, MSG_LOTTERY_ALREADY})
+MSG_NO_PRIZE = "這張發票沒有可以領的獎"
 # 刪除全部資料沒有全部做完時的錯誤頁標題(說明裡寫哪些已刪、哪些沒刪,下一步回設定頁再按一次)
 MSG_PURGE_NOT_STARTED = "資料沒有刪除"
 MSG_PURGE_STUCK = "有些資料還沒刪掉"
+# 資料使用說明不攔的路徑(說明頁本身、健康檢查、樣式與圖示)
+_NOTICE_FREE = ("/data-use", "/healthz", "/static/")
+
+
+def _safe_next(value: str) -> str:
+    """看完說明要回去的頁面:只收這個網站裡的路徑(/ 開頭、不是 //、沒有反斜線),其他一律回首頁。"""
+    if value.startswith("/") and not value.startswith("//") and "\\" not in value:
+        return value
+    return "/"
+
+
 # 確認欄位的值:確認框按「確定…」後 app.js 補的隱藏欄位、沒有 JS 時勾選的欄位、確認頁的隱藏欄位都送這個值;
 # 要先確認的動作(切到雲端備援、刪除全部資料、退回)沒收到就不做
 CONFIRMED = "1"
@@ -166,6 +212,14 @@ _PENDING_TOKEN = re.compile(r"[A-Za-z0-9_-]{32}")   # secrets.token_urlsafe(24) 
 MSG_PDF_WRONG = "密碼不對，還可以再試 {left} 次。"
 MSG_PDF_GONE = "密碼錯太多次，這份檔案已經刪掉了。請回首頁重新上傳。"
 MSG_PDF_MISSING = "找不到這份等待輸入密碼的檔案"
+
+# 上傳後在背景辨識(UX-3,web/jobs.py):這麼多秒內做完(展示模式、模擬讀值)就直接打開結果,不經過進度頁
+QUICK_RESULT_SECONDS = 1.0
+MSG_JOB_MISSING = "找不到這次上傳的進度"
+MSG_JOB_FAILED = "這份文件處理到一半出了問題"
+MSG_NO_RETRY = "這份文件不用重新辨識"
+_JOB_MISSING_HINT = "可能已經處理好一陣子了，或這台電腦剛重新啟動。處理好的文件都在文件櫃裡；找不到的話，請回首頁再上傳一次。"
+_JOB_FAILED_HINT = "這份沒有存成文件。請回首頁再上傳一次；一直不行的話，請家人看一下這台電腦。"
 
 # 框架預設的英文錯誤訊息換成中文
 _DEFAULT_ERRORS = {404: "找不到這個頁面", 405: "這個網址不能這樣使用"}
@@ -296,19 +350,8 @@ _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _csrf_token: ContextVar[str] = ContextVar("csrf_token", default="")
 
 # 部署新版時改成當天日期;/healthz 會回報,用來確認 GPU 電腦上跑的是哪一版
-APP_VERSION = "2026.10.04"
+APP_VERSION = "2026.10.27"
 _OLLAMA_PROBE_TIMEOUT = 2.0   # 秒;健康檢查不能被卡住的 Ollama 拖住
-
-# 誰改的設定:Cloudflare Access 登入後轉過來的 email 標頭。只用來記錄,不當授權(本機直接開沒有這個標頭);
-# 不像 email 的值(太長、有空白或控制字元)當作沒有
-_ACTOR_HEADER = "Cf-Access-Authenticated-User-Email"
-_EMAIL = re.compile(r"[^@\s\x00-\x1f\x7f]{1,64}@[^@\s\x00-\x1f\x7f]{1,189}")
-
-
-def _actor(request: Request) -> str | None:
-    value = request.headers.get(_ACTOR_HEADER, "").strip()
-    return value if _EMAIL.fullmatch(value) else None
-
 
 def _looks_like(ext: str, head: bytes) -> bool:
     """用檔頭確認內容真的是該格式,擋掉改副檔名的 HTML/程式檔。未知副檔名不擋。"""
@@ -345,6 +388,22 @@ def _image_size(path: Path | None) -> tuple[int, int] | None:
         return None
 
 
+def _thumbnail(path: Path) -> bytes | None:
+    """進度頁的小縮圖(JPEG,只放在記憶體,做完就丟);PDF 或讀不了就沒有。原件已經去過拍攝資訊(strip_metadata)。"""
+    if is_pdf(path):
+        return None
+    try:
+        with Image.open(path) as im:
+            im.draft("RGB", (240, 320))   # JPEG 直接用縮小的倍率解碼,大照片也很快
+            small = ImageOps.exif_transpose(im)
+            small.thumbnail((240, 320))
+            out = io.BytesIO()
+            small.convert("RGB").save(out, "JPEG", quality=70)
+            return out.getvalue()
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
+        return None
+
+
 def _new_upload_name(ext: str) -> str:
     """時間戳 + 隨機碼;完全不使用使用者提供的檔名。"""
     return f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(4)}{ext}"
@@ -365,7 +424,7 @@ def _read_pending(meta: Path) -> dict[str, Any] | None:
 def _redirect_with_msg(path: str, msg: str) -> RedirectResponse:
     """POST 做完就 303 轉址並帶狀態訊息(重新整理不會重送表單)。訊息不在白名單內,頁面不會顯示,所以直接擋下。"""
     assert msg in _MESSAGES, msg
-    return RedirectResponse(url=f"{path}?msg={quote(msg)}", status_code=303)
+    return RedirectResponse(url=f"{path}{'&' if '?' in path else '?'}msg={quote(msg)}", status_code=303)
 
 
 # ---- CSRF(W2-B) -------------------------------------------------------------
@@ -419,20 +478,41 @@ def _model_names(cfg: AppConfig) -> dict[str, str]:
     return {}
 
 
-def _ollama_status(cfg: AppConfig, transport: httpx.BaseTransport | None = None) -> str:
-    """reachable / unreachable / unused(mock 模式不連)。Ollama 在本機,不走系統代理。"""
+def _ollama_probe(cfg: AppConfig, transport: httpx.BaseTransport | None = None) -> tuple[str, bool | None]:
+    """(reachable / unreachable / unused, 設定的模型是不是已經載入顯示記憶體);mock 模式不連。
+
+    問 Ollama 的 /api/ps(列出已載入的模型):連得上就是 reachable;模型已載入,第一張文件就不必等載入。
+    看不懂回覆時「有沒有載入」是 None。Ollama 在本機,不走系統代理。
+    """
     if cfg.provider == "mock":
-        return "unused"
+        return "unused", None
     try:
         with httpx.Client(transport=transport, timeout=_OLLAMA_PROBE_TIMEOUT, trust_env=False) as client:
-            response = client.get(f"{cfg.ollama.host.rstrip('/')}/api/version")
+            response = client.get(f"{cfg.ollama.host.rstrip('/')}/api/ps")
     except (httpx.HTTPError, httpx.InvalidURL):
-        return "unreachable"
-    return "reachable" if response.status_code == 200 else "unreachable"
+        return "unreachable", None
+    if response.status_code != 200:
+        return "unreachable", None
+    try:
+        loaded = {_model_tag(m.get("name") or m.get("model")) for m in response.json().get("models") or []}
+    except (ValueError, AttributeError, TypeError):
+        return "reachable", None
+    return "reachable", _model_tag(cfg.ollama.model) in loaded
+
+
+def _model_tag(name: Any) -> str:
+    """模型名稱沒寫標籤的就是 :latest(gemma4 與 gemma4:latest 是同一個)。"""
+    text = str(name or "")
+    return text if ":" in text else f"{text}:latest"
+
+
+def _ollama_status(cfg: AppConfig, transport: httpx.BaseTransport | None = None) -> str:
+    """reachable / unreachable / unused(mock 模式不連);設定頁用。"""
+    return _ollama_probe(cfg, transport)[0]
 
 
 def create_app(cfg: AppConfig | None = None, analyzer=None,
-               ollama_transport: httpx.BaseTransport | None = None) -> FastAPI:
+               ollama_transport: httpx.BaseTransport | None = None, identity_resolver=None) -> FastAPI:
     """建立 app;測試可注入隔離在 tmp 的設定與 MockAnalyzer。
 
     analyzer 預設依目前生效的設定(current_cfg)建立,在第一次上傳時才建立,
@@ -441,10 +521,19 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
     """
     cfg = cfg or load_config()
     cfg.ensure_dirs()
+    resolver = identity_resolver if identity_resolver is not None else AccessIdentityResolver()
+    identity_context: ContextVar[Identity | None] = ContextVar("identity", default=None)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        # 網頁啟動時(uvicorn;測試要用 with TestClient(app))補算舊文件的原件雜湊;只匯入這個模組不碰資料庫
+        await run_in_threadpool(backfill_hashes)
+        yield
+
     # 不開 API 文件頁(/docs 等):它從 CDN 載入,違反 CSP 與離線原則,對外也不需要公開 API 結構。
     # 每個路由都先過 check_csrf(只檢查會改資料的請求),之後新增的表單路由不必各自記得
     app = FastAPI(title=BRAND_FULL, docs_url=None, redoc_url=None, openapi_url=None,
-                  dependencies=[Depends(check_csrf)])
+                  dependencies=[Depends(check_csrf)], lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     # 外層的 cfg 是 config.yaml 的設定;state["cfg"] 是最近一次讀到的生效設定(錯誤頁用,不再讀資料庫)
     # state["analyzer"] 是(依哪個設定建的, analyzer)一起存的一組:分成兩個值各寫一次的話,兩次寫入之間
@@ -469,6 +558,21 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         """
         state["cfg"] = effective_config(cfg, store())
         return state["cfg"]
+
+    def principal() -> Principal:
+        identity = identity_context.get()
+        if identity is None:
+            raise HTTPException(403, "無法確認登入身分。")
+        return principal_for(identity, store())
+
+    def require(permission: str) -> Principal:
+        who = principal()
+        if not who.permissions.get(permission, False):
+            raise HTTPException(403, "這項操作需要家人協助。" if who.role == "elder" else "您目前只能查看，請家人設定家庭成員。")
+        return who
+
+    def actor_fields(who: Principal) -> dict[str, str]:
+        return dict(actor=who.actor, role=who.role)
 
     def get_analyzer():
         """上傳用的 analyzer:測試注入的一律沿用;否則依目前的辨識模式建立,模式改了就重建。
@@ -497,7 +601,8 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         msg = ctx.pop("msg", None)
         nav = {"confirm": len(pending_confirms()), "review": store().count_documents(action="review")}
         html = render(template, nav=nav, active=active, trust=trust_for(current_cfg()),
-                      msg=msg if msg in _MESSAGES else None, **ctx)
+                      msg=msg if msg in _MESSAGES else None,
+                      identity=principal().view, permissions=principal().permissions, **ctx)
         return HTMLResponse(html, status_code=status_code)
 
     def cloud_mode() -> bool:
@@ -508,14 +613,18 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
              category: str = UNSURE, msg=None):
         docs = store().list_documents(limit=30)
         recent = [doc_row(d) for d in docs[:8]]
-        reminders = reminder_rows(docs, store().list_actions(), date.today())
+        actions = store().list_actions()
+        reminders = reminder_rows(docs, actions, date.today())
+        names = {m["email"]: m.get("display_name") or "" for m in store().list_members()}
+        completed = completed_rows(docs, actions, store().list_audit_events(limit=200), date.today(), names)
         group = category if category in CATEGORIES else None
         return page(
             "home.html", active="home", status_code=status_code, msg=msg,
             # 重畫時(例如沒選檔)留住剛才的選擇;第二列只留伺服器收得下的值,和上傳時同一份白名單
             error=error, selected_type=kind_choice(group, selected) or UNSURE, selected_category=group or UNSURE,
             category_choices=category_choices(), kind_choices=kind_choices(), kinds_legend=KINDS_LEGEND,
-            recent=recent, reminders=reminders, max_bytes=MAX_UPLOAD_BYTES, local_only=cloud_mode(),
+            recent=recent, reminders=reminders, completed=completed, max_bytes=MAX_UPLOAD_BYTES,
+            local_only=cloud_mode(),
         )
 
     def allowed_file(doc: dict[str, Any]) -> Path | None:
@@ -537,6 +646,33 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         if path.suffix.lower() not in cfg.supported_extensions or not path.is_file():
             return None
         return path
+
+    def backfill_hashes() -> int:
+        """原件雜湊欄位加上之前就有的文件:原件還在的補算雜湊,重複上傳提示才找得到舊的那份。
+
+        讀不到的跳過(下次啟動再試),回傳補了幾份;紀錄只寫文件編號與例外種類。
+        """
+        filled = 0
+        for doc in store().documents_missing_hash():
+            path = allowed_file(doc)
+            if path is None:
+                continue
+            try:
+                store().set_file_hash(doc["id"], file_sha256(path))
+            except OSError as exc:
+                log.warning("補算原件雜湊失敗:文件 %s(%s)", doc["id"], type(exc).__name__)
+                continue
+            filled += 1
+        if filled:
+            log.info("補上 %d 份文件的原件雜湊", filled)
+        return filled
+
+    def duplicate_of(doc: dict[str, Any]) -> dict[str, Any] | None:
+        """「這張可能已經上傳過」:原件雜湊相同,或兩份發票的號碼都經 QR 核對相符而且一樣(src/duplicates.py)。"""
+        same_file = store().documents_with_hash(doc["file_sha256"]) if doc.get("file_sha256") else []
+        invoices = (store().list_documents(doc_type="發票", limit=None)
+                    if verified_invoice_number(doc.get("result")) else [])
+        return find_duplicate(doc, same_file, invoices)
 
     def get_doc(doc_id: int) -> dict[str, Any]:
         # 編號超出 SQLite 整數範圍時 sqlite3 會丟 OverflowError(變成 500);不可能有這份文件,不必查
@@ -577,12 +713,39 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
                           values=values, errors=errors)
         return page("settings.html", active="settings", status_code=status_code, msg=msg, v=v)
 
-    def process_upload(dest: Path, group: str | None, name: str | None) -> RedirectResponse:
-        """辨識一份收下的上傳檔(加密 PDF 已經解開),轉到結果頁。group、name 是過了白名單的大類與名稱:
-        選了大類,名稱當作家人選的文件(label);沒選大類,名稱就是類型提示。"""
+    jobs = JobBoard()   # 上傳後的背景辨識:一次一張、照順序(web/jobs.py)
+
+    def start_job(dest: Path, group: str | None, name: str | None, *, started: float,
+                  redo: Redo | None = None) -> RedirectResponse:
+        """收下的上傳檔(加密 PDF 已經解開)交給背景辨識,轉到進度頁;QUICK_RESULT_SECONDS 內做完就直接到結果頁。
+
+        group、name 是過了白名單的大類與名稱:選了大類,名稱當作家人選的文件(label);沒選大類,名稱就是類型提示。
+        設定與 analyzer 照上傳當下的辨識模式在這裡取好,背景只管照做。started 是這個請求開始處理的時間
+        (time.monotonic),「收到照片」那一步的秒數從這裡算到縮圖做好。redo:重新辨識既有的文件(更新那一筆)。
+        """
         hint, label = (None, name) if group else (name, None)
-        record = Pipeline(current_cfg(), get_analyzer(), store()).process_file(dest, hint, category=group, label=label)
-        return RedirectResponse(url=f"/doc/{record['文件ID']}", status_code=303)
+        current, who = current_cfg(), principal()
+        pipeline = Pipeline(current, get_analyzer(), store())
+
+        def work(report: Callable[[str], None]) -> int:
+            return pipeline.process_file(dest, hint, category=group, label=label, on_stage=report,
+                                         redo=redo)["文件ID"]
+
+        photo = _thumbnail(dest)
+        job = jobs.submit(work, owner=who.actor, provider=current.provider, is_pdf=is_pdf(dest), label=name or "",
+                          photo=photo, received=time.monotonic() - started)
+        if not jobs.wait(job, QUICK_RESULT_SECONDS):
+            return RedirectResponse(url=f"/upload/progress/{job.token}", status_code=303)
+        if job.doc_id is None:
+            raise PageError(500, MSG_JOB_FAILED, next_url="/", next_label="回首頁", hint=_JOB_FAILED_HINT)
+        return RedirectResponse(url=f"/doc/{job.doc_id}", status_code=303)
+
+    def get_job(token: str):
+        """本人上傳、還記得的那一份;token 格式不對、過期、別人上傳的都當作找不到。"""
+        job = jobs.get(token, principal().actor) if _PENDING_TOKEN.fullmatch(token) else None
+        if job is None:
+            raise PageError(404, MSG_JOB_MISSING, next_url="/cabinet", next_label="到文件櫃找找", hint=_JOB_MISSING_HINT)
+        return job
 
     pending_lock = threading.Lock()
 
@@ -703,6 +866,21 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         return response
 
     @app.middleware("http")
+    async def authenticate(request: Request, call_next):
+        # 身分驗證先於 body-limit 重畫與所有路由；公鑰 I/O 不阻塞事件迴圈。
+        try:
+            identity = await run_in_threadpool(resolver.resolve, request)
+        except IdentityError as exc:
+            return error_page(403, str(exc))
+        token = identity_context.set(identity)
+        try:
+            if request.method == "GET" and await run_in_threadpool(needs_notice, request.url.path):
+                return RedirectResponse(f"/data-use?next={quote(request.url.path, safe='/')}", status_code=303)
+            return await call_next(request)
+        finally:
+            identity_context.reset(token)
+
+    @app.middleware("http")
     async def security_headers(request: Request, call_next):
         """所有回應加安全標頭;HTML 頁面含個資,不讓瀏覽器或中間的代理存下來。"""
         response = await call_next(request)
@@ -716,23 +894,49 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
             response.headers.setdefault("Cache-Control", "no-store")
         return response
 
+    def needs_notice(path: str = "") -> bool:
+        """從外面登入的家庭成員還沒看過資料使用說明:頁面先轉到說明頁(靜態檔、健康檢查、說明頁本身不攔)。
+        在這台電腦直接開的不攔(管理的人在設定);名單外的登入者只能看、不記同意。"""
+        identity = identity_context.get()
+        if identity is None or identity.local or path.startswith(_NOTICE_FREE):
+            return False
+        who = principal()
+        return who.role in ("family", "elder") and f"{CONSENT_PREFIX}{who.actor}" not in store().get_settings()
+
+    @app.get("/data-use", response_class=HTMLResponse)
+    def data_use(next_url: str = Query("/", alias="next")):
+        """資料使用說明:存了什麼、放在哪裡、會不會送出去、誰看得到、怎麼刪;第一次使用時下面多一顆「我看過了」。"""
+        return page("data_use.html", active="settings", needs_ack=needs_notice(), next_url=_safe_next(next_url))
+
+    @app.post("/data-use")
+    def data_use_ack(next_url: str = Form("/", alias="next")) -> RedirectResponse:
+        """記下誰、什麼時候看過說明(設定變更紀錄也留一筆),再回原本要去的頁面。"""
+        if needs_notice():
+            who = principal()
+            store().set_setting(f"{CONSENT_PREFIX}{who.actor}", datetime.now().isoformat(timespec="seconds"),
+                                actor=who.actor)
+        return RedirectResponse(_safe_next(next_url), status_code=303)
+
     # ---- 健康檢查(部署用) --------------------------------------------------
 
     @app.get("/healthz")
     def healthz() -> JSONResponse:
-        """給開機腳本與監看用:網頁活著就回 200;Ollama 連不上時照常回應,標成 degraded。
+        """給開機腳本與監看用:網頁活著就回 200;Ollama 連不上或資料庫寫不進去時照常回應,標成 degraded。
 
-        只列狀態、版本、provider 與模型名稱;不列路徑、主機位址、金鑰或其他設定值。
-        provider 是目前生效的(設定頁可以切換辨識模式)。
+        只列狀態、版本、provider、模型名稱、模型有沒有載入(model_loaded,不適用時 null)與資料庫寫不寫得進去;
+        不列路徑、主機位址、金鑰或其他設定值。provider 是目前生效的(設定頁可以切換辨識模式)。
         """
         current = current_cfg()
-        ollama = _ollama_status(current, ollama_transport)
+        ollama, loaded = _ollama_probe(current, ollama_transport)
+        database = "ok" if store().writable() else "error"
         return JSONResponse({
-            "status": "degraded" if ollama == "unreachable" else "ok",
+            "status": "degraded" if ollama == "unreachable" or database != "ok" else "ok",
             "version": APP_VERSION,
             "provider": current.provider,
             "models": _model_names(current),
             "ollama": ollama,
+            "model_loaded": loaded,
+            "database": database,
         }, headers={"Cache-Control": "no-store"})
 
     # ---- 首頁與上傳 --------------------------------------------------------
@@ -748,6 +952,8 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         doc_type: str = Form(UNSURE),
         category: str = Form(UNSURE),
     ):
+        require("can_upload")
+        started = time.monotonic()
         sweep_pending()
         # 兩個入口:相機(file)與相簿/電腦選檔(file_pick),用有選檔的那個
         chosen = next((f for f in (file, file_pick) if f is not None and f.filename), None)
@@ -780,6 +986,8 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         if error:
             dest.unlink(missing_ok=True)
             return home(status_code=code, error=error, selected=doc_type, category=category)
+        # 存起來的原件不留拍攝地點與裝置(結果頁、匯出與這台電腦都看得到原件);送模型的那份另外再去一次
+        strip_metadata(dest)
 
         # 大類與第二列各自只收白名單值,其他當作沒選(kind_choice):選了大類只收那一類清單上的名稱,
         # 當作家人選的文件(label;類型提示、要不要只在本機、要不要一律轉人工由 Pipeline 依固定清單決定);
@@ -795,12 +1003,53 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
             meta.write_text(json.dumps({"created": time.time(), "tries": 0, "category": group, "name": name},
                                        ensure_ascii=False), encoding="utf-8")
             return RedirectResponse(url=f"/upload/password/{token}", status_code=303)
-        return process_upload(dest, group, name)
+        return start_job(dest, group, name, started=started)
+
+    # ---- 上傳後的進度(UX-3):四步照伺服器真的做完的亮;沒有 JS 時頁面每 3 秒重新整理 ----
+
+    def progress_for(job) -> dict[str, Any]:
+        """做完了 → {"next": 結果頁};處理失敗 → 錯誤頁;還在做 → 進度頁的畫面資料。"""
+        snap = jobs.snapshot(job)
+        if snap["failed"]:
+            raise PageError(500, MSG_JOB_FAILED, next_url="/", next_label="回首頁", hint=_JOB_FAILED_HINT)
+        if snap["doc_id"] is not None:
+            return {"next": f"/doc/{snap['doc_id']}"}
+        return progress_view(snap, token=job.token, provider=job.provider, is_pdf=job.is_pdf, label=job.label,
+                             has_photo=job.photo is not None)
+
+    @app.get("/upload/progress/{token}", response_class=HTMLResponse)
+    def upload_progress(token: str) -> Response:
+        require("can_upload")
+        v = progress_for(get_job(token))
+        if "next" in v:
+            return RedirectResponse(url=v["next"], status_code=303)
+        response = page("progress.html", active="home", v=v)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.get("/upload/progress/{token}/status")
+    def upload_progress_status(token: str) -> JSONResponse:
+        """進度頁的 app.js 每秒問一次;只回步驟狀態與文字(和頁面同一份),做完了回結果頁的網址。"""
+        require("can_upload")
+        v = progress_for(get_job(token))
+        body = {"next": v["next"]} if "next" in v else {
+            "next": None, "say": v["say"],
+            "steps": [{k: s[k] for k in ("id", "state", "state_text", "hint", "time")} for s in v["steps"]]}
+        return JSONResponse(body, headers={"Cache-Control": "no-store"})
+
+    @app.get("/upload/progress/{token}/photo")
+    def upload_progress_photo(token: str) -> Response:
+        require("can_upload")
+        photo = get_job(token).photo
+        if photo is None:
+            raise HTTPException(status_code=404, detail="找不到這張照片")
+        return Response(photo, media_type="image/jpeg", headers=_FILE_HEADERS)
 
     # ---- 加密 PDF:輸入密碼(PDF-PW) ------------------------------------------
 
     @app.get("/upload/password/{token}", response_class=HTMLResponse)
     def pdf_password_form(token: str):
+        require("can_upload")
         sweep_pending()
         if load_pending(token) is None:
             raise _pending_missing()
@@ -812,6 +1061,8 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
 
         密碼只交給 decrypt_pdf 用一次:不寫進資訊檔、紀錄、錯誤頁,重畫的表單密碼欄是空的。
         """
+        require("can_upload")
+        started = time.monotonic()
         with pending_lock:   # 同一份的兩個請求不會同時讀寫「試了幾次」,也不會各解開一次
             info = load_pending(token)
             if info is None:
@@ -832,7 +1083,7 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
             drop_pending(token)
         # 資訊檔在伺服器上,照樣再過一次白名單(和上傳時同一份)
         group = info["category"] if info["category"] in CATEGORIES else None
-        return process_upload(dest, group, kind_choice(group, info["name"] or UNSURE))
+        return start_job(dest, group, kind_choice(group, info["name"] or UNSURE), started=started)
 
     # ---- 文件櫃(四大類) ----------------------------------------------------
 
@@ -841,6 +1092,82 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         """四大類的份數與文件;?cat= 只看一類(四大類或未分類),其他值當作沒選,依大類分組列出全部。"""
         v = cabinet_view(store().list_documents(limit=None), cat, cloud=cloud_mode())
         return page("cabinet.html", active="cabinet", v=v)
+
+    # ---- 統一發票對獎 --------------------------------------------------------
+    # 家人照公告輸入號碼(存在設定裡,改的紀錄寫進設定變更);只比對號碼經 QR Code 核對相符的發票。
+    # 領獎提醒由伺服器用存好的號碼重新比對才加,表單只帶文件編號與期別(src/lottery.py)
+
+    def invoice_period(doc: dict[str, Any]) -> str | None:
+        """發票屬於哪一期(看讀到的開立日期);讀不到日期回 None。"""
+        try:
+            return period_of(date.fromisoformat(str((doc.get("result") or {}).get("date") or "")))
+        except ValueError:
+            return None
+
+    def lottery_page(period: str | None, *, values: Any = None, errors: dict[str, str] | None = None,
+                     status_code: int = 200, msg: str | None = None) -> HTMLResponse:
+        """對獎頁;沒指定(或格式不對)的期別用今天以前最近開過獎的那一期。"""
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for doc in store().list_documents(doc_type="發票", limit=None):
+            key = invoice_period(doc) if doc.get("action") != "failed" else None
+            if key:
+                groups.setdefault(key, []).append(doc)
+        if parse_period(period) is None:
+            period = latest_drawn(date.today())
+        numbers = Numbers.from_json(store().get_settings().get(LOTTERY_PREFIX + period))
+        reminded = {a["document_id"] for a in store().list_actions()
+                    if not a["superseded"] and is_lottery_reminder(a, period)}
+        who = principal()
+        v = lottery_view(period, [(key, len(groups.get(key, []))) for key in sorted(set(groups) | {period}, reverse=True)],
+                         groups.get(period, []), numbers, can_edit=who.permissions["can_manage"],
+                         can_remind=who.permissions["can_remind"], reminded=reminded, values=values, errors=errors)
+        return page("lottery.html", active="cabinet", status_code=status_code, msg=msg, v=v)
+
+    @app.get("/lottery", response_class=HTMLResponse)
+    def lottery(period: str | None = None, msg: str | None = None):
+        return lottery_page(period, msg=msg)
+
+    @app.post("/lottery")
+    def lottery_save(form: FormData = Depends(read_form)) -> Response:
+        """存一期的號碼與領獎期限(只有家人);格式不對回同一頁,留住剛填的值、寫出哪一欄不對。"""
+        who = require("can_manage")
+        period = form.get("period")
+        if not isinstance(period, str) or parse_period(period) is None:
+            raise PageError(400, MSG_INVALID, next_url="/lottery", next_label="回對獎")
+        numbers, errors = parse_lottery_form(form, period)
+        if numbers is None:
+            return lottery_page(period, values=form, errors=errors, status_code=400)
+        store().set_setting(LOTTERY_PREFIX + period, numbers.to_json(), actor=who.actor)
+        return _redirect_with_msg(f"/lottery?period={period}", MSG_LOTTERY_SAVED)
+
+    @app.post("/lottery/remind")
+    def lottery_remind(doc_id: int = Form(...), period: str = Form(...)) -> Response:
+        """可能中獎的發票加一筆領獎提醒(auto,可以在發票的結果頁取消);同一張同一期只加一次。
+
+        表單只有文件編號與期別:獎項由伺服器用存好的號碼和經 QR 核對相符的發票號碼重新比對,送假的獎項沒有用;
+        QR 記載有買方統編(打統編,不能兌獎)或看不出來的也不加。
+        """
+        back = f"/lottery?period={period}" if parse_period(period) else "/lottery"
+        with doc_lock:      # 「有沒有加過」到寫入之間,不讓同一張的另一次按鈕插進來
+            who = require("can_remind")
+            doc = get_doc(doc_id)
+            numbers = Numbers.from_json(store().get_settings().get(LOTTERY_PREFIX + period)) if back != "/lottery" else None
+            number = verified_invoice_number(doc.get("result")) if doc.get("action") != "failed" else None
+            if qr_buyer_has_tax_id(doc.get("result")) is not False:
+                number = None
+            hit = match(number, numbers) if numbers and number and invoice_period(doc) == period else None
+            if hit is None:
+                raise PageError(409, MSG_NO_PRIZE, next_url=back, next_label="回對獎",
+                                hint="號碼可能改過了，或這張發票的號碼沒有經過 QR Code 核對、有打統編。"
+                                     "請回對獎頁再看一次。")
+            if any(is_lottery_reminder(a, period) for a in store().list_actions(document_id=doc_id)
+                   if not a["superseded"]):
+                return _redirect_with_msg(back, MSG_LOTTERY_ALREADY)
+            action = reminder_action(number, hit, numbers, period)
+            action_id = store().add_action(doc_id, action["kind"], action["tier"], action["payload"])
+            store().add_audit_event("lottery_reminder", document_id=doc_id, action_id=action_id,
+                                    detail={"period": period, "prize": hit.prize.name}, **actor_fields(who))
+        return _redirect_with_msg(back, MSG_LOTTERY_REMINDED)
 
     # ---- 結果頁 ------------------------------------------------------------
 
@@ -853,9 +1180,38 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         actions = [action_view(a) for a in store().list_actions(document_id=doc_id) if not a["superseded"]]
         corrected = bool(store().list_corrections(document_id=doc_id, verified_only=False, limit=1))
         v = doc_view(doc, file_url=file_url, hint=doc.get("doc_type_hint"), actions=actions,
-                     file_size=_image_size(path), corrected=corrected,
-                     correct_url=f"/doc/{doc_id}/correct" if correctable(doc) else None)
-        return page("doc.html", msg=msg, v=v, actions=actions)
+                     file_size=_image_size(path), corrected=corrected, duplicate=duplicate_of(doc),
+                     prepared_url=f"/doc/{doc_id}/prepared" if path else None,
+                     correct_url=f"/doc/{doc_id}/correct" if correctable(doc) and principal().permissions["can_correct"] else None,
+                     retry_url=f"/doc/{doc_id}/retry" if path and principal().permissions["can_upload"] else None)
+        for action in actions:
+            action["reject_ask"] = reject_action_ask(action["kind_label"])
+        return page("doc.html", msg=msg, v=v, actions=actions,
+                    audit_events=audit_rows(store().list_audit_events(document_id=doc_id)),
+                    reject_document_url=f"/doc/{doc_id}/reject" if doc.get("action") == "review" else None,
+                    reject_document_ask=REJECT_DOC_ASK, delete_document_url=f"/doc/{doc_id}/delete",
+                    delete_document_ask=DELETE_DOC_ASK)
+
+    @app.post("/doc/{doc_id}/retry")
+    def retry_document(doc_id: int) -> Response:
+        """模型沒回應而沒讀成的文件:原件放回上傳時的位置(檔名不變),照上傳時的選擇再讀一次,更新同一份文件。
+
+        只有「模型沒回應」的失敗才能重讀(照片讀不出來的要重拍);原件已經搬走(正在重讀、連按兩下)就不再做。
+        """
+        who = require("can_upload")
+        started = time.monotonic()
+        with doc_lock:
+            doc = get_doc(doc_id)
+            original = allowed_file(doc)
+            if doc.get("action") != "failed" or not model_unavailable(doc.get("error")) or original is None:
+                raise PageError(409, MSG_NO_RETRY, next_url=f"/doc/{doc_id}", next_label="回到這份文件",
+                                hint="可能已經在重新辨識，或已經讀好了。")
+            dest = cfg.paths.uploads_path / original.name
+            original.replace(dest)
+        # 上傳時的選擇照資料庫的紀錄,一樣只收白名單值:大類是四大類之一才算選了
+        group = doc.get("category") if doc.get("category") in CATEGORIES else None
+        name = doc.get("doc_label") if group else kind_choice(None, doc.get("doc_type_hint") or UNSURE)
+        return start_job(dest, group, name, started=started, redo=Redo(doc_id, **actor_fields(who)))
 
     @app.get("/doc/{doc_id}/file")
     def document_file(doc_id: int):
@@ -865,10 +1221,31 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         # 表上沒有的副檔名(config.yaml 另外加的)才交給主機猜
         return FileResponse(path, headers=_FILE_HEADERS, media_type=_MEDIA_TYPES.get(path.suffix.lower()))
 
+    @app.get("/doc/{doc_id}/prepared")
+    def document_prepared(doc_id: int):
+        """系統送給 AI 讀的影像:用目前的設定對原件重跑一次前處理(src/preprocess.py),不存檔。
+
+        看得到原件的人才看得到(同 /doc/{id}/file)。雲端讀的文件照雲端的設定產生(沒有細長單據的面積上限)。
+        """
+        doc = get_doc(doc_id)
+        path = allowed_file(doc)
+        if path is None:
+            raise HTTPException(status_code=404, detail="找不到原件")
+        options = cfg.preprocess
+        if str((doc.get("result") or {}).get("source_model") or "").startswith("workers_ai:"):
+            options = replace(options, tall_pixels=False)
+        try:
+            prepared = prepare_image(path, options=options)
+        except Exception as exc:    # 原件壞了、PDF 還有密碼:沒有影像可以給,原件照樣看得到
+            log.warning("處理後的影像產生失敗:#%s(%s)", doc_id, type(exc).__name__)
+            raise HTTPException(status_code=404, detail="產生不了處理後的影像") from None
+        return Response(prepared.data, media_type=prepared.mime_type, headers=_FILE_HEADERS)
+
     # ---- 更正讀值(F7) -----------------------------------------------------
 
     @app.get("/doc/{doc_id}/correct", response_class=HTMLResponse)
     def correct_form(doc_id: int):
+        require("can_correct")
         return correct_page(get_correctable(doc_id))
 
     @app.post("/doc/{doc_id}/correct")
@@ -881,6 +1258,7 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         連按兩下時,第二個請求等第一個做完才讀文件:讀值已經和表單一樣,只當成改類別,不會再搬一次原件。
         """
         with doc_lock:
+            who = require("can_correct")
             doc = get_correctable(doc_id)
             changes, values, errors = parse_correction(doc["result"], form)
             category = form.get("category")
@@ -891,11 +1269,11 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
                 return correct_page(doc, values, errors, status_code=400)
             if category in ASSIGNABLE_CATEGORIES and reading_unchanged(ExtractionResult.from_dict(doc["result"]), changes):
                 # 只改了類別:不重新核對、不換行動(已取消的提醒不會變回生效,已確認的服藥表不必再確認)
-                store().set_document_category(doc_id, category)
+                store().set_document_category(doc_id, category, **actor_fields(who))
                 return _redirect_with_msg(f"/doc/{doc_id}", MSG_CATEGORY)
-            correct_document(current_cfg(), store(), doc_id, changes, original=allowed_file(doc))
+            correct_document(current_cfg(), store(), doc_id, changes, original=allowed_file(doc), **actor_fields(who))
             if category in ASSIGNABLE_CATEGORIES:
-                store().set_document_category(doc_id, category)
+                store().set_document_category(doc_id, category, **actor_fields(who))
             return _redirect_with_msg(f"/doc/{doc_id}", MSG_CORRECTED)
 
     @app.post("/doc/{doc_id}/reject")
@@ -903,15 +1281,28 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         """待複核的文件讀不了(例如影像品質太差):同一筆文件改成「讀不出來」,請長輩重新拍。
         退回在系統內沒有復原,要先確認:沒帶確認欄位就不退回,回確認頁再問一次。"""
         with doc_lock:
+            who = require("can_reject")
             doc = get_doc(doc_id)
             if doc.get("action") != "review":
                 raise PageError(409, "這份文件不在待複核", next_url=f"/doc/{doc_id}", next_label="回結果頁",
                                 hint="已經存檔或讀不出來的文件不能在這裡退回。")
             if confirmed != CONFIRMED:
-                return ask_first(REJECT_DOC_ASK, action=f"/doc/{doc_id}/reject", back_url=f"/doc/{doc_id}/correct",
+                return ask_first(REJECT_DOC_ASK, action=f"/doc/{doc_id}/reject", back_url=f"/doc/{doc_id}",
                                  active="review")
-            reject_document(current_cfg(), store(), doc_id, original=allowed_file(doc))
+            reject_document(current_cfg(), store(), doc_id, original=allowed_file(doc), **actor_fields(who))
             return _redirect_with_msg("/review", MSG_REJECTED)
+
+    @app.post("/doc/{doc_id}/delete")
+    def delete_doc(doc_id: int, confirmed: str | None = Form(None, alias=CONFIRM_DELETE_FIELD)) -> Response:
+        """家人刪除一份文件(照片、讀值、提醒、更正、操作紀錄一起刪,不能復原):沒帶確認欄位就不刪,回確認頁再問。"""
+        with doc_lock:
+            who = require("can_manage")
+            doc = get_doc(doc_id)
+            if confirmed != CONFIRMED:
+                return ask_first(DELETE_DOC_ASK, action=f"/doc/{doc_id}/delete", back_url=f"/doc/{doc_id}",
+                                 active="cabinet")
+            delete_document(current_cfg(), store(), doc_id, original=allowed_file(doc), actor=who.actor)
+            return _redirect_with_msg("/cabinet", MSG_DOC_DELETED)
 
     # ---- 取消/恢復提醒(F8) ------------------------------------------------
 
@@ -925,6 +1316,7 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         if decision not in _REMINDER_DECISIONS:
             raise HTTPException(status_code=400, detail="只能選「取消提醒」或「恢復提醒」")
         with doc_lock:      # 檢查「有沒有被取代」到寫入之間,不讓同一份文件的更正插進來
+            who = require("can_remind")
             action = get_action(action_id)
             if action["superseded"]:
                 # 家人更正後舊提醒已被新的取代:恢復它會冒出兩個期限(例如從更正前開著的舊頁面按)
@@ -935,8 +1327,37 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
                 raise PageError(409, "這個事項要在「家人確認」處理",
                                 hint="要家人點頭的事項不能在這裡取消，請到「家人確認」確認或退回。")
             status, msg = _REMINDER_DECISIONS[decision]
-            store().set_action_status(action_id, status)
+            store().set_action_status(action_id, status,
+                                      event="cancel_reminder" if decision == REMINDER_CANCEL else "restore_reminder",
+                                      **actor_fields(who))
             return _redirect_with_msg(f"/doc/{action['document_id']}", msg)
+
+    @app.post("/reminder/{action_id}/done")
+    def reminder_done(action_id: int, decision: str = Form(...)) -> RedirectResponse:
+        """長輩或家人按「繳好了/辦好了」,或改回:只是記下來讓家人知道,不付款、不查核。
+
+        只收生效中的期限提醒(自動列入的,或家人確認過的);等家人確認、已取消、被更正取代的與服藥時間表都不收。
+        已經是想要的狀態(連按兩次)照樣回首頁,不重複記操作紀錄。改回時自動提醒回到生效、家人確認過的回到已確認。
+        """
+        if decision not in (DONE_COMPLETE, DONE_UNDO):
+            raise HTTPException(status_code=400, detail="只能選「繳好了」或「改回」")
+        with doc_lock:
+            who = require("can_remind")
+            action = get_action(action_id)
+            if action["kind"] != "calendar" or action["superseded"]:
+                raise PageError(409, "這個事項不能標成完成", next_url="/", next_label="回首頁",
+                                hint="只有生效中的期限提醒可以按「繳好了」或「辦好了」。")
+            if decision == DONE_COMPLETE:
+                if action["status"] != "completed":
+                    if action["status"] not in (("pending", "done") if action["tier"] == "auto" else ("done",)):
+                        raise PageError(409, "這個提醒還沒生效", next_url="/", next_label="回首頁",
+                                        hint="還在等家人確認或已取消的提醒，不能標成完成。")
+                    store().set_action_status(action_id, "completed", event="complete_reminder", **actor_fields(who))
+                return _redirect_with_msg("/", MSG_REMINDER_DONE)
+            if action["status"] == "completed":
+                store().set_action_status(action_id, "pending" if action["tier"] == "auto" else "done",
+                                          event="undo_complete", **actor_fields(who))
+            return _redirect_with_msg("/", MSG_REMINDER_UNDONE)
 
     # ---- 家人確認 ----------------------------------------------------------
 
@@ -959,19 +1380,25 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
 
     @app.post("/confirm/{action_id}")
     def confirm_decide(action_id: int, decision: str = Form(...),
-                       confirmed: str | None = Form(None, alias=CONFIRM_REJECT_FIELD)) -> Response:
+                       confirmed: str | None = Form(None, alias=CONFIRM_REJECT_FIELD),
+                       expected_status: str = Form("pending")) -> Response:
         if decision not in _CONFIRM_DECISIONS:
             raise HTTPException(status_code=400, detail="只能選「確認」或「退回」")
         with doc_lock:      # 兩位家人同時按同一個事項:先到的算數,另一位看到「已經處理過了」
+            who = require("can_confirm" if decision == "done" else "can_reject")
             action = get_action(action_id)
-            if action["tier"] != "confirm" or action["status"] != "pending":
+            permitted_states = ("pending", "done") if decision == "rejected" else ("pending",)
+            if (action["tier"] != "confirm" or action["status"] not in permitted_states
+                    or action["superseded"] or action["status"] != expected_status):
                 raise HTTPException(status_code=409, detail="這個事項不需要確認，或已經處理過了")
             if decision == "rejected" and confirmed != CONFIRMED:
                 # 退回在系統內沒有復原,要先確認(「確認」不必多問):沒帶確認欄位就不退回,回確認頁再問一次
                 return ask_first(reject_action_ask(action_view(action)["kind_label"]), action=f"/confirm/{action_id}",
-                                 back_url="/confirm", active="confirm", fields={"decision": decision})
+                                 back_url="/confirm", active="confirm",
+                                 fields={"decision": decision, **({"expected_status": expected_status} if expected_status != "pending" else {})})
             status, msg = _CONFIRM_DECISIONS[decision]
-            store().set_action_status(action_id, status)
+            store().set_action_status(action_id, status, event="confirm" if decision == "done" else "reject",
+                                      **actor_fields(who))
             return _redirect_with_msg("/confirm", msg)
 
     # ---- 待複核 ------------------------------------------------------------
@@ -996,6 +1423,7 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         有改的每一項都留紀錄(何時、改成什麼、誰改的)。辨識模式改了,下一次上傳會重建 analyzer。
         從本機切到雲端備援要先確認(之後不敏感的文件會交給雲端模型讀):沒帶確認欄位就整份不存,
         回確認頁再問一次;切回本機、只改門檻都不必確認。"""
+        require("can_manage")
         values = {PROVIDER: provider, THRESHOLD: auto_threshold}
         current = current_cfg()
         changes, errors = form_changes(values, cfg, current)
@@ -1004,14 +1432,60 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         if changes.get(PROVIDER) == "workers_ai" and confirmed != CONFIRMED:
             return ask_first(cloud_ask(current.local_only_doc_types), action="/settings", back_url="/settings",
                              active="settings", fields={k: v for k, v in values.items() if v is not None})
-        actor = _actor(request)
-        for key, value in changes.items():
-            store().set_setting(key, value, actor=actor)
+        with doc_lock:
+            who = require("can_manage")
+            for key, value in changes.items():
+                store().set_setting(key, value, actor=who.actor)
         return _redirect_with_msg("/settings", MSG_SETTINGS_SAVED if changes else MSG_SETTINGS_UNCHANGED)
+
+    # ---- 家庭成員；和文件操作用同一把鎖，角色撤銷後的請求重新檢查 ----
+
+    def members_page(*, values=None, error=None, saved=False, status_code=200):
+        return page("members.html", active="settings", members=store().list_members(),
+                    values=values or {}, error=error, saved=saved, status_code=status_code)
+
+    def last_family(email: str) -> bool:
+        families = [m["email"] for m in store().list_members() if m["role"] == "family"]
+        return families == [email]
+
+    @app.get("/settings/members", response_class=HTMLResponse)
+    def members_list(saved: bool = False):
+        require("can_manage")
+        return members_page(saved=saved)
+
+    @app.post("/settings/members")
+    def member_save(email: str = Form(""), role: str = Form(""), display_name: str = Form("")):
+        with doc_lock:
+            who = require("can_manage")
+            values, error = member_values(email, role, display_name)
+            if not error and role != "family" and last_family(values["email"]):
+                error = "至少保留一位家人；請先加入另一位家人。"
+            if error:
+                return members_page(values=values, error=error, status_code=400)
+            store().set_member(values["email"], role, values["display_name"], actor=who.actor)
+        return RedirectResponse("/settings/members?saved=true", status_code=303)
+
+    @app.post("/settings/members/remove")
+    def member_remove(email: str = Form(""), confirmed: str = Form("")):
+        with doc_lock:
+            who = require("can_manage")
+            member = store().get_member(email)
+            if not member:
+                raise HTTPException(404, "找不到這位家庭成員。")
+            if last_family(member["email"]):
+                return members_page(error="至少保留一位家人；請先加入另一位家人。", status_code=400)
+            if confirmed != CONFIRMED:
+                return ask_first({"title": "確定移除這位成員嗎？", "message": "移除後，這位成員只能查看，不能更正或確認。",
+                                  "ok": "確定移除", "field": "confirmed"},
+                                 action="/settings/members/remove", back_url="/settings/members",
+                                 active="settings", fields={"email": member["email"]})
+            store().remove_member(member["email"], actor=who.actor)
+        return RedirectResponse("/settings/members?saved=true", status_code=303)
 
     @app.get("/settings/export")
     def settings_export() -> Response:
         """匯出全部紀錄:文件與讀值、行動、更正、設定變更(JSON 下載,不含影像)。內容有個資,不讓瀏覽器或代理存下來。"""
+        require("can_manage")
         body = json.dumps(export_records(store(), cfg, version=APP_VERSION), ensure_ascii=False, indent=2)
         stamp = f"{datetime.now():%Y%m%d-%H%M}"
         # 中文檔名給認得 filename* 的瀏覽器,其他的用英數檔名
@@ -1034,9 +1508,11 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
         哪些已刪、哪些沒刪,關掉那個程式後再按一次就補刪。
         和改文件的路由同一把鎖:做到一半的更正先做完,不會在刪完之後又把讀值寫回來。
         """
+        require("can_manage")
         if confirmed != CONFIRMED:
             return ask_first(PURGE_ASK, action="/settings/delete", back_url="/settings", active="settings")
         with doc_lock:
+            who = require("can_manage")
             try:
                 store().purge_all()
             except sqlite3.Error as exc:
@@ -1056,7 +1532,7 @@ def create_app(cfg: AppConfig | None = None, analyzer=None,
             except OSError as exc:
                 files_stuck = True
                 log.warning("刪除全部資料:刪照片檔時出錯(%s)", type(exc).__name__)
-            store().set_setting(PURGED, datetime.now().isoformat(), actor=_actor(request))
+            store().set_setting(PURGED, datetime.now().isoformat(), actor=who.actor)
         if records_stuck:
             gone = "文件、提醒與更正紀錄已經刪除" if files_stuck else "文件、提醒、更正紀錄與照片都已經刪除"
             still = "處理紀錄檔（裡面有讀值）" + ("和有些照片檔" if files_stuck else "")

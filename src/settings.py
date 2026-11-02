@@ -250,11 +250,13 @@ def export_records(store: Store, cfg: AppConfig, *, version: str) -> dict[str, A
     return {
         "exported_at": datetime.now().isoformat(timespec="seconds"),
         "version": version,
-        "note": "看有匯出的全部紀錄：文件與讀值、提醒與服藥時間表、更正、設定變更。不含照片與 PDF 原件。",
+        "note": "看有匯出的全部紀錄：文件與讀值、提醒與服藥時間表、更正、操作紀錄、家庭成員與設定變更。不含照片與 PDF 原件。",
         "documents": documents,
         "actions": store.list_actions(),
         "corrections": store.list_corrections(verified_only=False, limit=_ALL_ROWS),
         "setting_changes": store.list_setting_changes(limit=_ALL_ROWS),
+        "members": store.list_members(),
+        "audit_events": store.list_audit_events(limit=_ALL_ROWS),
     }
 
 

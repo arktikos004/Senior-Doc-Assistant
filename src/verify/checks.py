@@ -25,6 +25,7 @@ CHECK_AMOUNT = "金額合理性"
 CHECK_AMOUNT_SUM = "金額加總"
 CHECK_SUBJECT = "主旨完整"
 CHECK_MEDICATION_ITEMS = "藥品清單完整"
+CHECK_MEDICATION_TIMING = "服藥時段印在藥袋上"
 
 EARLIEST_DATE = date(2000, 1, 1)       # 早於 2000 年的單據不在本系統的使用情境內
 FUTURE_TOLERANCE = timedelta(days=1)   # 時區、跨夜拍照的時差
@@ -272,3 +273,69 @@ def check_medication_items(items: Any) -> dict[str, Any]:
     if incomplete:
         return entry("fail", "藥品清單不完整：" + "、".join(incomplete), fields)
     return entry("pass", f"讀出 {len(items)} 項藥品，每項都有藥名與用法", fields)
+
+
+# 用法、用量原文裡表示時段的字;寧可多認(把印出來的時段當成沒印,會讓家人白跑一趟)
+_SLOT_WORDS = {
+    "早": re.compile(r"早|晨|(?<![A-Za-z])Q?AM(?![A-Za-z])", re.I),
+    "中": re.compile(r"午|中[飯餐]|早[、,，\s□■☐☑☒✓✔]*中|中[、,，\s□■☐☑☒✓✔]*晚|[□■☐☑☒✓✔]\s*中"),
+    "晚": re.compile(r"晚|夜|(?<![A-Za-z])Q?PM(?![A-Za-z])", re.I),
+    "睡前": re.compile(r"睡前|睡覺前|就寢|臨睡|(?<![A-Za-z])Q?HS(?![A-Za-z])", re.I),
+}
+# 只寫次數的用法:「每日三次」「一天 2 次」「3次/日」「TID」
+_TIMES_PER_DAY = re.compile(r"(?:每|一)(?:日|天)\s*([一二兩三四五六1-6])\s*次|([一二兩三四五六1-6])\s*次\s*/\s*(?:日|天)")
+_LATIN_TIMES = re.compile(r"(?<![A-Za-z])(QD|BID|TID|QID)(?![A-Za-z])", re.I)
+_NUMBERS = {"一": 1, "二": 2, "兩": 2, "三": 3, "四": 4, "五": 5, "六": 6}
+_LATIN_COUNTS = {"QD": 1, "BID": 2, "TID": 3, "QID": 4}
+_CHECKBOX = re.compile(r"[□■☐☑☒✓✔]")     # 勾選格:時段字都印著,看不出哪幾格有勾
+
+
+def _times_per_day(text: str) -> int | None:
+    m = _TIMES_PER_DAY.search(text)
+    if m:
+        n = m.group(1) or m.group(2)
+        return _NUMBERS.get(n) or int(n)
+    m = _LATIN_TIMES.search(text)
+    return _LATIN_COUNTS[m.group(1).upper()] if m else None
+
+
+def check_medication_timing(items: Any) -> dict[str, Any]:
+    """標出的服用時段,不能和同一項藥照抄的用法、用量矛盾(原則 2:時段要有原文依據)。
+
+    只看照抄的文字,所以只在明顯矛盾時不通過:
+    - 文字印了時段字(早、中午、晚、睡前…):標出的時段都要在裡面,印出來的也不能漏標
+      (漏標會讓服藥表少一次;文字裡有勾選格符號時看不出哪幾格有勾,不判斷漏標);
+    - 文字只印次數(每日三次、TID)、沒印時段:不能標任何時段(不把「一天三次」換算成時段);
+    - 文字兩者都沒有(例如只印「飯後」,時段在勾選格):看不出矛盾,不判斷。
+    抓的是「只印『每日三次』卻標成『晚』」「只印『每日兩次』卻標成中、晚」這種推測的時段(10/27 dev 評測的實例)。
+    不改讀值,只回報不符,讓文件轉人工、家人對照藥袋;家人更正後時段以家人為準(src/review.py)。
+    藥名與時段是模型的字,只截短後當資料顯示。
+    """
+    fields = ["fields.items"]
+    if not isinstance(items, list):
+        return entry("skip", "沒有讀到藥品清單", fields)
+    marked = [(i, it) for i, it in enumerate(items, start=1)
+              if isinstance(it, dict) and isinstance(it.get("timing"), list) and it["timing"]]
+    if not marked:
+        return entry("skip", "沒有標出服藥時段，不用比對", fields)
+    problems = []
+    for i, item in marked:
+        name = str(item.get("name") or "").strip()[:12] or f"第 {i} 項"
+        timing = [str(slot)[:4] for slot in item["timing"]]
+        printed = f"{item.get('frequency_text') or ''} {item.get('dose_text') or ''}"
+        on_paper = {slot for slot, pattern in _SLOT_WORDS.items() if pattern.search(printed)}
+        times = _times_per_day(printed)
+        unknown = [slot for slot in timing if slot not in _SLOT_WORDS]
+        extra = [slot for slot in timing if slot in _SLOT_WORDS and slot not in on_paper]
+        left_out = [slot for slot in _SLOT_WORDS if slot in on_paper and slot not in timing]
+        if unknown:
+            problems.append(f"{name}的時段「{'、'.join(unknown)}」不是早、中、晚、睡前")
+        elif on_paper and extra:
+            problems.append(f"{name}的「{'、'.join(extra)}」沒有印在用法裡")
+        elif on_paper and left_out and not _CHECKBOX.search(printed):
+            problems.append(f"{name}的用法印了「{'、'.join(left_out)}」，時段卻沒有標")
+        elif not on_paper and times is not None:
+            problems.append(f"{name}的用法只寫一天 {times} 次、沒印時段，卻標成「{'、'.join(timing)}」")
+    if problems:
+        return entry("fail", f"{'；'.join(problems[:2])}，請對照藥袋", fields)
+    return entry("pass", "標出的服藥時段和藥袋的用法沒有矛盾", fields)

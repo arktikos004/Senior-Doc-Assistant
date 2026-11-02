@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}{{ v.title }} - {{ BRAND_FULL }}{% endblock %}
+{# 沒有 JS 時每 3 秒重新整理一次,做完了伺服器直接轉到結果頁;有 JS 時 app.js 每秒問一次進度,不重新整理 #}
+{% block head %}<noscript><meta http-equiv="refresh" content="3"></noscript>{% endblock %}
+{% block content %}
+<header class="page-head"><div class="page-head__text"><h1>{{ v.title }}</h1>
+  <p class="lede">通常幾秒鐘就好；好了會自動打開結果，不用一直盯著。</p></div></header>
+
+<section class="panel" aria-labelledby="progress-title" data-job-status="/upload/progress/{{ v.token }}/status">
+  <h2 class="visually-hidden" id="progress-title">處理進度</h2>
+  <div class="progress-photo">
+    {% if v.has_photo %}<img src="/upload/progress/{{ v.token }}/photo" alt="" width="72" height="96">
+    {%- else %}<span class="progress-photo__icon">{{ icon("file") }}</span>{% endif %}
+    <span>{{ v.photo_text }}</span>
+  </div>
+  <ol class="steps">
+    {% for s in v.steps %}
+    <li class="step step--{{ s.state }}" data-step="{{ s.id }}">
+      <span class="step__dot">{{ icon("check", "step__icon step__icon--done") }}{{ icon("clock", "step__icon step__icon--now") }}</span>
+      <span><span class="step__title">{{ s.title }}<span class="visually-hidden" data-step-state>{{ s.state_text }}</span></span>
+        <span class="step__hint" data-step-hint>{{ s.hint }}</span></span>
+      <span class="step__time" data-step-time>{{ s.time }}</span>
+    </li>
+    {% endfor %}
+  </ol>
+  <p class="visually-hidden" role="status" data-job-say>{{ v.say }}</p>
+  <p class="progress-foot">核對與決定都由程式照固定規則做，不是 AI 自己打分數。</p>
+</section>
+{% endblock %}

@@ -10,6 +10,7 @@
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/roles.css">
   <script src="/static/app.js" defer></script>
   {% block head %}{% endblock %}
 </head>
@@ -38,6 +39,9 @@
       {% endif %}
     </aside>
     <main id="main" class="main" tabindex="-1">
+      {% if identity is defined and identity %}
+      <p class="identity"><span>{{ icon("family") }}{{ identity.role_label }}</span><span>{{ identity.label }}</span></p>
+      {% endif %}
       {% if msg %}<p class="msg" role="status">{{ icon("check") }}<span>{{ msg }}</span></p>{% endif %}
       {% block content %}{% endblock %}
       {% if trust %}

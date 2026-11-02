@@ -120,6 +120,16 @@ def test_compare_amount_mismatch_fails_with_both_values_in_detail():
     assert "350" in total["detail"] and "530" in total["detail"]
 
 
+def test_qr_conflicts_carry_the_qr_value_for_one_tap_correction():
+    # 與 QR 矛盾時附上 QR 上的值(expected),更正頁用它給「改成這個」;相符或略過的不附
+    checks = einvoice.compare_with_result(einvoice.parse_left_qr(LEFT),
+                                          _result(amount=530.0, invoice_number="ZX10293848", date="2026-07-05"))
+    assert checks[einvoice.CHECK_QR_TOTAL]["expected"] == {"amount": 350}
+    assert checks[einvoice.CHECK_QR_INVOICE]["expected"] == {"invoice_number": "ZX10293847"}
+    assert checks[einvoice.CHECK_QR_DATE]["expected"] == {"date": "2026-07-04"}
+    assert "expected" not in checks[einvoice.CHECK_QR_SELLER] and "expected" not in checks[einvoice.CHECK_QR_BUYER]
+
+
 def test_compare_missing_model_values_skip_and_show_qr_value():
     checks = einvoice.compare_with_result(
         einvoice.parse_left_qr(LEFT), _result(invoice_number=None, amount=None, fields={}))
@@ -202,6 +212,42 @@ def test_missing_zxing_falls_back_to_opencv_only(tmp_path, monkeypatch):
     assert einvoice.decode_qr_texts(einvoice.load_image(path)) == []
 
 
+def _faded_noisy(seed: int = 0) -> Image.Image:
+    """褪色的熱感紙(QR 的黑只比白暗 20)加上拍照的雜訊:zxing 找得到 QR,卻讀錯好幾格。"""
+    import numpy as np
+
+    page = np.asarray(_invoice_image().convert("L"), dtype=np.float32) / 255.0
+    gray = 150 + 20 * page + np.random.default_rng(seed).normal(0, 9, page.shape)
+    return Image.fromarray(np.clip(gray, 0, 255).astype(np.uint8))
+
+
+def test_faded_noisy_qr_is_read_with_a_local_threshold(tmp_path, monkeypatch):
+    # 照片上找得到卻解不開的 QR:以 QR 的大小定範圍做局部二值化再試(11/2 家人拍的發票有 1 張因此解開)
+    path = tmp_path / "褪色.png"
+    _faded_noisy().save(path)
+    image = einvoice.load_image(path)
+
+    assert einvoice.find_left_qr(einvoice.decode_qr_texts(image)) == einvoice.parse_left_qr(LEFT)
+    assert einvoice.verify_einvoice(_result(), path)[einvoice.CHECK_QR_TOTAL]["status"] == "pass"
+
+    monkeypatch.setattr(einvoice, "_decode_local_threshold", lambda _image, _codes: [])
+    assert einvoice.find_left_qr(einvoice.decode_qr_texts(image)) is None     # 少了這一步就解不開
+
+
+def test_local_threshold_runs_only_for_a_qr_that_was_found_but_not_read(monkeypatch):
+    # 沒有 QR、或 QR 一次就解開:不多花時間
+    import cv2
+    import numpy as np
+
+    calls = []
+    real = cv2.adaptiveThreshold
+    monkeypatch.setattr(cv2, "adaptiveThreshold", lambda *args: calls.append(1) or real(*args))
+
+    assert einvoice._decode_zxing(np.full((300, 400, 3), 255, np.uint8)) == []
+    assert LEFT in einvoice._decode_zxing(cv2.cvtColor(np.asarray(_invoice_image()), cv2.COLOR_RGB2BGR))
+    assert calls == []
+
+
 def test_end_to_end_match_is_pass(tmp_path):
     path = tmp_path / "合成發票.png"
     _invoice_image().save(path)
@@ -244,3 +290,74 @@ def test_foreign_qr_is_skip_not_fail(tmp_path):
     _invoice_image(left="https://example.com/menu", right=None).save(path)
     entry = einvoice.verify_einvoice(_result(), path)[einvoice.CHECK_QR]
     assert entry["status"] == "skip" and "不是電子發票左側 QR" in entry["detail"]
+
+
+# --- 第一次解不開時再試:掃描 PDF 的原解析度、照片找到紙張並拉正 ---
+
+def _blank_bgr(*_args):
+    import numpy as np
+    return np.full((400, 400, 3), 255, np.uint8)
+
+
+def test_qr_on_a_scanned_pdf_is_found_at_native_resolution(tmp_path, monkeypatch):
+    # 200 DPI 的掃描檔放大成 288 DPI 反而解不開(10/30 實測):轉圖那次找不到,就用內嵌影像的原解析度再解
+    path = tmp_path / "掃描發票.pdf"
+    _invoice_image().save(path, "PDF", resolution=200)
+    monkeypatch.setattr(einvoice, "load_image", _blank_bgr)          # 模擬轉圖那次解不開
+
+    checks = einvoice.verify_einvoice(_result(), path)
+
+    assert checks[einvoice.CHECK_QR_INVOICE]["status"] == "pass"
+    assert checks[einvoice.CHECK_QR_TOTAL]["status"] == "pass"
+
+
+def test_photo_is_tried_again_straightened(tmp_path):
+    # 手機拍桌上的發票:alternate_images 產生一張找到紙張、拉正後的版本,大小接近那張紙
+    import cv2
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    table = np.clip(rng.normal(0, 14, (900, 1000, 3)) + [95, 72, 52], 0, 255).astype(np.uint8)   # 紙約佔三成
+    sheet = np.asarray(_invoice_image())
+    height, width = sheet.shape[:2]
+    corners = np.float32([[220, 180], [220 + width, 210], [250 + width, 210 + height], [200, 180 + height]])
+    matrix = cv2.getPerspectiveTransform(np.float32([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]]),
+                                         corners)
+    warped = cv2.warpPerspective(sheet, matrix, (1000, 900))
+    mask = cv2.warpPerspective(np.full((height, width), 255, np.uint8), matrix, (1000, 900))
+    photo = cv2.cvtColor(np.where(mask[..., None] > 0, warped, table), cv2.COLOR_RGB2BGR)
+    path = tmp_path / "照片.png"
+    cv2.imwrite(str(path), photo)
+
+    [extra] = list(einvoice.alternate_images(path, photo))
+
+    # 拉正後的長寬取梯形對邊的較長者(這裡下緣比上緣長),所以只會比紙稍大
+    assert extra.shape[1] == pytest.approx(width, rel=0.15) and extra.shape[0] == pytest.approx(height, rel=0.15)
+    assert einvoice.find_left_qr(einvoice.decode_qr_texts(extra)) == einvoice.parse_left_qr(LEFT)
+
+
+def test_verify_uses_the_alternate_images_when_the_first_pass_finds_nothing(tmp_path, monkeypatch):
+    import cv2
+    import numpy as np
+
+    path = tmp_path / "照片.png"
+    _invoice_image().save(path)
+    monkeypatch.setattr(einvoice, "load_image", _blank_bgr)
+    qr_image = cv2.cvtColor(np.asarray(_invoice_image()), cv2.COLOR_RGB2BGR)
+    monkeypatch.setattr(einvoice, "alternate_images", lambda _path, _image: iter([qr_image]))
+
+    assert einvoice.verify_einvoice(_result(), path)[einvoice.CHECK_QR_TOTAL]["status"] == "pass"
+
+
+def test_alternate_images_skip_quietly(tmp_path, monkeypatch):
+    # 沒有適用的版本就什麼都不產生;找紙張出錯也只是少一次機會
+    path = tmp_path / "空白.png"
+    Image.new("RGB", (300, 300), "white").save(path)
+    assert list(einvoice.alternate_images(path, _blank_bgr())) == []
+
+    def boom(_img):
+        raise RuntimeError("偵測失敗")
+
+    monkeypatch.setattr("src.preprocess.find_document", boom)
+    assert list(einvoice.alternate_images(path, _blank_bgr())) == []
+    assert einvoice.verify_einvoice(_result(), path)[einvoice.CHECK_QR]["status"] == "skip"

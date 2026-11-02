@@ -9,6 +9,13 @@
 </header>
 
 <div class="settings">
+  {% if permissions is not defined or permissions.can_manage %}
+  <section class="panel set-card" aria-labelledby="members-title">
+    <h2 id="members-title">家庭成員</h2>
+    <p class="field-hint">家人負責確認、更正與管理；長輩可查看、退回與調整提醒。</p>
+    <div><a class="btn btn--secondary" href="/settings/members">{{ icon("family") }}管理家庭成員</a></div>
+  </section>
+  {% endif %}
   {# 1. 系統狀態:只看。依目前生效的設定與本機模型的連線寫(render.settings_view) #}
   <section class="panel set-card" aria-labelledby="status-title">
     <h2 id="status-title">系統狀態 <span class="tag">只看，不能改</span></h2>
@@ -39,6 +46,7 @@
   </section>
 
   {# 3. 系統設定:會影響全家。規則在 src/settings.py(門檻不低於 80%、雲端要金鑰、藥袋一律本機),每次改動都留紀錄 #}
+  {% if permissions is not defined or permissions.can_manage %}
   <section class="panel set-card" aria-labelledby="system-title">
     <h2 id="system-title">系統設定 <span class="tag">會影響全家</span></h2>
     <form class="set-form" method="post" action="/settings" data-settings-form novalidate>
@@ -100,6 +108,7 @@
   <section class="panel set-card danger-zone" aria-labelledby="data-title">
     <h2 id="data-title">資料管理</h2>
     <p class="field-hint">匯出的檔案含有文件內容，請存在安全的地方。刪除後無法復原。</p>
+    <p class="field-hint"><a href="/data-use">資料怎麼用：存了什麼、放在哪裡、誰看得到</a></p>
     <form class="set-form" method="post" action="/settings/delete">
       {{ csrf_input() }}
       {# 沒有 JS 就沒有確認框:改成要先勾選才送得出去(瀏覽器內建的必填檢查,不用 JS)。
@@ -113,5 +122,6 @@
       </div>
     </form>
   </section>
+  {% endif %}
 </div>
 {% endblock %}

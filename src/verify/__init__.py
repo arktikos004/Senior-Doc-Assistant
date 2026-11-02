@@ -1,12 +1,14 @@
 """自我驗證引擎:用獨立於 VLM 的確定性檢查核對辨識結果。
 
-檢查:電子發票左側 QR 解碼比對(唯一的獨立證據)、統編檢查碼、字軌格式、期別/日期合理性、
-繳費期限、金額合理性、主旨與藥品清單完整。一維條碼(Code 39)與明細加總一律 skip:
-OpenCV 不支援 Code 39,ExtractionResult 也沒有明細欄位(見 einvoice.py、checks.py)。
+檢查:電子發票左側 QR 解碼比對、帳單超商代收條碼的應繳金額(兩者是獨立證據)、統編檢查碼、字軌格式、
+期別/日期合理性、繳費期限、金額合理性、主旨與藥品清單完整、服藥時段與用法一致。電子發票的一維條碼
+與明細加總一律 skip(見 einvoice.py、checks.py)。帳單條碼的代收期限只是輔助(見 billcode.py)。
 對外只有 verify_result 一個入口,Pipeline 在「辨識」與「決策」之間呼叫它。
 
 契約:
 - 就地填寫 result.verification:{檢查名稱: {"status": "pass"|"fail"|"skip", "detail": str, "fields": [...]}}
+  與獨立證據(QR、帳單條碼)矛盾的項目另附 "expected":{欄位: 機讀碼上的值},更正頁用它給「改成這個」;
+  帳單條碼只附金額,不附銷帳編號。
 - 就地填寫 result.verified_confidence:0~1;沒有任何檢查可用時維持 None,
   決策會退回使用模型自評信心。
 - 不得修改 result 的欄位值本身(驗證只判斷,不改答案)。
@@ -16,7 +18,7 @@ OpenCV 不支援 Code 39,ExtractionResult 也沒有明細欄位(見 einvoice.py�
   src.models.REQUIRED_FIELDS 的命名。以底線開頭的鍵不是檢查項目,介面逐項顯示時要略過:
   - "_coverage":{必要欄位: bool},該欄位有沒有被任何 pass/fail 的檢查涵蓋;
   - "_summary":一句話說明 verified_confidence 的依據,決策理由會引用。
-- 各檢查的實作:電子發票 QR 見 einvoice.py,格式/檢查碼/合理性見 checks.py。
+- 各檢查的實作:電子發票 QR 見 einvoice.py,帳單條碼見 billcode.py,格式/檢查碼/合理性見 checks.py。
 - INDEPENDENT_CHECKS(屬於獨立證據的檢查名稱)由本套件重新匯出,介面要區分證據強弱時從這裡取。
 """
 from __future__ import annotations
@@ -27,12 +29,24 @@ from pathlib import Path
 from typing import Any
 
 from ..models import REQUIRED_FIELDS, ExtractionResult
+from . import billcode, einvoice
 from . import checks as c
-from . import einvoice
-from .einvoice import INDEPENDENT_CHECKS
 from .logname import log_label, logged_as
 
 log = logging.getLogger(__name__)
+
+# 屬於獨立證據的檢查名稱:電子發票 QR 與帳單條碼的應繳金額(條碼的代收期限只是輔助,不在這裡)
+INDEPENDENT_CHECKS = einvoice.INDEPENDENT_CHECKS | billcode.BILL_INDEPENDENT_CHECKS
+
+
+def _conflict_summary(names: list[str]) -> str:
+    """與獨立證據矛盾的一句話依據:QR 與條碼分開說(「與 QR 不符：總計額」「與條碼不符：應繳金額」)。"""
+    qr = [n.removeprefix("QR ") for n in names if n.startswith("QR ")]
+    barcode = [n.removeprefix("條碼") for n in names if not n.startswith("QR ")]
+    parts = [f"與 QR 不符：{'、'.join(qr)}"] if qr else []
+    parts += [f"與條碼不符：{'、'.join(barcode)}"] if barcode else []
+    return "；".join(parts)
+
 
 QR_ALL_MATCH = 0.95         # QR 與模型在字軌、日期、總額三者一致
 QR_REQUIRED_MATCH = 0.90    # QR 只證實必要欄位(日期、總額),模型沒讀出字軌
@@ -85,6 +99,24 @@ def run_verification(result: ExtractionResult, file_path: Path, today: date) -> 
     result.verified_confidence = score
 
 
+def waive_check(result: ExtractionResult, name: str, detail: str) -> None:
+    """把一項沒通過的規則檢查改成「略過」並重算驗證信心;家人對照原件更正後,交給家人決定的檢查才用。
+
+    目前只有服藥時段:它抓的是 AI 推測的時段,家人勾的時段以家人為準(勾選格的時段從文字看不出來)。
+    與獨立證據(QR)矛盾的檢查、核對程式出錯(fail-closed)都不能這樣放行。
+    """
+    verification = result.verification if isinstance(result.verification, dict) else {}
+    check = verification.get(name)
+    if (name in INDEPENDENT_CHECKS or verification.get("_summary") == VERIFY_ERROR_SUMMARY
+            or not isinstance(check, dict) or check.get("status") != "fail"):
+        return
+    verification[name] = c.entry("skip", detail, list(check.get("fields") or []))
+    found = {k: v for k, v in verification.items() if not k.startswith("_")}
+    score, summary = score_verification(found, result.doc_type, result.confidence)
+    verification.update({"_coverage": coverage(found, result.doc_type), "_summary": summary})
+    result.verified_confidence = score
+
+
 def collect_checks(result: ExtractionResult, file_path: Path, today: date) -> dict[str, dict[str, Any]]:
     """依 doc_type 決定要跑哪些檢查;沒有對應檢查的類型(其他)回空 dict。"""
     fields = result.fields or {}
@@ -112,6 +144,11 @@ def collect_checks(result: ExtractionResult, file_path: Path, today: date) -> di
         found[c.CHECK_AMOUNT] = c.check_amount_plausible(result.amount, result.currency)
         found[c.CHECK_AMOUNT_SUM] = c.check_amount_sum(result.amount, None)
     elif doc_type == "帳單":
+        try:
+            found.update(billcode.verify_bill_barcode(result, file_path))
+        except Exception as exc:  # 解碼器壞掉只是少一項證據,不能讓其他檢查跟著失敗
+            log.error("條碼驗證失敗:%s(%s)", log_label(file_path), type(exc).__name__)
+            found[billcode.CHECK_BARCODE] = c.entry("skip", f"條碼解碼發生錯誤：{type(exc).__name__}", [])
         found[c.CHECK_DUE_DATE] = c.check_due_date(fields.get("due_date"), result.date)
         found[c.CHECK_AMOUNT] = c.check_amount_plausible(result.amount, result.currency)
         found[c.CHECK_DATE] = c.check_date_plausible(result.date, today)
@@ -121,6 +158,7 @@ def collect_checks(result: ExtractionResult, file_path: Path, today: date) -> di
     elif doc_type == "藥袋":
         found[c.CHECK_DATE] = c.check_date_plausible(result.date, today)
         found[c.CHECK_MEDICATION_ITEMS] = c.check_medication_items(fields.get("items"))
+        found[c.CHECK_MEDICATION_TIMING] = c.check_medication_timing(fields.get("items"))
     return found
 
 
@@ -197,7 +235,7 @@ def score_verification(
     other_fails = [name for name in failed if name not in qr_conflicts and name not in required_fails]
     if qr_conflicts:
         score = min(score, CAP_QR_CONFLICT)
-        summary = f"與 QR 不符：{'、'.join(n.removeprefix('QR ') for n in qr_conflicts)}"
+        summary = _conflict_summary(qr_conflicts)
     elif required_fails:
         score = min(score, CAP_REQUIRED_FAIL)
         summary = f"必要欄位檢查不通過：{'、'.join(required_fails)}"

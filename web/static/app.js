@@ -143,6 +143,73 @@
     });
   });
 
+  // ---- data-fill-target:更正頁「改成 QR/條碼上的值」 ----
+  // 讀值和 QR 或帳單條碼不符時,欄位下面寫著機讀碼上的值;有 JS 才露出「改成…」(沒有 JS 就照著打)。
+  // 按了只把值填進那一欄、焦點移過去,不送出:家人還是要按「存檔並重新核對」才生效。
+  // 欄位已經是這個值時按鈕停用並寫「已改成…」;家人又改掉就恢復成可以按
+  document.querySelectorAll("[data-fill-wrap]").forEach(function (wrap) {
+    var button = wrap.querySelector("button[data-fill-target]");
+    var input = button && document.getElementById(button.getAttribute("data-fill-target"));
+    if (!input) return;
+    var value = button.getAttribute("data-fill-value") || "";
+    var label = button.querySelector("[data-fill-label]");
+    var labelText = label ? label.textContent : "";
+
+    function sync() {
+      var filled = input.value === value;
+      button.disabled = filled;
+      if (label) label.textContent = filled ? button.getAttribute("data-fill-done") || labelText : labelText;
+    }
+
+    wrap.hidden = false;
+    button.addEventListener("click", function () {
+      input.value = value;
+      input.focus();
+      sync();
+    });
+    input.addEventListener("input", sync);
+    sync();
+  });
+
+  // ---- 上傳後的進度頁:每秒問伺服器做到哪一步,做完就打開結果 ----
+  // 每一步是伺服器真的做完才亮(狀態與文字都照伺服器回的換,這裡不自己推進)。沒有 JS 時是 <noscript> 裡的
+  // meta refresh 每 3 秒重新整理。問不到(網路斷了、服務重開、處理失敗)就改成整頁重新整理,由伺服器的頁面說明
+  var jobBox = document.querySelector("[data-job-status]");
+  if (jobBox) {
+    var jobUrl = jobBox.getAttribute("data-job-status");
+    var jobSay = jobBox.querySelector("[data-job-say]");
+    var reloadSoon = function () {
+      window.setTimeout(function () { window.location.reload(); }, 3000);
+    };
+    var showStep = function (step) {
+      var item = jobBox.querySelector('[data-step="' + step.id + '"]');
+      if (!item) return;
+      item.className = "step step--" + step.state;
+      item.querySelector("[data-step-state]").textContent = step.state_text;
+      item.querySelector("[data-step-hint]").textContent = step.hint;
+      item.querySelector("[data-step-time]").textContent = step.time;
+    };
+    var poll = function () {
+      window.fetch(jobUrl, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } })
+        .then(function (response) {
+          if (!response.ok) throw new Error(String(response.status));
+          return response.json();
+        })
+        .then(function (status) {
+          if (status.next) {
+            window.location.replace(status.next);
+            return;
+          }
+          status.steps.forEach(showStep);
+          if (jobSay && jobSay.textContent !== status.say) jobSay.textContent = status.say;
+          window.setTimeout(poll, 1000);
+        })
+        .catch(reloadSoon);
+    };
+    if (window.fetch) window.setTimeout(poll, 1000);
+    else reloadSoon();   // 太舊的瀏覽器沒有 fetch:和沒有 JS 一樣,整頁重新整理
+  }
+
   // ---- 手機「選單」(<details>,沒有 JS 也能開關):按 Esc 或點選單外面就收起 ----
   var menu = document.querySelector("details.menu");
   if (menu) {
@@ -288,10 +355,10 @@
     }
     // 送出後才停用按鈕(停用的 input 不會被送出,所以只停用按鈕)
     submit.disabled = true;
-    if (submitLabel) submitLabel.textContent = "辨識中…";
+    if (submitLabel) submitLabel.textContent = "上傳中…";
     form.setAttribute("aria-busy", "true");
     progress.hidden = false;
-    status.textContent = "正在辨識，請不要關閉這個畫面。";
+    status.textContent = "正在上傳，請不要關閉這個畫面。";
     // 等候秒數放在非 live 區,避免讀屏每秒唸一次
     var started = Date.now();
     wait.hidden = false;

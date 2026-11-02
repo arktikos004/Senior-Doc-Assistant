@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}家庭成員 - {{ BRAND_FULL }}{% endblock %}
+{% block content %}
+<nav class="crumbs" aria-label="位置"><a href="/settings">設定</a><span aria-hidden="true">/</span><span>家庭成員</span></nav>
+<header class="page-head"><div class="page-head__text"><h1>家庭成員</h1><p class="lede">分清楚誰來把關，也保留長輩的決定權。</p></div></header>
+{% if saved %}<p class="msg" role="status">{{ icon("check") }}家庭成員已更新。</p>{% endif %}
+{% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+<section class="panel set-card"><h2>誰可以做什麼</h2>
+  <ul class="plain-list"><li><b>家人</b>：確認服藥表、更正讀值、管理成員與資料。</li>
+  <li><b>長輩</b>：上傳、查看、退回事項，取消或恢復提醒。</li>
+  <li><b>名單外的登入者</b>：只能查看。這台電腦直接開啟時可管理家庭成員。</li></ul>
+  <p class="field-hint">請填入每位成員登入時使用的電子郵件。至少保留一位家人。</p>
+</section>
+<section class="section" aria-labelledby="member-list-title"><div class="section__head"><h2 id="member-list-title">目前的成員</h2><span class="muted">{{ members|length }} 位</span></div>
+{% for member in members %}
+<article class="panel set-card member-card">
+  <h3>{{ member.display_name or member.email }}</h3><p class="member-email">{{ member.email }}</p>
+  <form method="post" action="/settings/members" class="member-form">
+    {{ csrf_input() }}<input type="hidden" name="email" value="{{ member.email }}">
+    <label for="name-{{ loop.index }}">稱呼<input id="name-{{ loop.index }}" name="display_name" maxlength="40" value="{{ member.display_name or '' }}"></label>
+    <label for="role-{{ loop.index }}">角色<select id="role-{{ loop.index }}" name="role"><option value="family"{% if member.role == "family" %} selected{% endif %}>家人</option><option value="elder"{% if member.role == "elder" %} selected{% endif %}>長輩</option></select></label>
+    <button class="btn btn--primary" type="submit">儲存變更<span class="visually-hidden">：{{ member.email }}</span></button>
+  </form>
+  <form method="post" action="/settings/members/remove" class="member-remove">
+    {{ csrf_input() }}<input type="hidden" name="email" value="{{ member.email }}">
+    <button class="btn btn--secondary" type="submit" data-confirm-title="確定移除這位成員嗎？" data-confirm="移除後，這位成員只能查看，不能更正或確認。" data-confirm-ok="確定移除" data-confirm-field="confirmed">移除成員<span class="visually-hidden">：{{ member.email }}</span></button>
+  </form>
+</article>
+{% else %}<p class="empty">還沒有家庭成員。先加入一位家人，再加入長輩。</p>{% endfor %}
+</section>
+<section class="panel set-card" aria-labelledby="add-member-title"><h2 id="add-member-title">加入家庭成員</h2>
+<form method="post" action="/settings/members" class="member-form">
+{{ csrf_input() }}
+<label for="member-email">登入電子郵件<input id="member-email" name="email" type="email" maxlength="254" required autocomplete="off" value="{{ values.email or '' }}"></label>
+<label for="member-name">稱呼（選填）<input id="member-name" name="display_name" maxlength="40" value="{{ values.display_name or '' }}"></label>
+<label for="member-role">角色<select id="member-role" name="role"><option value="family"{% if values.role != "elder" %} selected{% endif %}>家人</option><option value="elder"{% if values.role == "elder" %} selected{% endif %}>長輩</option></select></label>
+<button class="btn btn--primary" type="submit">加入成員</button>
+</form></section>
+{% endblock %}

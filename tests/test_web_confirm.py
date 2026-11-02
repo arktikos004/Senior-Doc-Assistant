@@ -127,12 +127,12 @@ def test_two_family_members_deciding_at_once_only_one_counts(app, form_client, s
              for c, decision in zip(clients, ("done", "rejected"))]
     gate, real = threading.Barrier(2), Store.set_action_status
 
-    def gated(self, action_id, status):
+    def gated(self, action_id, status, **kwargs):
         try:
             gate.wait(timeout=1.0)      # 有鎖時另一個請求進不來,等不到就自己往下走
         except threading.BrokenBarrierError:
             pass
-        return real(self, action_id, status)
+        return real(self, action_id, status, **kwargs)
 
     monkeypatch.setattr(Store, "set_action_status", gated)
     with ThreadPoolExecutor(max_workers=2) as pool:

@@ -7,7 +7,7 @@ from typing import Any
 from ..config import AppConfig
 from ..models import ExtractionResult
 from ..parsing import ask_json, to_result
-from ..preprocess import load_image_bytes
+from ..preprocess import prepare_image
 from ..prompts import get_prompt
 
 
@@ -29,7 +29,7 @@ class OllamaAnalyzer:
     def analyze(self, file_path: Path, doc_type_hint: str | None = None, *,
                 local_only: bool = False) -> ExtractionResult:
         # local_only 不用看:本來就在本機推論
-        image_bytes = load_image_bytes(file_path)
+        image_bytes = prepare_image(file_path, options=self.cfg.preprocess).data
         prompt, schema = get_prompt(doc_type_hint)
 
         def ask(text: str) -> Any:

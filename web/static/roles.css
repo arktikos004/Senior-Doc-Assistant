@@ -1,0 +1,16 @@
+/* 角色與紀錄沿用既有工作台元件，只補排版與長文字換行。 */
+.identity { display:flex; flex-wrap:wrap; gap:.5rem 1rem; align-items:center; margin:0 0 1rem; color:var(--ink-3); font-size:.875rem; overflow-wrap:anywhere; }
+.identity > span:first-child { display:inline-flex; gap:.4rem; align-items:center; font-weight:700; }
+.identity svg { width:1.1rem; height:1.1rem; }
+.member-form { display:flex; flex-wrap:wrap; gap:1rem; align-items:end; }
+.member-form label { display:flex; flex-direction:column; flex:1 1 12rem; gap:.4rem; min-width:0; }
+.member-form input,.member-form select { width:100%; min-height:48px; padding:.65rem; border:1px solid var(--control); border-radius:.5rem; background:var(--bg); color:var(--ink); font:inherit; }
+.member-card { margin-bottom:1rem; }
+.member-email { overflow-wrap:anywhere; }
+.log li { overflow-wrap:anywhere; }
+.member-remove { margin-top:1rem; }
+.audit-list { list-style:none; padding:0; margin:0; }
+.audit-list li { padding:1rem 0; border-bottom:1px solid var(--line); overflow-wrap:anywhere; }
+.audit-list p { margin:.25rem 0; }
+.action-reject { margin-top:.75rem; }
+@media (max-width:47.99rem) { .member-form > *, .member-form button { flex-basis:100%; width:100%; } }

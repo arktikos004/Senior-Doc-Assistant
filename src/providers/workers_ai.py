@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import base64
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -61,7 +62,8 @@ class WorkersAIAnalyzer:
         # 要求本機的文件(local_only)在 RoutingAnalyzer 就分到本機,不會走到這裡;收下參數只為符合介面
         account_id, token = self._credentials()  # 先檢查設定,缺了就不必讀檔
         model = self.cfg.workers_ai.model
-        image = prepare_image(file_path)
+        # 細長單據的面積上限只給本機模型:雲端請求太大會被拒(413),長邊維持 2048
+        image = prepare_image(file_path, options=replace(self.cfg.preprocess, tall_pixels=False))
         prompt, schema = get_prompt(doc_type_hint)
         url = f"{API_BASE}/accounts/{account_id}/ai/run/{model}"
 

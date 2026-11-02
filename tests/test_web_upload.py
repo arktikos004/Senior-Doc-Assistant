@@ -138,9 +138,9 @@ def test_every_form_value_reaches_pipeline_exactly(client, monkeypatch, upload):
     seen = []
     original = web_app.Pipeline.process_file
 
-    def spy(self, path, doc_type_hint=None, *, category=None, label=None):
+    def spy(self, path, doc_type_hint=None, *, category=None, label=None, **kwargs):
         seen.append((doc_type_hint, category, label))
-        return original(self, path, doc_type_hint, category=category, label=label)
+        return original(self, path, doc_type_hint, category=category, label=label, **kwargs)
 
     monkeypatch.setattr(web_app.Pipeline, "process_file", spy)
     rows = _category_rows(client.get("/").text)
@@ -182,6 +182,27 @@ def test_upload_filename_is_regenerated(cfg, client, upload):
     doc_id = int(r.headers["location"].rsplit("/", 1)[1])
     doc = Store(cfg.paths.db_path).get_document(doc_id)
     assert re.fullmatch(r"\d{8}-\d{6}-[0-9a-f]{8}\.png", doc["source_file"])
+
+
+def test_stored_original_keeps_no_gps_or_camera_details(cfg, client, upload):
+    """存起來的原件(結果頁、匯出、家裡的電腦都看得到)不能留拍攝地點與裝置;轉向套到像素上。"""
+    import io
+
+    from PIL import Image
+    img = Image.new("RGB", (300, 200), "white")
+    exif = Image.Exif()
+    exif[0x010F] = "SyntheticCam"                 # 拍攝裝置
+    exif[0x0112] = 6                              # 轉向:要順時針轉 90°
+    gps = exif.get_ifd(0x8825)
+    gps[1] = "N"
+    gps[2] = (25.0, 2.0, 30.0)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", exif=exif.tobytes())
+    r = upload(client, name="photo.jpg", content=buf.getvalue())
+    doc = Store(cfg.paths.db_path).get_document(int(r.headers["location"].rsplit("/", 1)[1]))
+    with Image.open(doc["target_path"]) as stored:
+        assert not stored.getexif().get_ifd(0x8825) and 0x010F not in stored.getexif()
+        assert stored.size == (200, 300)
 
 
 def test_malicious_filename_does_not_escape_uploads(cfg, client, tmp_path, upload):

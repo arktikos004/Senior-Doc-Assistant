@@ -36,6 +36,21 @@ class WorkersAIConfig:
 
 
 @dataclass
+class PreprocessConfig:
+    """送進模型前的影像處理(src/preprocess.py),每一步都能單獨關掉;預設值依真實照片實測決定。
+
+    只影響送進模型的影像:存檔的原件不動,核對(src/verify)讀的也是原件。
+    """
+
+    find_document: bool = True    # 照片:找到紙張並拉正(透視校正);找不到就照舊裁白邊
+    enlarge_paper: bool = False   # 拉正後的紙比上限小時放大到上限(影像的 token 數跟著像素走;實測沒有讀得比較好)
+    even_light: bool = True       # 拉正後的紙光線不均(陰影、燈光)時補成一樣亮;沒找到紙就不補
+    contrast: bool = False        # 偏暗或褪色時拉開字和紙的亮度差(照片上沒觸發過、評測集少自動接受 1 張)
+    scan_native: bool = False     # 掃描的 PDF 用內嵌影像的原解析度,不重新轉圖
+    tall_pixels: bool = False     # 細長單據改用面積上限,短邊多留一點像素(只在本機模型;雲端請求有大小上限)
+
+
+@dataclass
 class PathsConfig:
     inbox: Path = BASE_DIR / "data/inbox"
     archive: Path = BASE_DIR / "data/archive"
@@ -59,6 +74,7 @@ class AppConfig:
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
     workers_ai: WorkersAIConfig = field(default_factory=WorkersAIConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
+    preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
     provider: str = "ollama"          # ollama / workers_ai / mock
     # 隱私分流:這些類型不論 provider 為何,一律只在本機推論(藥袋屬特種個資)
     local_only_doc_types: tuple[str, ...] = ("藥袋",)
@@ -106,6 +122,7 @@ def load_config(path: Path | None = None) -> AppConfig:
     paths_raw = raw.get("paths", {})
     archive_raw = raw.get("archive", {})
     confidence_raw = raw.get("confidence", {})
+    preprocess_raw = raw.get("preprocess", {})
 
     provider = model_raw.get("provider", AppConfig.provider)
     if provider not in PROVIDERS:
@@ -133,6 +150,10 @@ def load_config(path: Path | None = None) -> AppConfig:
             uploads=_abs(paths_raw["uploads"]) if paths_raw.get("uploads") else None,
             db=_abs(paths_raw["db"]) if paths_raw.get("db") else None,
         ),
+        preprocess=PreprocessConfig(**{
+            name: bool(preprocess_raw.get(name, getattr(PreprocessConfig, name)))
+            for name in PreprocessConfig.__dataclass_fields__
+        }),
         provider=provider,
         local_only_doc_types=tuple(model_raw.get("local_only_doc_types", AppConfig.local_only_doc_types)),
         auto_threshold=float(confidence_raw.get("auto_threshold", AppConfig.auto_threshold)),

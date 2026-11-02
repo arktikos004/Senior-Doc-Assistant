@@ -4,7 +4,7 @@
 <header class="page-head">
   <div class="page-head__text">
     <h1>待複核（{{ items|length }}）</h1>
-    <p class="lede">核對不符、缺少必要欄位或讀值沒把握的文件會放在這裡。點進去對照原件更正讀值，存檔後會重新核對。</p>
+    <p class="lede">核對不符、缺少必要欄位或讀值沒把握的文件會放在這裡。{% if permissions is not defined or permissions.can_correct %}點進去對照原件更正讀值，存檔後會重新核對。{% else %}點進去可查看內容與原件，讀錯的地方請家人協助更正。{% endif %}</p>
   </div>
 </header>
 {% if not items %}
@@ -14,7 +14,7 @@
   <div class="tbl__row tbl__row--head" aria-hidden="true"><span></span><span>文件與原因</span><span>驗證信心</span><span></span></div>
   <ul class="tbl__list">
     {% for it in items %}
-    <li><a class="tbl__row" href="{{ it.href }}">
+    <li><a class="tbl__row" href="{{ it.href if permissions is not defined or permissions.can_correct else (it.doc_href or it.href|replace('/correct', '')) }}">
       <span class="type-icon">{{ icon(it.icon) }}</span>
       <span class="tbl__main">
         <span class="tbl__title">{{ it.title }}</span>

@@ -3,6 +3,7 @@
 用法(專案根目錄):
     python tools/demo_server.py            # 開在 http://127.0.0.1:8000
     python tools/demo_server.py --seed     # 先把示範文件跑過一遍,首頁就有資料可看
+    python tools/demo_server.py --seed --as-of 2026-11-07   # 展示日(預設今天);和印出來的文件用同一天
 
 與正式執行的差別:
 1. 資料全部放在 data/demo_run/(已 gitignore),**不讀也不動** data/archive、data/review、logs/
@@ -11,6 +12,8 @@
    合成文件,回傳「模型讀到的結果」的示範值(依內容雜湊比對),每筆都註明是展示模式。
    驗證(QR 解碼、統編檢查碼…)、決策、行動、網頁全部是真的程式在跑。
    其他照片則依使用者選的類型回傳通用示範值。
+3. 啟動時依展示日重畫 data/samples/demo/ 的帳單、藥袋、公文(make_demo_docs.generate),
+   示範讀值用同一份日期(make_demo_docs.demo_dates):影像與讀值一定對得上,展示當天首頁看得到期限提醒。
 """
 from __future__ import annotations
 
@@ -23,7 +26,9 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import make_demo_docs  # noqa: E402
 from src.config import BASE_DIR, AppConfig, PathsConfig  # noqa: E402
 from src.models import ExtractionResult  # noqa: E402
 
@@ -37,17 +42,20 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _bill() -> ExtractionResult:
+def _bill(dates: dict) -> ExtractionResult:
+    due = dates["bill_due"]
     return ExtractionResult(
-        doc_type="帳單", date="2026-10-01", vendor="範例電力公司", amount=1286.0, confidence=0.92,
-        fields={"due_date": "2026-10-20", "bill_kind": "電費"},
-        plain_summary="這是範例電力公司的電費帳單,本期要繳 1,286 元,請在 2026 年 10 月 20 日前到超商或銀行繳費。",
+        doc_type="帳單", date=dates["bill_issued"].isoformat(), vendor="範例電力公司",
+        amount=float(make_demo_docs.BILL_AMOUNT), confidence=0.92,
+        fields={"due_date": due.isoformat(), "bill_kind": "電費"},
+        plain_summary=f"這是範例電力公司的電費帳單,本期要繳 {make_demo_docs.BILL_AMOUNT:,} 元,"
+                      f"請在 {due.year} 年 {due.month} 月 {due.day} 日前到超商或銀行繳費。",
     )
 
 
-def _medication() -> ExtractionResult:
+def _medication(dates: dict) -> ExtractionResult:
     return ExtractionResult(
-        doc_type="藥袋", date="2026-09-30", vendor="範例診所", confidence=0.90,
+        doc_type="藥袋", date=dates["dispensed"].isoformat(), vendor="範例診所", confidence=0.90,
         fields={
             "items": [
                 {"name": "乙醯胺酚錠 500 毫克", "dose_text": "每次 1 錠", "frequency_text": "每日三次,早午晚飯後",
@@ -62,9 +70,9 @@ def _medication() -> ExtractionResult:
     )
 
 
-def _letter() -> ExtractionResult:
+def _letter(dates: dict) -> ExtractionResult:
     return ExtractionResult(
-        doc_type="公文", date="2026-09-28", vendor="範例市稅務局", confidence=0.90,
+        doc_type="公文", date=dates["letter_issued"].isoformat(), vendor="範例市稅務局", confidence=0.90,
         fields={
             "subject": "台端申請房屋稅減免一案,請於收到本函後15日內檢附相關證明文件補正,逾期未補正者,依規定不予受理。",
             "doc_number": "範稅字第1150000001號",
@@ -102,14 +110,18 @@ def _einvoice_results() -> dict[str, ExtractionResult]:
 
 
 class DemoAnalyzer:
-    """依內容雜湊回傳合成文件的示範讀值;認不得的照片依使用者選的類型給通用值。"""
+    """依內容雜湊回傳合成文件的示範讀值;認不得的照片依使用者選的類型給通用值。
 
-    def __init__(self):
+    as_of 是展示日:示範讀值的日期與 make_demo_docs 畫在文件上的同一份(demo_dates)。
+    """
+
+    def __init__(self, as_of: date | None = None):
+        self.dates = make_demo_docs.demo_dates(as_of or date.today())
         self.known: dict[str, ExtractionResult] = _einvoice_results()
         for name, make in _DEMO_FILES.items():
             path = DEMO_DOCS / name
             if path.exists():
-                self.known[_sha(path)] = make()
+                self.known[_sha(path)] = make(self.dates)
 
     def analyze(self, file_path: Path, doc_type_hint: str | None = None, *,
                 local_only: bool = False) -> ExtractionResult:
@@ -117,7 +129,7 @@ class DemoAnalyzer:
         base = self.known.get(_sha(file_path))
         if base is None:
             make = _BY_TYPE.get(doc_type_hint or "")
-            base = make() if make else ExtractionResult(
+            base = make(self.dates) if make else ExtractionResult(
                 doc_type=doc_type_hint or "收據", date=date.today().isoformat(), vendor="示範商店",
                 amount=320.0, confidence=0.70, plain_summary="展示模式無法辨識這張照片,以下是示範內容。")
         result = ExtractionResult(**{**base.__dict__, "fields": dict(base.fields)})
@@ -159,12 +171,16 @@ def main() -> int:
     parser.add_argument("--seed", action="store_true", help="啟動前先處理一輪示範文件")
     parser.add_argument("--reset", action="store_true", help="清空 data/demo_run/ 後再開始")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--as-of", type=date.fromisoformat, default=None,
+                        help="展示日 YYYY-MM-DD(預設今天);文件日期、期限與示範讀值都由它推算")
     args = parser.parse_args()
 
     if args.reset and DEMO_ROOT.exists():
         shutil.rmtree(DEMO_ROOT)
+    as_of = args.as_of or date.today()
+    make_demo_docs.generate(DEMO_DOCS, as_of)
     cfg = demo_config()
-    analyzer = DemoAnalyzer()
+    analyzer = DemoAnalyzer(as_of)
     if args.seed:
         seed(cfg, analyzer)
 
@@ -172,7 +188,7 @@ def main() -> int:
 
     from web.app import create_app
 
-    print(f"展示資料夾:{DEMO_ROOT}")
+    print(f"展示資料夾:{DEMO_ROOT}(展示日 {as_of.isoformat()})")
     uvicorn.run(create_app(cfg, analyzer=analyzer), host="127.0.0.1", port=args.port)
     return 0
 

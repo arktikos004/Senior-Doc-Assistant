@@ -23,9 +23,10 @@ from .config import AppConfig
 from .models import COMMON_FIELDS, FIELD_LABELS, REQUIRED_FIELDS, Decision, ExtractionResult
 from .pipeline import error_kind, verify_decide_plan
 from .prompts import TYPE_FIELDS
-from .record_log import append_record, timestamp
+from .record_log import append_record, remove_records, timestamp
 from .store import Store
-from .verify import VERIFY_ERROR_SUMMARY
+from .verify import VERIFY_ERROR_SUMMARY, waive_check
+from .verify.checks import CHECK_MEDICATION_TIMING
 
 log = logging.getLogger(__name__)
 
@@ -116,7 +117,9 @@ def decide_corrected(result: ExtractionResult, cfg: AppConfig) -> Decision:
     4. 還缺必要欄位                      → review(表單已經擋過,這裡是第二道)
     5. 全部通過                          → archive「家人更正後存檔」
     驗證信心與門檻是用來判斷「要不要人看」的;家人已對照原件看過,只剩程式核對能把它擋回待複核。
+    服藥時段那一項只抓 AI 推測的時段,家人更正後以家人為準(waive_check,先於第 3 條)。
     """
+    waive_check(result, CHECK_MEDICATION_TIMING, "家人對照原件更正過，服藥時段以家人為準")
     if result.doc_type not in cfg.target_doc_types:
         return Decision(action="review", reason=f"文件類型「{result.doc_type}」不在目標範圍，需人工判斷")
     verification = result.verification if isinstance(result.verification, dict) else {}
@@ -130,6 +133,28 @@ def decide_corrected(result: ExtractionResult, cfg: AppConfig) -> Decision:
     if missing:
         return Decision(action="review", reason=f"家人更正後仍缺少必要欄位：{'、'.join(missing)}")
     return Decision(action="archive", reason=CORRECTED_REASON)
+
+
+def delete_document(cfg: AppConfig, store: Store, doc_id: int, original: Path | None, *,
+                    actor: str | None = None) -> None:
+    """家人刪除一份文件:原件、待複核的 AI 讀值附檔、records.jsonl 那幾行與資料庫裡的紀錄一起刪,不能復原。
+
+    original 是 web 層確認過在本系統資料夾內的原檔(不見了是 None)。誰刪的記在設定變更紀錄,只記編號。
+    檔案刪不掉(例如正被開著)也照樣刪資料庫:畫面上就找不到這份,log 只寫例外種類。找不到文件丟 LookupError。
+    """
+    with _LOCK:
+        doc = store.get_document(doc_id)
+        if doc is None:
+            raise LookupError(f"找不到文件 {doc_id}")
+        if original is not None:
+            for path in (original, original.with_suffix(original.suffix + SIDECAR_SUFFIX)):
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as exc:
+                    log.warning("文件 %s 的檔案刪不掉(%s)", doc_id, type(exc).__name__)
+        remove_records(cfg.paths.logs, doc_id=doc_id, source_file=doc.get("source_file"))
+        store.delete_document(doc_id, actor=actor)
+        log.info("家人刪除文件 %s", doc_id)
 
 
 def reading(result: ExtractionResult) -> dict[str, Any]:
@@ -261,7 +286,8 @@ def _record(doc: dict[str, Any], action: str, reason: str, target: Path | None,
 
 
 def correct_document(cfg: AppConfig, store: Store, doc_id: int, changes: dict[str, Any],
-                     original: Path | None) -> Decision:
+                     original: Path | None, *, actor: str | None = None,
+                     role: str | None = None) -> Decision:
     """家人更正一份文件的讀值,回傳更正後的決策(archive 或 review)。
 
     original 是原檔目前的位置(web 層已確認它在本系統的資料夾內;原件不見了是 None)。核對一律讀原檔:
@@ -289,7 +315,7 @@ def correct_document(cfg: AppConfig, store: Store, doc_id: int, changes: dict[st
         # 驗證閘門(更正紀錄的 verified):沒有任何檢查不通過、核對有完成、必要欄位齊全,也就是能存檔
         store.add_correction(reading(before), reading(result), document_id=doc_id, doc_type=result.doc_type,
                              vendor_key=vendor_key(result), verified=decision.action == "archive",
-                             source=SOURCE_CORRECT)
+                             source=SOURCE_CORRECT, actor=actor, role=role)
         append_record(cfg.paths.logs, record)
         # log 不記文件內容(藥袋的院所與藥名屬健康資料),內容以 SQLite 為準
         log.info("家人更正:文件 %s → [%s]", doc_id, decision.action)
@@ -297,8 +323,9 @@ def correct_document(cfg: AppConfig, store: Store, doc_id: int, changes: dict[st
 
 
 def reject_document(cfg: AppConfig, store: Store, doc_id: int, original: Path | None,
-                    reason: str = REJECT_REASON) -> None:
-    """家人判定這份讀不了(例如影像品質太差):同一筆文件改成「讀不出來」,請長輩重新拍。
+                    reason: str = REJECT_REASON, *, actor: str | None = None,
+                    role: str | None = None) -> None:
+    """家庭成員判定這份讀不了(例如影像品質太差):同一筆文件改成「讀不出來」,請重新拍。
 
     只接受待複核的文件(其他丟 ValueError,找不到丟 LookupError)。原檔在 review/ 就移到 failed/、刪 sidecar;
     這份文件的行動一併退場(等確認的期限提醒不再留在「家人確認」)。讀值留著,當作 AI 當初讀到什麼的紀錄。
@@ -322,7 +349,7 @@ def reject_document(cfg: AppConfig, store: Store, doc_id: int, original: Path | 
             else:
                 _drop_sidecar(original, doc_id)
         record = _record(doc, "failed", f"人工複核判定退回：{reason}", target, doc.get("result"), SOURCE_REJECT)
-        store.update_document(doc_id, record)
+        store.update_document(doc_id, record, event="reject_document", actor=actor, role=role)
         store.replace_actions(doc_id, [])
         append_record(cfg.paths.logs, record)
-        log.info("家人退回:文件 %s → [failed]", doc_id)
+        log.info("人工退回:文件 %s → [failed]", doc_id)

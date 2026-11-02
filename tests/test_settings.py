@@ -233,16 +233,17 @@ def test_purge_all_removes_documents_actions_corrections_but_keeps_settings(stor
     for i in range(3):
         store.add_correction({"amount": i}, {"amount": i + 1}, document_id=doc_id)
     store.set_setting(THRESHOLD, "0.85", actor="family@example.com")
-    assert store.purge_all() == {"actions": 1, "corrections": 3, "documents": 1}
+    # 每筆更正都留一筆操作紀錄(correct),跟著文件一起刪
+    assert store.purge_all() == {"audit_events": 3, "actions": 1, "corrections": 3, "documents": 1}
     assert store.list_documents() == [] and store.list_actions() == []
-    assert store.list_corrections(verified_only=False) == []
+    assert store.list_corrections(verified_only=False) == [] and store.list_audit_events() == []
     assert store.get_settings() == {THRESHOLD: "0.85"}                    # 設定與設定紀錄保留
     assert [c["new_value"] for c in store.list_setting_changes()] == ["0.85"]
     assert _doc(store, "b.png") > doc_id                                # 文件編號不重來:舊網址不會變成別份文件
 
 
 def test_purge_all_on_empty_store(store):
-    assert store.purge_all() == {"actions": 0, "corrections": 0, "documents": 0}
+    assert store.purge_all() == {"audit_events": 0, "actions": 0, "corrections": 0, "documents": 0}
 
 
 # ---- 刪除全部資料:檔案 ----------------------------------------------------------------
@@ -418,7 +419,7 @@ def test_export_has_every_table_but_no_images(base, store):
     for i in range(12):
         store.set_setting(THRESHOLD, f"0.{80 + i}", actor="family@example.com")
     data = export_records(store, base, version="2026.10.02")
-    assert set(data) == {"exported_at", "version", "note", "documents", "actions", "corrections", "setting_changes"}
+    assert set(data) == {"exported_at", "version", "note", "documents", "actions", "corrections", "setting_changes", "members", "audit_events"}
     assert len(data["documents"]) == 2 and len(data["corrections"]) == 25 and len(data["setting_changes"]) == 12
     docs = {d["id"]: d for d in data["documents"]}
     assert docs[doc_id]["result"]["vendor"] == "範例電力公司"        # 含讀值

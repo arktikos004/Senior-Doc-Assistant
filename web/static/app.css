@@ -638,3 +638,98 @@ html:is([data-font="large"], [data-font="xlarge"]) .menu__btn { white-space: now
   html:is([data-font="large"], [data-font="xlarge"]) .tbl__num:empty { display: none; }
   html:is([data-font="large"], [data-font="xlarge"]) .tbl__cell-label { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; }
 }
+
+/* ---- 「繳好了/辦好了」與「已完成」(首頁;10/28 樣稿) ---- */
+.btn--done { min-height: 2.75rem; padding: 0 var(--s4); white-space: nowrap; gap: .35rem; }
+@media (min-width: 48rem) {
+  /* 每一列都留同樣寬的位置給按鈕,狀態欄才對得齊;按鈕疊在那個位置上(連結裡不能再放按鈕) */
+  .tbl--remind .tbl__list > li { position: relative; }
+  .tbl--remind .tbl__row { padding-right: 8.5rem; }
+  .tbl--remind li.has-done > form { position: absolute; right: var(--s2); top: 50%; transform: translateY(-50%); }
+}
+@media (max-width: 47.99rem) {
+  /* 手機:按鈕整列寬,放在那一列下面;分隔線畫在整個項目外面 */
+  .tbl--remind li.has-done { border-bottom: 1px solid var(--line); }
+  .tbl--remind li.has-done > a.tbl__row { border-bottom: 0; }
+  .tbl--remind li.has-done > form { padding: 0 var(--s4) var(--s4); }
+  .btn--done { width: 100%; justify-content: center; }
+}
+.done-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); }
+.done-list li { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); flex-wrap: wrap; }
+.done-list li + li { border-top: 1px solid var(--line); }
+.done-list form { margin-left: auto; }
+.done-mark { color: var(--green); display: inline-flex; }
+.done-what { font-weight: 600; }
+.done-who { color: var(--ink-2); flex: 1 1 12rem; }
+.link-btn { background: none; border: 0; color: var(--link); text-decoration: underline; font: inherit;
+            min-height: 2.75rem; padding: 0 var(--s2); cursor: pointer; }
+
+/* ---- 更正頁「改成 QR/條碼上的值」(10/28 樣稿) ---- */
+.evidence-fix { margin-top: var(--s3); padding: var(--s4); border-radius: var(--radius); background: var(--mist);
+                border: 1px solid var(--line); display: grid; gap: var(--s3); }
+.evidence-fix p { margin: 0; }
+.evidence-fix__act { display: grid; gap: var(--s2); }
+.evidence-fix .btn { justify-self: start; }
+.evidence-fix .ev-num { font-size: 1.25rem; font-weight: 700; color: var(--brand-ink); white-space: nowrap; }
+
+/* ---- 上傳後的進度頁(10/28 樣稿) ---- */
+.progress-photo { margin: var(--s6) var(--s6) 0; display: flex; gap: var(--s4); align-items: center; color: var(--ink-2); }
+.progress-photo img { width: 4.5rem; height: 6rem; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
+.progress-photo__icon { display: grid; place-items: center; width: 4.5rem; height: 6rem; flex: none; border-radius: 8px;
+                        background: var(--mist); color: var(--link); }
+.progress-photo__icon .icon { width: 2rem; height: 2rem; }
+.steps { list-style: none; margin: 0; padding: var(--s6); display: grid; gap: var(--s4); }
+.step { display: grid; grid-template-columns: 2.25rem 1fr auto; gap: var(--s3); align-items: start; color: var(--ink-3); }
+.step__dot { width: 2.25rem; height: 2.25rem; border-radius: 50%; display: grid; place-items: center;
+             border: 2px solid var(--control); background: var(--bg); }
+.step__icon { display: none; }
+.step__title { font-size: 1.1rem; font-weight: 700; display: block; }
+.step__hint { display: block; font-size: .95rem; }
+.step__time { font-variant-numeric: tabular-nums; font-size: .95rem; white-space: nowrap; }
+.step--done { color: var(--ink); }
+.step--done .step__dot { background: var(--green); border-color: var(--green); color: var(--bg); }
+.step--done .step__icon--done { display: block; }
+.step--now { color: var(--ink); }
+.step--now .step__dot { border-color: var(--primary); color: var(--primary); box-shadow: 0 0 0 4px var(--mist); }
+.step--now .step__icon--now { display: block; }
+.step--now .step__title::after { content: "…"; }
+.progress-foot { margin: 0; padding: 0 var(--s6) var(--s6); color: var(--ink-2); }
+
+/* ---- 重複上傳的提示(結果頁標題下,10/28 樣稿) ---- */
+.dup-note { margin: 0 0 var(--s6); padding: var(--s4) var(--s6); border-radius: var(--radius); background: var(--amber-bg);
+            border: 1px solid var(--line); display: grid; gap: var(--s3); }
+.dup-note h2 { margin: 0; font-size: 1.15rem; display: flex; gap: var(--s2); align-items: center; color: var(--amber); }
+.dup-note p { margin: 0; }
+.dup-note .btn { justify-self: start; }
+
+/* ---- 統一發票對獎(/lottery,10/28 樣稿) ---- */
+.lot-periods { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0 0 var(--s6); }
+.lot-period { display: inline-flex; align-items: baseline; gap: var(--s2); min-height: 2.75rem; padding: .55rem var(--s4);
+              border: 1px solid var(--line); border-radius: 999px; color: var(--ink); text-decoration: none; }
+.lot-period small { color: var(--ink-3); }
+.lot-period:hover { border-color: var(--control); }
+.lot-period[aria-current="true"] { border-color: var(--primary); background: var(--mist); font-weight: 700; }
+.lot-form { display: grid; gap: var(--s4); padding: var(--s6); }
+.lot-form h2 { font-size: 1.2rem; font-weight: 700; }
+.lot-form > .btn { justify-self: start; }
+.lot-grid { display: grid; gap: var(--s3); grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); }
+.lot-grid .text-input { font-variant-numeric: tabular-nums; letter-spacing: .08em; }
+.lot-form .text-input[readonly] { background: var(--mist); }   /* 長輩看得到號碼,不能改 */
+.lot-results { list-style: none; margin: 0; padding: 0; }
+.lot-results li { display: grid; gap: var(--s2); padding: var(--s4) var(--s6); }
+.lot-results li + li { border-top: 1px solid var(--line); }
+.lot-results .lot-no { justify-self: start; font-variant-numeric: tabular-nums; font-weight: 700; letter-spacing: .04em; }
+.lot-results .lot-meta { color: var(--ink-2); }
+.lot-results .btn { justify-self: start; }
+.lot-hit { display: flex; gap: var(--s2); align-items: center; font-weight: 700; color: var(--green); }
+.lot-miss { color: var(--ink-3); }
+.lot-done { display: flex; gap: var(--s2); align-items: flex-start; color: var(--ink-2); }
+.lot-done .icon { margin-top: .2em; flex: none; }
+.section__head--tools .muted { margin-left: auto; }   /* 份數靠右、緊鄰按鈕(文件櫃「財產資產」的對獎入口) */
+.lot-skip { padding: var(--s4) var(--s6); color: var(--ink-2); border-top: 1px solid var(--line); margin: 0; }
+.lot-results:empty + .lot-skip, .panel > .lot-skip:first-child { border-top: 0; }
+.lot-foot { margin-top: var(--s4); }
+.answer__more { margin: var(--s4) 0 0; }
+.prepared { margin-top: var(--s4); }   /* 原件下方收合的「系統處理後送給 AI 的影像」 */
+.prepared .fold__head span { font-weight: 600; }
+.prepared .original { margin-top: var(--s2); }

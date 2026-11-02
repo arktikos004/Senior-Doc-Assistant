@@ -9,6 +9,8 @@
       uvicorn.exe、pip.exe 等啟動器還記著舊路徑,會直接壞掉。
     - 每 CheckSeconds 秒看一次 /healthz:連續 MaxFailures 次沒回應就重啟網頁;
       回報 ollama = unreachable 就重啟 Ollama;cloudflared 結束了就重開。
+    - 給了 InstanceRoot 就另開一份獨立的實例(tools\run_instance.py:資料全部在 InstanceRoot,埠 InstancePort,
+      用自己的 Access 應用與家庭成員名單),一樣監看;通道設定要另外加一個主機名稱指到那個埠(見 docs\部署指南.md)。
     - 紀錄寫在 logs\service\(logs\ 已在 .gitignore)。紀錄可能含文件編號與時間,不要貼到公開的地方。
     Windows PowerShell 5.1 就能執行;本檔存成 UTF-8 with BOM,中文才不會被當成系統編碼讀錯。
 
@@ -18,13 +20,22 @@
 .EXAMPLE
     powershell -NoProfile -ExecutionPolicy Bypass -File deploy\windows\start-services.ps1 -NoTunnel
     只在本機測試、不開通道:瀏覽器開 http://127.0.0.1:8000
+
+.EXAMPLE
+    powershell -NoProfile -ExecutionPolicy Bypass -File deploy\windows\start-services.ps1 `
+        -InstanceRoot "$env:USERPROFILE\kanyou-instance" -InstanceAccessAud <AUD> -InstanceMember someone@example.com:family
+    正式那份照常開,另外在 8100 埠開一份獨立的實例
 #>
 param(
     [int]$Port = 8000,
     [string]$TunnelConfig = (Join-Path $env:USERPROFILE ".cloudflared\config.yml"),
     [int]$CheckSeconds = 60,
     [int]$MaxFailures = 3,
-    [switch]$NoTunnel
+    [switch]$NoTunnel,
+    [string]$InstanceRoot = "",
+    [int]$InstancePort = 8100,
+    [string]$InstanceAccessAud = "",
+    [string[]]$InstanceMember = @()
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,6 +44,7 @@ $Python = Join-Path $Root ".venv\Scripts\python.exe"
 $LogDir = Join-Path $Root "logs\service"
 $HealthUrl = "http://127.0.0.1:$Port/healthz"
 $OllamaUrl = "http://127.0.0.1:11434/api/version"
+$InstanceHealthUrl = "http://127.0.0.1:${InstancePort}/healthz"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
 function Write-Log([string]$Message) {
@@ -99,6 +111,16 @@ function Start-Web {
     Start-Logged "web" $Python $arguments | Out-Null
 }
 
+function Start-Instance {
+    # 另一份獨立的實例:資料全部在 InstanceRoot(必須在專案資料夾外面,run_instance.py 會檢查)
+    Stop-Listener $InstancePort "python*"
+    $env:PYTHONUTF8 = "1"
+    $arguments = @("tools\run_instance.py", "--root", $InstanceRoot, "--port", "$InstancePort")
+    if ($InstanceAccessAud) { $arguments += @("--access-aud", $InstanceAccessAud) }
+    foreach ($member in $InstanceMember) { $arguments += @("--member", $member) }
+    Start-Logged "instance" $Python $arguments | Out-Null
+}
+
 function Start-Tunnel {
     if (-not (Test-Path $TunnelConfig)) {
         throw "找不到通道設定 ${TunnelConfig}(範例:deploy\cloudflared\config.example.yml)。"
@@ -121,6 +143,7 @@ try {
     Write-Log "Ollama 沒有啟動:$($_.Exception.Message)"   # 網頁照開,監看迴圈會再試
 }
 Start-Web
+if ($InstanceRoot) { Start-Instance }
 $tunnel = $null
 if (-not $NoTunnel) {
     try {
@@ -131,6 +154,7 @@ if (-not $NoTunnel) {
 }
 
 $failures = 0
+$instanceFailures = 0
 while ($true) {
     Start-Sleep -Seconds $CheckSeconds
     try {
@@ -148,6 +172,19 @@ while ($true) {
             if ($health.ollama -eq "unreachable") {
                 Write-Log "Ollama 連不上,重新啟動 Ollama"
                 Restart-Ollama
+            }
+        }
+        if ($InstanceRoot) {
+            if ($null -eq (Get-Json $InstanceHealthUrl)) {
+                $instanceFailures++
+                Write-Log "獨立實例的 /healthz 沒有回應(${instanceFailures}/${MaxFailures})"
+                if ($instanceFailures -ge $MaxFailures) {
+                    Write-Log "重新啟動獨立實例"
+                    Start-Instance
+                    $instanceFailures = 0
+                }
+            } else {
+                $instanceFailures = 0
             }
         }
         if ($tunnel -and $tunnel.HasExited) {

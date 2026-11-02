@@ -7,6 +7,7 @@ verify_decide_plan,上傳與家人更正讀值(src/review.py)走同一條。
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import date
 from functools import partial
 from pathlib import Path
@@ -16,6 +17,7 @@ from . import archiver
 from .actions import plan_actions
 from .config import AppConfig
 from .decision import decide, decide_manual
+from .duplicates import file_sha256
 from .models import IDENTITY_CATEGORY, SENSITIVE_CATEGORIES, Decision, ExtractionResult, catalog_entry, category_for
 from .record_log import append_record, timestamp
 from .settings import hide_local_paths
@@ -23,6 +25,30 @@ from .store import Store
 from .verify import verify_or_flag
 
 log = logging.getLogger(__name__)
+
+# process_file 的 on_stage 會收到的步驟名稱(網頁進度頁「AI 照抄文字」「程式核對」兩步)
+STAGE_READ, STAGE_CHECKED = "read", "checked"
+
+# 模型沒回應(服務沒開、逾時、忙碌、伺服器出錯):不是照片的問題,原件留著,可以「重新辨識」。
+# 看處理紀錄「錯誤」開頭的例外種類(process_file 寫成「種類: 訊息」)
+MODEL_UNAVAILABLE_ERRORS = frozenset({
+    "ConnectionError", "ConnectError", "ConnectTimeout", "ReadTimeout", "WriteTimeout", "PoolTimeout",
+    "TimeoutException", "TimeoutError", "RemoteProtocolError", "ReadError", "ResponseError", "WorkersAIError",
+})
+REDO_EVENT = "retry_read"   # 重新辨識記在操作紀錄的種類(src.models.AUDIT_EVENTS)
+
+
+def model_unavailable(error: Any) -> bool:
+    """處理紀錄的錯誤是不是「模型沒回應」(照片沒問題,等一下再讀一次就好)。"""
+    return isinstance(error, str) and error.split(":", 1)[0].strip() in MODEL_UNAVAILABLE_ERRORS
+
+
+@dataclass(frozen=True)
+class Redo:
+    """重新辨識同一份文件(模型沒回應而沒讀成的):更新原本那一筆、編號不變,誰按的記進操作紀錄。"""
+    doc_id: int
+    actor: str | None = None
+    role: str | None = None
 
 
 def error_kind(exc: BaseException) -> str:
@@ -76,7 +102,8 @@ class Pipeline:
         self.store = store if store is not None else Store(cfg.paths.db_path)
 
     def process_file(self, file_path: Path, doc_type_hint: str | None = None, *,
-                     category: str | None = None, label: str | None = None) -> dict[str, Any]:
+                     category: str | None = None, label: str | None = None,
+                     on_stage: Callable[[str], None] | None = None, redo: Redo | None = None) -> dict[str, Any]:
         """處理單一文件,回傳這筆處理紀錄(同時寫入 log 與 SQLite)。
 
         doc_type_hint:使用者上傳時選的文件類型(可為 None),交給 provider
@@ -87,8 +114,12 @@ class Pipeline:
         清單上的名稱(catalog_entry),其他當作沒選;選了就改用清單上的類型提示(稅單 → 帳單)。清單上沒有
         類型提示的(保單、存摺…交給家人確認)和身分證明整類一樣:只在本機辨識、不論讀成什麼都轉人工。
         大類與名稱只看使用者的選擇與固定清單,文件上的文字決定不了分流、歸類與決策(原則 3)。
+        on_stage:每做完一步就呼叫一次(網頁的進度頁用):STAGE_READ 辨識成功、STAGE_CHECKED 核對與決策做完;
+        辨識失敗不呼叫 STAGE_READ。只在真的做完之後才呼叫,畫面不會先亮。
+        redo:重新辨識既有的文件(原件已放回上傳時的位置、檔名不變):更新那一筆並換掉它的行動,不新增文件。
         """
         log.info("開始處理:%s", file_path.name)
+        report = on_stage or (lambda stage: None)
 
         entry = catalog_entry(category, label)
         if entry is not None:
@@ -109,6 +140,7 @@ class Pipeline:
                 "辨識結果:類型=%s 自評信心=%.2f 模型=%s",
                 result.doc_type, result.confidence, result.source_model or "-",
             )
+            report(STAGE_READ)
         except Exception as exc:  # 模型逾時、影像損毀、JSON 解析失敗等
             # 例外訊息可能帶這台電腦的完整路徑(例如開檔失敗);錯誤會進處理紀錄、資料庫與匯出,只留相對位置
             error = f"{type(exc).__name__}: {hide_local_paths(str(exc), self.cfg)}"
@@ -121,8 +153,16 @@ class Pipeline:
             decide_fn = partial(decide_manual, label=label) if manual else decide
             decision = verify_decide_plan(result, file_path, self.cfg, received_on=date.today(),
                                           decide_fn=decide_fn)
+            report(STAGE_CHECKED)
         else:
             decision = decide(None, self.cfg)
+
+        # 原件雜湊(重複上傳提示用):搬檔前算;讀不到就不記,不讓文件跟著失敗
+        try:
+            sha256: str | None = file_sha256(file_path)
+        except OSError as exc:
+            log.warning("算不出原件雜湊:%s(%s)", file_path.name, error_kind(exc))
+            sha256 = None
 
         # 步驟 5:依決策歸檔 / 移至待確認 / 移至失敗
         try:
@@ -159,12 +199,20 @@ class Pipeline:
             "使用者提示": doc_type_hint,
             "使用者選的文件": label,
             "類別": category_for(result.doc_type if result else None, category),
+            "檔案雜湊": sha256,
         }
         append_record(self.cfg.paths.logs, record)
-        doc_id = self.store.add_document(record)
+        actions = result.actions if result else []
+        if redo is None:
+            doc_id = self.store.add_document(record)
+            for action in actions:
+                self.store.add_action(doc_id, action["kind"], action["tier"], action.get("payload", {}))
+        else:
+            doc_id = redo.doc_id
+            self.store.update_document(doc_id, record, event=REDO_EVENT, actor=redo.actor, role=redo.role)
+            self.store.set_document_category(doc_id, record["類別"])   # 沒選大類的,讀成功後依類型歸類
+            self.store.replace_actions(doc_id, actions)
         record["文件ID"] = doc_id
-        for action in (result.actions if result else []):
-            self.store.add_action(doc_id, action["kind"], action["tier"], action.get("payload", {}))
         return record
 
     def process_folder(self, folder: Path) -> list[dict[str, Any]]:

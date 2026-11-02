@@ -62,6 +62,22 @@ def test_low_confidence_goes_to_review_with_sidecar(tmp_path):
     assert "原因" in payload
 
 
+def test_stages_are_reported_only_after_each_step_is_done(tmp_path):
+    """網頁的進度頁靠 on_stage:辨識成功才報 read、核對與決策做完才報 checked;辨識失敗兩個都不報。"""
+    cfg = _make_cfg(tmp_path)
+    seen: list[str] = []
+    record = Pipeline(cfg, MockAnalyzer(cfg)).process_file(_drop(cfg, "清晰發票.png"), on_stage=seen.append)
+    assert seen == ["read", "checked"] and record["動作"] == "archive"
+
+    class Broken(MockAnalyzer):
+        def analyze(self, file_path, doc_type_hint=None, *, local_only=False):
+            raise TimeoutError("模型逾時")
+
+    seen.clear()
+    record = Pipeline(cfg, Broken(cfg)).process_file(_drop(cfg, "清晰收據.png"), on_stage=seen.append)
+    assert seen == [] and record["動作"] == "failed"
+
+
 def test_analyzer_exception_moves_to_failed(tmp_path):
     cfg = _make_cfg(tmp_path)
 

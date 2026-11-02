@@ -1,21 +1,40 @@
-"""影像前處理測試:EXIF 轉正、縮圖、PDF 轉 PNG、中繼資料移除、歪斜校正、裁白邊。
+"""影像前處理測試:EXIF 轉正、縮圖、PDF 轉 PNG、中繼資料移除、歪斜校正、裁白邊、
+找紙張並拉正、放大紙張、補光、拉對比、細長單據、掃描 PDF 的原解析度。
 
-所有影像都在測試中用 PIL 合成,不讀任何真實文件。
+所有影像都在測試中用 PIL/OpenCV 合成(白紙、黑塊當字、深色有紋路的背景),不讀任何真實文件。
 """
 import io
 
+import cv2
+import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
 from src import preprocess
+from src.config import PreprocessConfig
 from src.preprocess import (
     MAX_LONG_EDGE,
+    MAX_PIXELS,
+    MAX_TALL_EDGE,
+    STEP_CONTRAST,
+    STEP_DOCUMENT,
+    STEP_ENLARGE,
+    STEP_LIGHT,
+    STEP_SCAN,
     UnreadableImageError,
     deskew_image,
+    enlarge_paper,
     estimate_skew,
+    even_light,
+    find_document,
     load_image_bytes,
     prepare_image,
+    scanned_page_image,
+    stretch_contrast,
+    warp_document,
 )
+
+OFF = PreprocessConfig(find_document=False, even_light=False, contrast=False)   # 只剩原本的四步
 
 _EXIF_ORIENTATION = 0x0112
 _EXIF_MAKE = 0x010F
@@ -73,6 +92,72 @@ def test_metadata_is_stripped_before_sending(tmp_path):
     out = _decode(prepare_image(path).data)
 
     assert _EXIF_MAKE not in out.getexif()
+
+
+# --- 存檔的原件去中繼資料(上傳後立刻做) ---
+
+_GPS_IFD = 0x8825
+
+
+def _phone_photo(path, orientation=6):
+    """像手機照片:帶拍攝裝置、GPS 位置與轉向標記(以橫放的像素儲存,左上角紅色標記)。"""
+    img = Image.new("RGB", (300, 200), "white")
+    img.paste((255, 0, 0), (0, 0, 40, 40))
+    exif = Image.Exif()
+    exif[_EXIF_MAKE] = "SyntheticCam"
+    exif[_EXIF_ORIENTATION] = orientation
+    gps = exif.get_ifd(_GPS_IFD)
+    gps[1] = "N"
+    gps[2] = (25.0, 2.0, 30.0)
+    img.save(path, format="JPEG", exif=exif.tobytes(), quality=95)
+    with Image.open(path) as check:
+        assert check.getexif().get_ifd(_GPS_IFD), "前提:照片裡真的有 GPS"
+    return path
+
+
+def test_stored_photo_loses_gps_and_device_but_keeps_its_orientation(tmp_path):
+    from src.preprocess import strip_metadata
+    path = _phone_photo(tmp_path / "photo.jpg")
+    assert strip_metadata(path) is True
+    with Image.open(path) as out:
+        exif = out.getexif()
+        assert not exif.get_ifd(_GPS_IFD) and _EXIF_MAKE not in exif and exif.get(_EXIF_ORIENTATION) in (None, 1)
+        assert out.size == (200, 300)                                   # 轉向套到像素上,看起來還是正的
+        r, g, b = out.convert("RGB").getpixel((out.width - 10, 10))
+        assert r > 200 and g < 80 and b < 80
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_png_text_chunks_are_removed(tmp_path):
+    from PIL import PngImagePlugin
+
+    from src.preprocess import strip_metadata
+    info = PngImagePlugin.PngInfo()
+    info.add_text("Author", "合成測試")
+    path = tmp_path / "scan.png"
+    Image.new("RGB", (40, 30), "white").save(path, pnginfo=info)
+    assert strip_metadata(path) is True
+    with Image.open(path) as out:
+        assert not getattr(out, "text", {})
+
+
+def test_clean_images_and_pdfs_are_left_untouched(tmp_path):
+    from src.preprocess import strip_metadata
+    clean = tmp_path / "clean.png"
+    Image.new("RGB", (40, 30), "white").save(clean)
+    pdf = tmp_path / "bill.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n% synthetic\n")
+    before = clean.read_bytes(), pdf.read_bytes()
+    assert strip_metadata(clean) is False and strip_metadata(pdf) is False
+    assert (clean.read_bytes(), pdf.read_bytes()) == before
+
+
+def test_unreadable_file_is_left_for_the_pipeline_to_fail(tmp_path):
+    from src.preprocess import strip_metadata
+    broken = tmp_path / "broken.jpg"
+    broken.write_bytes(b"\xff\xd8\xff\xe0 not really a jpeg")
+    assert strip_metadata(broken) is False and broken.read_bytes().startswith(b"\xff\xd8")
+    assert not list(tmp_path.glob("*.tmp"))
 
 
 # --- 縮圖 ---
@@ -326,14 +411,29 @@ def test_full_page_document_is_not_cropped(tmp_path):
     assert _decode(prepare_image(path, deskew=False).data).size == (900, 1200)
 
 
-def test_photo_on_dark_background_is_not_cropped(tmp_path):
-    # 手機拍桌上的收據:背景不是白的,分不出哪裡是空白,不裁
+def test_photo_on_dark_background_is_cropped_to_the_paper(tmp_path):
+    # 手機拍桌上的收據:背景不是白的,裁白邊分不出空白;找到紙張就裁到紙張(四周只多 DOC_PAD 那一點背景)
     photo = Image.new("RGB", (1600, 1200), (90, 70, 50))
     photo.paste(_text_like(400, 700), (200, 150))
     path = tmp_path / "photo.png"
     photo.save(path)
 
-    assert _decode(prepare_image(path, deskew=False).data).size == (1600, 1200)
+    prepared = prepare_image(path, deskew=False)
+
+    assert _decode(prepared.data).size == pytest.approx((400, 700), abs=12)
+    assert prepared.steps == (STEP_DOCUMENT,)
+
+
+def test_photo_is_left_whole_when_finding_the_paper_is_off(tmp_path):
+    # 關掉找紙張就是原本的做法:背景不是白的,不裁
+    photo = Image.new("RGB", (1600, 1200), (90, 70, 50))
+    photo.paste(_text_like(400, 700), (200, 150))
+    path = tmp_path / "photo.png"
+    photo.save(path)
+
+    prepared = prepare_image(path, deskew=False, options=OFF)
+
+    assert _decode(prepared.data).size == (1600, 1200) and prepared.steps == ()
 
 
 def test_crop_failure_sends_the_uncropped_image(tmp_path, monkeypatch):
@@ -380,6 +480,294 @@ def test_huge_pdf_page_is_rendered_within_a_pixel_budget(tmp_path):
 
     assert max(rendered.size) <= preprocess.PDF_MAX_EDGE
     assert rendered.height > rendered.width
+
+
+# ---- 找到紙張並拉正(照片) ---------------------------------------------------------
+
+PAPER = (500, 750)
+# 斜拍:紙的四角落在畫面上的位置(左上、右上、右下、左下),梯形
+ANGLED = [[520, 160], [1040, 205], [1080, 995], [470, 960]]
+
+
+def _photo(corners=ANGLED, paper=PAPER, size=(1600, 1200), header=False, seed=0) -> Image.Image:
+    """合成手機照片:深色、有紋路的桌面上放一張「像文件」的紙,依 corners 做透視變形。"""
+    rng = np.random.default_rng(seed)
+    width, height = size
+    table = np.clip(rng.normal(0, 14, (height, width, 3)) + [95, 72, 52], 0, 255).astype(np.uint8)
+    sheet = _text_like(*paper)
+    if header:
+        ImageDraw.Draw(sheet).rectangle([0, 0, paper[0], paper[1] // 5], fill=(30, 45, 110))   # 深色標題列
+    source = np.float32([[0, 0], [paper[0] - 1, 0], [paper[0] - 1, paper[1] - 1], [0, paper[1] - 1]])
+    matrix = cv2.getPerspectiveTransform(source, np.float32(corners))
+    warped = cv2.warpPerspective(np.asarray(sheet), matrix, size)
+    mask = cv2.warpPerspective(np.full(paper[::-1], 255, np.uint8), matrix, size)
+    return Image.fromarray(np.where(mask[..., None] > 0, warped, table))
+
+
+def _brown_share(img: Image.Image) -> float:
+    """桌面那種棕色像素的比例(紅明顯大於藍、又不亮)。"""
+    rgb = np.asarray(img.convert("RGB")).astype(int)
+    return float(((rgb[..., 0] - rgb[..., 2] > 25) & (rgb.max(axis=2) < 170)).mean())
+
+
+def test_angled_photo_is_found_and_straightened():
+    photo = _photo()
+
+    quad = find_document(photo)
+
+    diagonal = float(np.hypot(*photo.size))
+    assert quad is not None
+    assert float(np.abs(quad - np.float32(ANGLED)).max()) < 0.02 * diagonal    # 四角都找對(含往外放的那一點)
+    flat = warp_document(photo, quad)
+    assert 1.3 < flat.height / flat.width < 1.7                                 # 拉回直式的長方形
+    assert _brown_share(flat) < 0.05                                            # 桌面幾乎都裁掉了
+
+
+def test_scans_and_full_frame_documents_have_no_paper_to_find():
+    # 紙外沒有比較暗的背景:交給裁白邊,不動
+    assert find_document(_text_like(900, 1200)) is None
+    assert find_document(_receipt_on_page()) is None
+
+
+def test_dark_header_is_not_mistaken_for_the_paper():
+    # 紙上的深色標題列也是四邊形:要找的是整張紙,不能只裁出標題那一塊
+    photo = _photo(header=True)
+
+    quad = find_document(photo)
+
+    assert quad is not None
+    assert cv2.contourArea(quad) > 0.9 * cv2.contourArea(np.float32(ANGLED))
+
+
+def test_noise_has_no_paper():
+    noise = Image.fromarray(np.random.default_rng(3).integers(0, 255, (800, 800, 3), dtype=np.uint8))
+    assert find_document(noise) is None
+
+
+def test_finding_the_paper_fails_safely(tmp_path, monkeypatch):
+    # 找紙張只是加分:出錯就照原本的做法送,不能讓辨識失敗
+    def boom(_img):
+        raise RuntimeError("偵測失敗")
+
+    monkeypatch.setattr(preprocess, "find_document", boom)
+    path = tmp_path / "photo.png"
+    _photo().save(path)
+
+    prepared = prepare_image(path, deskew=False)
+
+    assert STEP_DOCUMENT not in prepared.steps
+    assert prepared.data == prepare_image(path, deskew=False, options=PreprocessConfig(find_document=False)).data
+
+
+def test_jpeg_photo_is_cropped_before_it_is_shrunk(tmp_path):
+    # 4000×3000 的照片,紙約佔一半:先縮成 2048 再裁的話,紙只剩一千多像素高;先裁再縮就有 2048
+    rng = np.random.default_rng(1)
+    table = np.clip(rng.normal(0, 14, (3000, 4000, 3)) + [95, 72, 52], 0, 255).astype(np.uint8)
+    photo = Image.fromarray(table)
+    photo.paste(_text_like(1500, 2300), (1200, 350))
+    path = tmp_path / "phone.jpg"
+    photo.save(path, quality=90)
+
+    prepared = prepare_image(path, deskew=False)
+
+    assert prepared.steps[0] == STEP_DOCUMENT
+    assert max(_decode(prepared.data).size) == MAX_LONG_EDGE
+
+
+def test_straightened_paper_is_enlarged_to_the_limit_when_turned_on(tmp_path):
+    # 拉正後只剩紙,像素比整張照片少;打開放大紙張,長邊放大到上限、長寬比不變
+    path = tmp_path / "photo.png"
+    _photo().save(path)
+
+    plain = prepare_image(path, deskew=False)
+    enlarged = prepare_image(path, deskew=False, options=PreprocessConfig(enlarge_paper=True))
+
+    small, big = _decode(plain.data), _decode(enlarged.data)
+    assert STEP_ENLARGE not in plain.steps and max(small.size) < MAX_LONG_EDGE
+    assert {STEP_DOCUMENT, STEP_ENLARGE} <= set(enlarged.steps)
+    assert max(big.size) == MAX_LONG_EDGE
+    assert big.width / big.height == pytest.approx(small.width / small.height, rel=0.01)
+
+
+def test_only_straightened_paper_is_enlarged(tmp_path):
+    # 掃描檔、數位檔、找不到紙的照片:照舊只縮不放
+    path = tmp_path / "small.png"
+    _text_like(600, 800).save(path)
+
+    prepared = prepare_image(path, deskew=False, options=PreprocessConfig(enlarge_paper=True))
+
+    assert STEP_ENLARGE not in prepared.steps
+    assert _decode(prepared.data).size == (600, 800)
+
+
+def test_enlarging_stops_at_the_limit():
+    assert enlarge_paper(Image.new("RGB", (1500, 2000))) is None                 # 差不到 5%:不重新取樣
+    assert enlarge_paper(Image.new("RGB", (200, 300))).size == (600, 900)        # 最多 3 倍
+    assert enlarge_paper(Image.new("RGB", (400, 1600))).size == (512, MAX_LONG_EDGE)
+    tall = enlarge_paper(Image.new("RGB", (400, 1600)), tall_pixels=True)        # 細長單據:面積上限
+    assert tall.width * tall.height <= MAX_PIXELS and max(tall.size) <= MAX_TALL_EDGE
+    assert tall.width > 512
+
+
+# ---- 補光、拉對比 -------------------------------------------------------------------
+
+def _paper_spread(img: Image.Image) -> float:
+    """紙面(亮的像素)亮度第 95 與第 5 百分位的差;四周留一圈不算。"""
+    gray = np.asarray(img.convert("L")).astype(float)[60:-60, 60:-60]
+    paper = gray[gray > 90]
+    return float(np.percentile(paper, 95) - np.percentile(paper, 5))
+
+
+def _shadowed(strength: float = 0.45) -> Image.Image:
+    """左亮右暗:手機在右邊擋到光。"""
+    page = np.asarray(_text_like(800, 1100)).astype(np.float32)
+    ramp = np.linspace(1.0, 1.0 - strength, page.shape[1])[None, :, None]
+    return Image.fromarray(np.clip(page * ramp, 0, 255).astype(np.uint8))
+
+
+def test_shadow_across_the_page_is_evened_out():
+    shadowed = _shadowed()
+
+    fixed = even_light(shadowed)
+
+    assert fixed is not None and fixed.size == shadowed.size
+    assert _paper_spread(fixed) < _paper_spread(shadowed) / 4
+
+
+def test_evenly_lit_page_and_printed_dark_blocks_are_left_alone():
+    # 深色標題列、灰底表格是印上去的,不是陰影:光照曲面是平的,不補
+    page = _text_like(800, 1100)
+    assert even_light(page) is None
+    ImageDraw.Draw(page).rectangle([0, 0, 800, 200], fill=(30, 45, 110))
+    ImageDraw.Draw(page).rectangle([60, 600, 740, 700], fill=(200, 200, 200))
+    assert even_light(page) is None
+
+
+def test_dark_photo_is_brightened():
+    dark = Image.fromarray((np.asarray(_text_like(800, 1100)) * 0.42).astype(np.uint8))
+
+    out = stretch_contrast(dark)
+
+    assert out is not None
+    ink, paper = np.percentile(np.asarray(out.convert("L")), [1, 90])
+    assert paper > 230 and ink < 40
+
+
+def test_faded_print_gets_more_contrast():
+    # 熱感紙褪色:字只比紙暗一點
+    page = Image.new("RGB", (800, 1100), (235, 235, 235))
+    draw = ImageDraw.Draw(page)
+    for y in range(80, 1000, 45):
+        draw.rectangle([60, y, 700, y + 16], fill=(165, 165, 165))
+
+    out = stretch_contrast(page)
+
+    assert out is not None
+    ink, paper = np.percentile(np.asarray(out.convert("L")), [1, 90])
+    assert paper - ink > 150
+
+
+def test_normal_or_blank_pages_keep_their_contrast():
+    assert stretch_contrast(_text_like()) is None
+    assert stretch_contrast(Image.new("RGB", (300, 300), "white")) is None
+
+
+def test_each_step_can_be_turned_off(tmp_path):
+    # 偏暗又有陰影的照片:三步都會做(補光只補到最亮那一塊的亮度,整張還是偏暗,所以也會拉對比);
+    # 關掉哪一步,那一步就不見
+    photo = np.asarray(_photo()).astype(np.float32)
+    ramp = np.linspace(0.55, 0.25, photo.shape[1])[None, :, None]
+    path = tmp_path / "dim.png"
+    Image.fromarray(np.clip(photo * ramp, 0, 255).astype(np.uint8)).save(path)
+    on = dict(find_document=True, even_light=True, contrast=True)
+
+    full = prepare_image(path, deskew=False, options=PreprocessConfig(**on)).steps
+    assert {STEP_DOCUMENT, STEP_LIGHT, STEP_CONTRAST} <= set(full)
+    for name, step in (("find_document", STEP_DOCUMENT), ("even_light", STEP_LIGHT), ("contrast", STEP_CONTRAST)):
+        steps = prepare_image(path, deskew=False, options=PreprocessConfig(**{**on, name: False})).steps
+        assert step not in steps
+    assert STEP_CONTRAST not in prepare_image(path, deskew=False).steps     # 拉對比預設關(11/2 實測)
+
+
+def test_light_is_only_evened_out_on_a_straightened_paper(tmp_path):
+    # 沒找到紙時,整張照片連桌面一起估光照會把紙補歪:只補拉正後的紙
+    shadowed = tmp_path / "shadowed.png"
+    _shadowed().save(shadowed)                      # 拍滿畫面的紙:找不到紙張,不補光
+
+    assert STEP_LIGHT not in prepare_image(shadowed, deskew=False).steps
+    assert even_light(_shadowed()) is not None      # 直接呼叫還是會補(核對的再試一次用它)
+
+
+# ---- 細長單據、掃描 PDF -------------------------------------------------------------
+
+def test_tall_receipt_keeps_more_pixels_with_the_area_cap(tmp_path):
+    path = tmp_path / "receipt.png"
+    _text_like(700, 2800).save(path)
+
+    tall = _decode(prepare_image(path, deskew=False, options=PreprocessConfig(tall_pixels=True)).data)
+    normal = _decode(prepare_image(path, deskew=False).data)
+
+    assert tall.size == (700, 2800) and tall.width * tall.height <= MAX_PIXELS
+    assert max(normal.size) == MAX_LONG_EDGE
+
+
+def test_area_cap_still_shrinks_big_photos(tmp_path):
+    path = tmp_path / "big.png"
+    Image.new("RGB", (5000, 4000), "white").save(path)
+
+    out = _decode(prepare_image(path, deskew=False, options=PreprocessConfig(tall_pixels=True)).data)
+
+    assert out.width * out.height <= MAX_PIXELS * 1.01
+    assert out.width / out.height == pytest.approx(1.25, rel=0.01)
+
+
+def test_scanned_pdf_gives_its_image_at_native_resolution(tmp_path):
+    path = tmp_path / "scan.pdf"
+    _receipt_on_page().save(path, format="PDF", resolution=200.0)
+
+    native = scanned_page_image(path)
+
+    assert native is not None and native.size == (2480, 3508)
+
+
+def _pdf_with_logo(path, logo: tuple[int, int] | None) -> None:
+    """數位 PDF:一頁 A4,可以放一個小 logo(影像只佔頁面一小塊)。"""
+    import pypdfium2 as pdfium
+
+    pdf = pdfium.PdfDocument.new()
+    page = pdf.new_page(595, 842)
+    if logo:
+        image = pdfium.PdfImage.new(pdf)
+        image.set_bitmap(pdfium.PdfBitmap.from_pil(Image.new("RGB", logo, (200, 30, 30))))
+        image.set_matrix(pdfium.PdfMatrix().scale(*logo).translate(40, 700))
+        page.insert_obj(image)
+        page.gen_content()
+    pdf.save(str(path))
+    pdf.close()
+
+
+def test_digital_pdfs_and_other_files_are_not_scans(tmp_path):
+    blank, logo, broken, photo = (tmp_path / "blank.pdf", tmp_path / "logo.pdf",
+                                  tmp_path / "broken.pdf", tmp_path / "photo.png")
+    _pdf_with_logo(blank, None)
+    _pdf_with_logo(logo, (120, 60))
+    broken.write_bytes(b"%PDF-1.7 not really")
+    _text_like().save(photo)
+
+    for path in (blank, logo, broken, photo):
+        assert scanned_page_image(path) is None, path.name
+
+
+def test_scanned_pdf_is_read_at_native_resolution_when_turned_on(tmp_path):
+    path = tmp_path / "scan.pdf"
+    _receipt_on_page().save(path, format="PDF", resolution=200.0)
+
+    on = prepare_image(path, deskew=False, options=PreprocessConfig(scan_native=True))
+    off = prepare_image(path, deskew=False)
+
+    assert on.steps[0] == STEP_SCAN and STEP_SCAN not in off.steps
+    wide, tall = _ink_share(_decode(on.data))
+    assert wide > 0.8 and tall > 0.8                 # 一樣裁到收據
 
 
 # ---- 加密 PDF(PDF-PW):偵測、用密碼解開 --------------------------------------------

@@ -14,6 +14,7 @@ pytest>=8.0          # 單元測試
 
 # Web 介面(web/app.py)
 fastapi>=0.115       # Web 框架
+PyJWT[crypto]>=2.10,<3  # Cloudflare Access 登入簽章驗證
 uvicorn>=0.30        # ASGI 伺服器
 python-multipart>=0.0.9  # 表單與檔案上傳(FastAPI Form/File 需要)
 jinja2>=3.1          # 網頁樣板(autoescape 防 XSS)

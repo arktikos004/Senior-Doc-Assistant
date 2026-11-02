@@ -73,7 +73,7 @@ def test_medication_bag_schedule_always_needs_family_confirmation(cfg):
         doc_type="藥袋", date=(date.today() - timedelta(days=1)).isoformat(), vendor="範例診所",
         confidence=0.95,
         fields={"items": [
-            {"name": "合成測試藥", "dose_text": "每次 1 錠", "frequency_text": "每日三次",
+            {"name": "合成測試藥", "dose_text": "每次 1 錠", "frequency_text": "每日三次 早午晚飯後",
              "timing": ["早", "中", "晚"], "prn": False, "days": 7},
             {"name": "合成止癢藥", "dose_text": "每次 1 錠", "frequency_text": "需要時",
              "timing": [], "prn": True, "days": 0},

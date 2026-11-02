@@ -4,7 +4,7 @@
 {# 一個輸入欄:提示與錯誤說明都用 aria-describedby 接到輸入欄;日期叫出日曆、金額與天數叫出數字鍵盤;
    不是登入表單,一律關掉自動填入。f 是 render.correct_view 給的欄位(name、id、label、kind…) #}
 {% macro field(f) %}
-{% set described = [f.id ~ "-hint" if f.hint else "", f.id ~ "-error" if f.error else ""]|select|join(" ") %}
+{% set described = [f.id ~ "-hint" if f.hint else "", f.id ~ "-error" if f.error else "", f.id ~ "-fix" if f.fix else ""]|select|join(" ") %}
 <div class="field-row">
   <label class="field-label" for="{{ f.id }}">{{ f.label }}{% if f.required %}<span class="req">必填</span>{% endif %}</label>
   {% if f.hint %}<span class="field-hint" id="{{ f.id }}-hint">{{ f.hint }}</span>{% endif %}
@@ -20,6 +20,17 @@
     {%- if not f.spellcheck %} spellcheck="false"{% endif %}
     {%- if f.required %} required{% endif %}{% if f.error %} aria-invalid="true"{% endif %}
     {%- if described %} aria-describedby="{{ described }}"{% endif %}{% if v.focus == f.id %} autofocus{% endif %}>
+  {% endif %}
+  {# 和 QR、帳單條碼不符:寫出機讀碼上的值;「改成…」要有 JS 才露出(app.js 的 data-fill-target),沒有 JS 就照著打 #}
+  {% if f.fix %}
+  <div class="evidence-fix" role="note">
+    <p id="{{ f.id }}-fix">{{ f.fix.lead }} <span class="ev-num">{{ f.fix.shown }}</span>（現在填的是 {{ f.fix.current }}）。</p>
+    <div class="evidence-fix__act" data-fill-wrap hidden>
+      <button class="btn btn--primary" type="button" data-fill-target="{{ f.id }}" data-fill-value="{{ f.fix.value }}"
+        data-fill-done="已改成 {{ f.fix.shown }}">{{ icon("check") }}<span data-fill-label>改成 {{ f.fix.shown }}</span></button>
+      <p class="field-hint">按了只會填進上面的欄位；要按下面的「存檔並重新核對」才會生效。</p>
+    </div>
+  </div>
   {% endif %}
 </div>
 {% endmacro %}

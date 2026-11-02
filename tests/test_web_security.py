@@ -194,7 +194,7 @@ def test_every_post_form_on_the_pages_carries_the_token(plain_client, seeded):
     forms = []
     for url in ("/", "/confirm", f"/doc/{ids['review']}/correct", f"/doc/{ids['doc']}"):
         forms += _POST_FORMS.findall(client.get(url).text)
-    assert len(forms) == 5          # 上傳、家人確認、更正頁的存檔與退回、取消提醒
+    assert len(forms) == 8          # 上傳、首頁「繳好了」、家人確認、更正存檔與退回、取消提醒、結果頁退回事項、刪除這份文件
     hidden = f'<input type="hidden" name="{CSRF_FIELD}" value="{client.cookies.get(CSRF_COOKIE)}">'
     assert all(hidden in body for body in forms)
 

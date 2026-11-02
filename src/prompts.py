@@ -86,7 +86,8 @@ _BILL_FIELDS_RULE = """\
    - bill_kind:帳單種類,只能填「電費」「水費」「瓦斯」「電信」「其他」之一"""
 
 _OFFICIAL_FIELDS_RULE = """\
-   - subject:照抄「主旨:」後面的文字;沒有填 ""
+   - subject:照抄「主旨:」後面的整段文字;主旨常換行跨好幾行,一直抄到「說明」之前,接成一句,
+     不要只抄第一行。沒有填 ""
    - doc_number:照抄發文字號(例如「○○字第1150000001號」);沒有填 ""
    - deadline_text:照抄文件上期限的原文,例如「收到本函後15日內」「自送達之次日起30日內」「於115年10月31日前」。
      **不要自己換算成日期**,也不要改寫,系統會用程式計算實際期限。沒有期限填 ""
@@ -105,7 +106,9 @@ _MEDICATION_FIELDS_RULE = """\
      - dose_text:每次用量原文,例如「1 顆」「半錠」「5 mL」;沒印填 ""
      - frequency_text:用法原文,例如「一天三次 飯後」「睡前一次」「需要時服用」;沒印填 ""
      - timing:藥袋上**有印出**的服用時段,只能是「早」「中」「晚」「睡前」(午、中午算「中」);
-       只印次數(例如「一天三次」)而沒印時段時填 [],不要自己推算
+       只印次數(例如「一天三次」)而沒印時段時填 [],不要自己推算;
+       也不要依藥名或用藥習慣推測時段(例如某些藥習慣晚上吃),藥袋上沒印的時段一律不寫。
+       時段印成勾選格(例如「□早 ■中 ■晚 □睡前」)時只算有打勾的,並把有勾的時段照抄進 frequency_text
      - prn:藥袋上寫「需要時」「必要時」「疼痛時」「PRN」等才填 true,否則 false
      - days:給藥天數(例如「7 日份」→ 7);沒印填 0
      整張藥袋都讀不出藥名時 items 填 [],並在 unreadable 列 "fields.items"
@@ -115,6 +118,8 @@ _UNREADABLE_RULE = """\
 {n}. unreadable:文件上「看得到這個欄位、但字跡模糊或被遮住而讀不清」的欄位名稱清單。
    - 只能填欄位名稱,例如 "amount"、"date";類型專屬欄位寫成 "fields.欄位名",例如 {example}。不要寫句子。
    - 讀不清的欄位本身照樣填哨兵值("" 或 0),不要猜;讀得清、或文件上本來就沒有的欄位不要列。
+   - 有填內容的欄位就不要列:列進 unreadable 的欄位一定是留空(哨兵值)的那幾個。
+     被浮水印、印章或摺痕蓋到一部分、但字還認得出來的,照樣抄寫,不要列。
    - 全部讀得清就填 []"""
 
 _SUMMARY_RULE = """\
@@ -221,7 +226,7 @@ GENERIC_PROMPT = f"""\
    藥袋:只負責「照抄藥袋上印刷的文字」,不得推論或補充學名、成分、劑量、用途,不給任何醫療建議;
    不要寫出病人姓名、身分證字號或病歷號。
 {_MEDICATION_FIELDS_RULE}
-{_tail('"fields.due_date"', _SUMMARY_ALL)}"""
+{_tail('"fields.doc_number"', _SUMMARY_ALL)}"""
 
 INVOICE_PROMPT = f"""\
 {_typed_intro("一張發票或收據", "「發票」或「收據」")}
@@ -255,7 +260,7 @@ BILL_PROMPT = f"""\
 6. invoice_number:帳單不是發票,填 ""
 7. fields:帳單的專屬欄位:
 {_BILL_FIELDS_RULE}
-{_tail('"fields.due_date"', _SUMMARY_BILL)}"""
+{_tail('"fields.bill_kind"', _SUMMARY_BILL)}"""
 
 OFFICIAL_PROMPT = f"""\
 {_typed_intro("一份公文(政府機關或學校寄來的函、通知單)", "「公文」")}
@@ -268,7 +273,7 @@ OFFICIAL_PROMPT = f"""\
 6. invoice_number:公文不是發票,填 ""
 7. fields:公文的專屬欄位:
 {_OFFICIAL_FIELDS_RULE}
-{_tail('"fields.deadline_text"', _SUMMARY_OFFICIAL)}"""
+{_tail('"fields.doc_number"', _SUMMARY_OFFICIAL)}"""
 
 MEDICATION_PROMPT = f"""\
 {_typed_intro("一個藥袋(醫院、診所或藥局開的藥袋或用藥明細)", "「藥袋」", _MEDICATION_CORE)}
@@ -281,7 +286,7 @@ MEDICATION_PROMPT = f"""\
 6. invoice_number:藥袋不是發票,填 ""
 7. fields:藥袋的專屬欄位(只照抄印刷文字):
 {_MEDICATION_FIELDS_RULE}
-{_tail('"fields.items"', _SUMMARY_MEDICATION)}"""
+{_tail('"fields.pharmacist_phone"', _SUMMARY_MEDICATION)}"""
 
 # ---- schema --------------------------------------------------------------------
 

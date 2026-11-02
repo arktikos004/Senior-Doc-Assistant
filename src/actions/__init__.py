@@ -19,9 +19,11 @@ src/pipeline.verify_decide_plan 在決策之後呼叫它,回傳的每筆行動�
     | 藥袋      | medication_schedule | 一律 confirm                           | src/actions/medication.py  |
     | 發票/收據 | (不產生)                                                                         |
     | 其他      | (不產生)                                                                         |
+另外一種不是依文件產生的:家人在對獎頁(/lottery)按「加進要記得的事」,發票加一筆 calendar 行動、
+分級一律 auto(家人自己按的;獎項由伺服器重新比對,內容見 src/lottery.py reminder_action)。
 本系統不產生任何付款或送出回覆的行動。
-取消路徑:auto 的期限提醒可在結果頁「取消提醒」、按錯可「恢復提醒」(web/app.py POST /reminder/{id});
-confirm 的行動在「家人確認」確認或退回。
+取消路徑:auto 的期限提醒(含對獎的領獎提醒)可在結果頁「取消提醒」、按錯可「恢復提醒」
+(web/app.py POST /reminder/{id});confirm 的行動在「家人確認」確認或退回。
 """
 from __future__ import annotations
 
@@ -110,7 +112,7 @@ def _plan_official(result: ExtractionResult, decision: Decision, received_on: da
         return []
 
     subject = clip(fields.get("subject"), 30)
-    title = f"{OFFICIAL_TITLE}:{subject}" if subject else OFFICIAL_TITLE
+    title = f"{OFFICIAL_TITLE}：{subject}" if subject else OFFICIAL_TITLE
     basis = (
         f"以發文日期 {base.isoformat()} 起算；實際收到日可能較晚，期限以公文原文為準。"
         if issued else

@@ -45,6 +45,33 @@ def clear_records(logs_dir: Path) -> None:
     (logs_dir / RECORDS_FILENAME).unlink(missing_ok=True)
 
 
+def remove_records(logs_dir: Path, *, doc_id: int, source_file: str | None = None) -> int:
+    """刪掉 records.jsonl 裡屬於這份文件的行(認「文件ID」,舊紀錄沒有的再認原始檔名),回傳刪了幾行。
+
+    「刪除這份文件」用:這些行含讀值,資料庫刪了它們也要跟著刪。先寫暫存檔再換掉,讀不懂的行原樣留著。
+    """
+    path = logs_dir / RECORDS_FILENAME
+    if not path.exists():
+        return 0
+    keep, removed = [], 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            record = json.loads(line)
+        except ValueError:
+            keep.append(line)
+            continue
+        if record.get("文件ID") == doc_id or (source_file and not record.get("文件ID")
+                                                and record.get("原始檔案") == source_file):
+            removed += 1
+        else:
+            keep.append(line)
+    if removed:
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text("".join(f"{line}\n" for line in keep), encoding="utf-8")
+        tmp.replace(path)
+    return removed
+
+
 def load_records(logs_dir: Path) -> list[dict[str, Any]]:
     path = logs_dir / RECORDS_FILENAME
     if not path.exists():

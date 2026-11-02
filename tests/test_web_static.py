@@ -406,3 +406,133 @@ def test_show_password_toggles_between_hidden_and_shown():
         {"hidden": False, "type": "password", "pressed": "false", "label": "顯示密碼"},
     ]
     assert r["focused"] == 2
+
+
+_FILL_FLOW = r"""
+const src = require("fs").readFileSync(__APP_JS__, "utf8");
+function node(name, attrs = {}, text = "") {
+  return {name, attrs, textContent: text, hidden: true, disabled: false, value: "", focused: 0, listeners: {},
+    getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
+    hasAttribute(k) { return k in this.attrs; },
+    setAttribute(k, v) { this.attrs[k] = v; },
+    addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); },
+    focus() { this.focused += 1; },
+    fire(type) { (this.listeners[type] || []).forEach(fn => fn({type, target: this, preventDefault() {}})); }};
+}
+const input = Object.assign(node("input"), {value: "514"});
+const label = node("label", {"data-fill-label": ""}, "改成 244 元");
+const button = node("button", {"data-fill-target": "f-amount", "data-fill-value": "244", "data-fill-done": "已改成 244 元"});
+button.querySelector = sel => sel === "[data-fill-label]" ? label : null;
+const wrap = node("wrap", {"data-fill-wrap": ""});
+wrap.querySelector = sel => sel === "button[data-fill-target]" ? button : null;
+const doc = {activeElement: null, addEventListener() {}, querySelector: () => null,
+             getElementById: id => id === "f-amount" ? input : null,
+             documentElement: {setAttribute() {}, getAttribute() { return null; }},
+             querySelectorAll: sel => sel === "[data-fill-wrap]" ? [wrap] : []};
+const win = Object.assign(node("window"), {setTimeout(fn) { fn(); }, HTMLFormElement: {prototype: {}}});
+new Function("window", "document", "HTMLFormElement", src)(win, doc, win.HTMLFormElement);
+const state = () => ({shown: !wrap.hidden, value: input.value, disabled: button.disabled, label: label.textContent});
+const seen = [state()];
+button.fire("click");
+seen.push(state());
+input.value = "2440";
+input.fire("input");
+seen.push(state());
+console.log(JSON.stringify({seen, focused: input.focused}));
+"""
+
+
+@pytest.mark.skipif(_NODE is None, reason="沒有 node,略過前端流程測試")
+def test_fill_button_only_fills_the_field():
+    """「改成 244 元」:有 JS 才出現;按了只填進欄位、焦點移過去,按鈕寫「已改成」;家人又改掉就恢復。"""
+    script = _FILL_FLOW.replace("__APP_JS__", json.dumps(str(STATIC_DIR / "app.js")))
+    out = subprocess.run([_NODE, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
+    r = json.loads(out.stdout)
+    assert r["seen"] == [
+        {"shown": True, "value": "514", "disabled": False, "label": "改成 244 元"},
+        {"shown": True, "value": "244", "disabled": True, "label": "已改成 244 元"},
+        {"shown": True, "value": "2440", "disabled": False, "label": "改成 244 元"},
+    ]
+    assert r["focused"] == 1
+
+
+_POLL_FLOW = r"""
+const src = require("fs").readFileSync(__APP_JS__, "utf8");
+function node(attrs = {}, text = "") {
+  return {attrs, textContent: text, className: "", parts: {},
+    getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
+    hasAttribute(k) { return k in this.attrs; },
+    setAttribute(k, v) { this.attrs[k] = v; },
+    addEventListener() {},
+    querySelector(sel) { return this.parts[sel] || null; }};
+}
+function step(id) {
+  const li = node({"data-step": id});
+  li.className = "step step--todo";
+  li.parts = {"[data-step-state]": node(), "[data-step-hint]": node(), "[data-step-time]": node()};
+  return li;
+}
+const steps = {received: step("received"), read: step("read"), checked: step("checked"), decided: step("decided")};
+const say = node({}, "now: read");
+const box = node({"data-job-status": "/upload/progress/T/status"});
+box.parts = {"[data-job-say]": say};
+for (const id in steps) box.parts['[data-step="' + id + '"]'] = steps[id];
+const later = [], calls = [], replaced = [];
+let reloaded = 0;
+const replies = __REPLIES__;
+const win = {setTimeout(fn) { later.push(fn); }, HTMLFormElement: {prototype: {}}, addEventListener() {},
+  location: {replace(url) { replaced.push(url); }, reload() { reloaded += 1; }},
+  fetch(url, opts) {
+    calls.push([url, opts.credentials, opts.cache]);
+    const reply = replies.shift();
+    return Promise.resolve({ok: reply.ok, status: reply.ok ? 200 : 500, json: () => Promise.resolve(reply.body)});
+  }};
+const doc = {activeElement: null, addEventListener() {}, getElementById: () => null,
+  documentElement: {setAttribute() {}, getAttribute() { return null; }},
+  querySelector: sel => sel === "[data-job-status]" ? box : null, querySelectorAll: () => []};
+new Function("window", "document", "HTMLFormElement", src)(win, doc, win.HTMLFormElement);
+const flush = () => new Promise(resolve => setImmediate(resolve));
+(async () => {
+  const seen = [];
+  for (let i = 0; i < 3 && later.length; i++) {
+    later.shift()();
+    await flush(); await flush();
+    seen.push({read: steps.read.className, readTime: steps.read.parts["[data-step-time]"].textContent,
+               checked: steps.checked.className, say: say.textContent});
+  }
+  console.log(JSON.stringify({seen, calls, replaced, reloaded, pending: later.length}));
+})();
+"""
+
+
+def _poll(replies):
+    script = (_POLL_FLOW.replace("__APP_JS__", json.dumps(str(STATIC_DIR / "app.js")))
+              .replace("__REPLIES__", json.dumps(replies)))
+    out = subprocess.run([_NODE, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
+    return json.loads(out.stdout)
+
+
+@pytest.mark.skipif(_NODE is None, reason="沒有 node,略過前端流程測試")
+def test_progress_page_follows_the_server_and_opens_the_result():
+    """進度頁:每秒問一次,步驟照伺服器回的換(不自己推進);做完了直接換成結果頁(不留在上一頁的紀錄)。"""
+    running = {"next": None, "say": "now: checked", "steps": [
+        {"id": "read", "state": "done", "state_text": "done", "hint": "h", "time": "2.1 秒"},
+        {"id": "checked", "state": "now", "state_text": "now", "hint": "h", "time": ""}]}
+    r = _poll([{"ok": True, "body": running}, {"ok": True, "body": {"next": "/doc/9"}}])
+    assert r["seen"][0] == {"read": "step step--done", "readTime": "2.1 秒", "checked": "step step--now",
+                            "say": "now: checked"}
+    assert r["replaced"] == ["/doc/9"] and r["reloaded"] == 0
+    assert r["calls"] == [["/upload/progress/T/status", "same-origin", "no-store"]] * 2
+
+
+@pytest.mark.skipif(_NODE is None, reason="沒有 node,略過前端流程測試")
+def test_progress_page_reloads_when_the_server_cannot_answer():
+    """問不到(處理失敗、服務重開)就整頁重新整理,由伺服器的頁面說明;不會卡在進度頁。"""
+    r = _poll([{"ok": False, "body": {}}])
+    assert r["reloaded"] == 1 and r["replaced"] == []
+    assert r["seen"][0]["read"] == "step step--todo"                         # 沒收到的狀態不會自己亮
+
+
+def test_progress_page_refreshes_without_js():
+    html = (TEMPLATES_DIR / "progress.html").read_text(encoding="utf-8")
+    assert '<noscript><meta http-equiv="refresh" content="3"></noscript>' in html

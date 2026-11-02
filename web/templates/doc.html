@@ -30,6 +30,15 @@
   </div>
   {% endif %}
 </header>
+{% if v.duplicate %}
+{# 重複上傳:只提示、連到另一份,不自動刪(要不要刪由家人決定) #}
+<section class="dup-note" role="note" aria-labelledby="dup-title">
+  <h2 id="dup-title">{{ icon("alert") }}這張可能已經上傳過</h2>
+  <p>{{ v.duplicate.text }}</p>
+  <a class="btn btn--secondary" href="{{ v.duplicate.href }}">{{ v.duplicate.link }}</a>
+  <p class="field-hint">系統不會自動刪除。確定是同一張的話，家人可以在其中一份的頁面把它刪掉。</p>
+</section>
+{% endif %}
 {% if not v.failed %}
 <div class="speak-msgs">
   <p class="speak__status" role="status" aria-live="polite" data-speak-status></p>
@@ -40,7 +49,18 @@
 
 <div class="doc-grid">
   <div class="doc-main">
-    {% if v.failed %}
+    {% if v.busy %}
+    {# 模型沒回應(服務沒開、逾時、忙碌):照片沒問題,不叫長輩重拍 #}
+    <section class="panel retry" aria-labelledby="retry-title">
+      <h2 id="retry-title">系統暫時忙碌，這張還沒讀</h2>
+      <p>照片已經收好了，不用重拍。{% if v.retry_url %}請等一下再按「重新辨識」；{% endif %}一直不行的話，請家人看一下這台電腦。</p>
+      {% if v.retry_url %}
+      <form method="post" action="{{ v.retry_url }}">{{ csrf_input() }}
+        <button class="btn btn--primary btn--lg" type="submit">{{ icon("refresh") }}重新辨識</button>
+      </form>
+      {% endif %}
+    </section>
+    {% elif v.failed %}
     <section class="panel retry" aria-labelledby="retry-title">
       <h2 id="retry-title">這張讀不出來</h2>
       <p>請在光線充足的地方，把文件放平、整張拍進畫面，再試一次。</p>
@@ -73,7 +93,7 @@
       <div class="facts__status">
         <p class="facts__note facts__note--{{ a.status.class }}" data-speak-part>{{ icon(a.status.icon) }}<span>{{ a.status.text }}{% if a.status.sub %}，{{ a.status.sub }}{% endif %}。</span></p>
         {# 自動提醒在這裡取消/恢復:不跳確認框,按錯可以馬上恢復 #}
-        {% if a.status.toggle %}{% set t = a.status.toggle %}
+        {% if a.status.toggle and (permissions is not defined or permissions.can_remind) %}{% set t = a.status.toggle %}
         <form method="post" action="/reminder/{{ t.id }}">
           {{ csrf_input() }}
           <button class="btn btn--secondary" type="submit" name="decision" value="{{ t.decision }}">{{ icon(t.icon) }}{{ t.label }}</button>
@@ -82,6 +102,7 @@
       </div>
       {% endif %}
       {% if a.footer %}<p class="section__note">{{ a.footer }}</p>{% endif %}
+      {% if v.lottery_url %}<p class="answer__more"><a class="btn btn--secondary" href="{{ v.lottery_url }}">{{ icon("star") }}統一發票對獎</a></p>{% endif %}
     </section>
 
     {% if v.is_medication %}
@@ -129,6 +150,14 @@
             <p class="todo-item__head"><span class="todo-item__title">{{ a.title }}</span><span class="pill pill--{{ a.state_class }}">{{ icon(a.state_icon) }}{{ a.state_text }}</span></p>
             {% for line in a.lines %}<p class="todo-item__line">{{ line }}</p>{% endfor %}
             {% if a.medication %}<p class="todo-item__line">各時段的藥列在上面的服藥時間表。</p>{% endif %}
+            {% if permissions is defined and permissions.can_reject and a.tier == "confirm" and a.status in ("pending", "done") %}
+            <form class="action-reject" method="post" action="/confirm/{{ a.id }}">{{ csrf_input() }}
+              <input type="hidden" name="expected_status" value="{{ a.status }}">
+              <button class="btn btn--secondary" type="submit" name="decision" value="rejected"
+                data-confirm-title="{{ a.reject_ask.title }}" data-confirm="{{ a.reject_ask.message }}"
+                data-confirm-ok="{{ a.reject_ask.ok }}" data-confirm-field="{{ a.reject_ask.field }}">退回這個事項</button>
+            </form>
+            {% endif %}
           </div>
         </li>
         {% endfor %}
@@ -176,6 +205,23 @@
     {% endif %}
   </div>
 
-  {{ original(v.file_url, v.is_pdf, v.file_size, "您上傳的" ~ v.title ~ "原件") }}
+  {{ original(v.file_url, v.is_pdf, v.file_size, "您上傳的" ~ v.title ~ "原件", v.prepared_url) }}
 </div>
+{% if permissions is defined and permissions.can_reject and reject_document_url %}
+<form class="section" method="post" action="{{ reject_document_url }}">{{ csrf_input() }}
+<button class="btn btn--secondary" type="submit" data-confirm-title="{{ reject_document_ask.title }}" data-confirm="{{ reject_document_ask.message }}" data-confirm-ok="{{ reject_document_ask.ok }}" data-confirm-field="{{ reject_document_ask.field }}">這份讀不清楚，退回重拍</button>
+</form>
+{% endif %}
+{% if permissions is defined and permissions.can_manage and delete_document_url %}
+<form class="section" method="post" action="{{ delete_document_url }}">{{ csrf_input() }}
+<button class="btn btn--danger" type="submit" data-confirm-title="{{ delete_document_ask.title }}" data-confirm="{{ delete_document_ask.message }}" data-confirm-ok="{{ delete_document_ask.ok }}" data-confirm-field="{{ delete_document_ask.field }}">{{ icon("x") }}刪除這份文件</button>
+</form>
+{% endif %}
+{% if audit_events is defined %}
+<section class="section" aria-labelledby="audit-title"><div class="section__head"><h2 id="audit-title">操作紀錄</h2><span class="muted">最近 50 筆</span></div>
+<ul class="audit-list">{% for event in audit_events %}
+<li><p><b>{{ event.event_label }}</b> · {{ event.actor }}{% if event.role_label %}（{{ event.role_label }}）{% endif %}</p><p class="muted">{{ event.when }}</p>{% if event.detail %}<p>{{ event.detail }}</p>{% endif %}</li>
+{% else %}<li class="muted">還沒有操作紀錄。舊版未記錄的操作者不會補填。</li>{% endfor %}</ul>
+</section>
+{% endif %}
 {% endblock %}

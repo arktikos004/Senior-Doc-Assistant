@@ -21,7 +21,9 @@
 
 {% for s in v.sections %}
 <section class="section" aria-labelledby="cat-title-{{ loop.index }}">
-  <div class="section__head"><h2 id="cat-title-{{ loop.index }}">{{ s.name }}</h2><span class="muted">{{ s.count }} 份</span></div>
+  {% set lottery = s.name == "財產資產" %}
+  <div class="section__head{% if lottery %} section__head--tools{% endif %}"><h2 id="cat-title-{{ loop.index }}">{{ s.name }}</h2><span class="muted">{{ s.count }} 份</span>
+    {%- if lottery %}<a class="btn btn--secondary" href="/lottery">{{ icon("star") }}統一發票對獎</a>{% endif %}</div>
   {% if s.rows %}{{ doc_table(s.rows) }}{% else %}<p class="empty">{{ s.empty }}</p>{% endif %}
   {% if loop.last and v.id_note %}<p class="section__note">{{ v.id_note }}</p>{% endif %}
 </section>

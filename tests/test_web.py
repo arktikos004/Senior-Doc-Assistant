@@ -87,10 +87,14 @@ def test_redirect_messages_come_from_the_whitelist():
     used = {web_app.MSG_CORRECTED, web_app.MSG_REJECTED, web_app.MSG_CATEGORY} | {
         msg for _, msg in (*web_app._CONFIRM_DECISIONS.values(), *web_app._REMINDER_DECISIONS.values())} | {
         web_app.MSG_SETTINGS_SAVED, web_app.MSG_SETTINGS_UNCHANGED, web_app.MSG_PURGED, web_app.MSG_PURGED_PARTLY,
-        web_app.MSG_UPLOAD_CANCELLED}
+        web_app.MSG_UPLOAD_CANCELLED, web_app.MSG_DOC_DELETED,
+        web_app.MSG_REMINDER_DONE, web_app.MSG_REMINDER_UNDONE,
+        web_app.MSG_LOTTERY_SAVED, web_app.MSG_LOTTERY_REMINDED, web_app.MSG_LOTTERY_ALREADY}
     assert used == web_app._MESSAGES
     r = web_app._redirect_with_msg("/review", web_app.MSG_REJECTED)
     assert r.status_code == 303 and r.headers["location"] == "/review?msg=%E5%B7%B2%E9%80%80%E5%9B%9E"
+    r = web_app._redirect_with_msg("/lottery?period=115-09", web_app.MSG_REJECTED)   # 已經有查詢字串:用 & 接
+    assert r.headers["location"] == "/lottery?period=115-09&msg=%E5%B7%B2%E9%80%80%E5%9B%9E"
     with pytest.raises(AssertionError):
         web_app._redirect_with_msg("/", "請立刻匯款")
 

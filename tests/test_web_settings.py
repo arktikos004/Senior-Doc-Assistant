@@ -35,7 +35,7 @@ def no_cloud_keys(monkeypatch):
 
 
 def ollama(status: int = 200) -> httpx.MockTransport:
-    """假的 Ollama:/api/version 回 status;連線失敗用 ollama_down。"""
+    """假的 Ollama:每個路徑都回 status;連線失敗用 ollama_down。"""
     return httpx.MockTransport(lambda request: httpx.Response(status, json={"version": "0.22.0"}))
 
 
@@ -124,7 +124,7 @@ def test_concurrent_uploads_build_the_analyzer_once(cfg, form_client, monkeypatc
         def __init__(self, current, analyzer, store):
             used.append(analyzer)
 
-        def process_file(self, path, hint, category=None, label=None):
+        def process_file(self, path, hint, category=None, label=None, on_stage=None, redo=None):
             return {"文件ID": 1}
 
     monkeypatch.setattr(web_app, "create_analyzer", slow_create)
@@ -311,7 +311,7 @@ def test_saving_a_stricter_threshold_takes_effect_and_is_logged(client, store, f
     html = client.get(r.headers["location"]).text
     assert flash_text(html) == "已儲存設定"
     assert "驗證信心 85% 以上才自動存檔" in _text(html)
-    assert re.search(r'<li>\d+月\d+日 \d\d:\d\d 自動存檔門檻改成 85%</li>', html)
+    assert re.search(r'<li>\d+月\d+日 \d\d:\d\d 自動存檔門檻改成 85%<span class="log__who">（這台電腦）</span></li>', html)
     assert '<option value="0.85" selected>85%</option>' in html
 
 
@@ -398,16 +398,16 @@ def test_unknown_fields_are_ignored(local_client, store, cloud_keys):
 
 
 def test_who_changed_it_is_recorded_but_not_trusted(client, store):
-    """Access 登入的 email 只用來記錄(不當授權);不像 email 的標頭值當作沒有。"""
+    """操作人取自已驗證身分；未驗證 email 標頭不能冒名。"""
     client.post("/settings", data={"auto_threshold": "0.85"},
                 headers={"Cf-Access-Authenticated-User-Email": "family@example.com"})
     client.post("/settings", data={"auto_threshold": "0.90"},
                 headers={"Cf-Access-Authenticated-User-Email": "<script>alert(1)</script> x"})
     client.post("/settings", data={"auto_threshold": "0.95"})
     actors = [c["actor"] for c in store.list_setting_changes()]
-    assert actors == [None, None, "family@example.com"]
+    assert actors == ["local", "local", "local"]
     html = client.get("/settings").text
-    assert "自動存檔門檻改成 85%<span class=\"log__who\">（family@example.com）</span>" in html
+    assert "自動存檔門檻改成 85%<span class=\"log__who\">（這台電腦）</span>" in html
     assert "<script>alert" not in html
 
 
@@ -517,8 +517,8 @@ def test_delete_all_data(cfg, client, store, filled, tmp_path, flash_text):
         assert folder.is_dir()                                  # 資料夾本身留著
     assert store.get_settings()[THRESHOLD] == "0.85"            # 設定與設定紀錄保留,刪除本身也記一筆
     latest = store.list_setting_changes()[0]
-    assert latest["key"] == "purged" and latest["actor"] == "family@example.com"
-    assert "刪除全部資料<span class=\"log__who\">（family@example.com）</span>" in client.get("/settings").text
+    assert latest["key"] == "purged" and latest["actor"] == "local"
+    assert "刪除全部資料<span class=\"log__who\">（這台電腦）</span>" in client.get("/settings").text
 
 
 def test_delete_says_when_some_files_are_stuck(client, cfg, store, filled, monkeypatch, flash_text):

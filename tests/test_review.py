@@ -189,6 +189,9 @@ def test_medication_bag_saved_but_schedule_waits_for_family(cfg, store):
     assert (action["kind"], action["tier"], action["status"]) == ("medication_schedule", "confirm", "pending")
     assert [s["slot"] for s in action["payload"]["slots"]] == ["早", "中", "晚"]
     assert [i["name"] for i in action["payload"]["prn"]] == ["範例止癢錠"]
+    # 「每日三次」配早、中、晚是家人勾的:服藥時段那一項以家人為準,畫面上是「略過」並寫明原因
+    check = store.get_document(doc_id)["result"]["verification"]["服藥時段印在藥袋上"]
+    assert check["status"] == "skip" and "家人" in check["detail"]
 
 
 # ---- 發票:和 QR 矛盾就留在待複核 ---------------------------------------------------

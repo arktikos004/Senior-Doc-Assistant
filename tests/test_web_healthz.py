@@ -11,10 +11,11 @@ def get_health(cfg, transport: httpx.BaseTransport) -> httpx.Response:
     return TestClient(create_app(cfg, analyzer=MockAnalyzer(cfg), ollama_transport=transport)).get("/healthz")
 
 
-def ollama_up(seen: list) -> httpx.MockTransport:
+def ollama_up(seen: list, loaded: tuple[str, ...] = ("gemma4:12b",)) -> httpx.MockTransport:
+    """假的 Ollama:/api/ps 列出已載入顯示記憶體的模型。"""
     def handler(request: httpx.Request) -> httpx.Response:
         seen.append(request)
-        return httpx.Response(200, json={"version": "0.22.0"})
+        return httpx.Response(200, json={"models": [{"name": name, "model": name} for name in loaded]})
     return httpx.MockTransport(handler)
 
 
@@ -34,7 +35,8 @@ def test_mock_mode_answers_200_without_touching_ollama(cfg):
     seen = []
     r = get_health(cfg, ollama_up(seen))
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "version": APP_VERSION, "provider": "mock", "models": {}, "ollama": "unused"}
+    assert r.json() == {"status": "ok", "version": APP_VERSION, "provider": "mock", "models": {}, "ollama": "unused",
+                        "model_loaded": None, "database": "ok"}
     assert seen == []
     assert r.headers["cache-control"] == "no-store"
     assert "set-cookie" not in r.headers          # 監看腳本每分鐘來一次,不必發 CSRF cookie
@@ -45,8 +47,9 @@ def test_reports_reachable_ollama_and_local_model(cfg):
     seen = []
     r = get_health(cfg, ollama_up(seen))
     assert r.json() == {"status": "ok", "version": APP_VERSION, "provider": "ollama",
-                        "models": {"local": "gemma4:12b"}, "ollama": "reachable"}
-    assert [str(q.url) for q in seen] == ["http://localhost:11434/api/version"]
+                        "models": {"local": "gemma4:12b"}, "ollama": "reachable", "model_loaded": True,
+                        "database": "ok"}
+    assert [str(q.url) for q in seen] == ["http://localhost:11434/api/ps"]
     assert seen[0].extensions["timeout"]["connect"] <= 3      # 短逾時:監看不會被卡住的 Ollama 拖住
 
 
@@ -75,7 +78,45 @@ def test_never_reveals_paths_hosts_or_keys(cfg, tmp_path, monkeypatch):
     cfg.ollama.host = "http://gpu-box.internal:11434/"
     seen = []
     r = get_health(cfg, ollama_up(seen))
-    assert str(seen[0].url) == "http://gpu-box.internal:11434/api/version"   # 檢查的是設定的主機
-    assert set(r.json()) == {"status", "version", "provider", "models", "ollama"}
+    assert str(seen[0].url) == "http://gpu-box.internal:11434/api/ps"   # 檢查的是設定的主機
+    assert set(r.json()) == {"status", "version", "provider", "models", "ollama", "model_loaded", "database"}
     for secret in (str(tmp_path), "must-not-leak", "gpu-box", "11434", "CF_"):
         assert secret not in r.text, secret
+
+
+def test_says_whether_the_model_is_already_loaded(cfg):
+    """展示前看一眼:model_loaded 是 true,第一張文件就不必等模型載入。沒寫標籤的名稱當作 :latest。"""
+    cfg.provider = "ollama"
+    assert get_health(cfg, ollama_up([], loaded=())).json()["model_loaded"] is False
+    assert get_health(cfg, ollama_up([], loaded=("other:7b",))).json()["model_loaded"] is False
+    cfg.ollama.model = "gemma4"
+    body = get_health(cfg, ollama_up([], loaded=("gemma4:latest",))).json()
+    assert body["model_loaded"] is True and body["status"] == "ok"            # 沒載入不算異常,只是第一張比較慢
+
+
+def test_unreadable_ollama_reply_still_counts_as_reachable(cfg):
+    cfg.provider = "ollama"
+    body = get_health(cfg, httpx.MockTransport(lambda request: httpx.Response(200, text="not json"))).json()
+    assert (body["ollama"], body["model_loaded"], body["status"]) == ("reachable", None, "ok")
+
+
+def test_reports_a_database_that_cannot_be_written(cfg, monkeypatch):
+    monkeypatch.setattr("src.store.Store.writable", lambda self: False)
+    r = get_health(cfg, ollama_up([]))
+    assert r.status_code == 200 and r.json()["database"] == "error" and r.json()["status"] == "degraded"
+
+
+def test_store_writable_check_changes_nothing_and_notices_a_lock(tmp_path):
+    import sqlite3
+
+    from src.store import Store
+    store = Store(tmp_path / "app.db")
+    before = (tmp_path / "app.db").read_bytes()
+    assert store.writable() is True and (tmp_path / "app.db").read_bytes() == before
+    holder = sqlite3.connect(tmp_path / "app.db")
+    holder.execute("BEGIN EXCLUSIVE")                                          # 別人正鎖著寫
+    try:
+        assert store.writable() is False
+    finally:
+        holder.rollback()
+        holder.close()

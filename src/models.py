@@ -65,6 +65,19 @@ SENSITIVE_CATEGORIES: frozenset[str] = frozenset({"身分證明", "醫療與保�
 # 身分證明類交給家人確認:選了這一類,不論讀成什麼都轉人工
 IDENTITY_CATEGORY = "身分證明"
 
+# 家庭角色:Cloudflare Access 登入的 email 對照到角色。家人確認服藥表、更正讀值;
+# 長輩看得到全部、任何行動都能退回。這裡只定名稱,誰能做什麼由 web 層決定
+ROLES: tuple[str, ...] = ("elder", "family")
+ROLE_LABELS: dict[str, str] = {"elder": "長輩", "family": "家人"}
+# 操作紀錄(store 的 audit_events)的種類 → 畫面上的說法:每次確認、退回、取消/恢復提醒、更正讀值、
+# 退回整份文件都記下是誰、什麼時候
+AUDIT_EVENTS: dict[str, str] = {
+    "confirm": "確認", "reject": "退回", "cancel_reminder": "取消提醒", "restore_reminder": "恢復提醒",
+    "correct": "更正讀值", "reject_document": "退回文件", "category": "調整文件分類",
+    "complete_reminder": "記下已繳／已辦好", "undo_complete": "改回還沒繳／還沒辦",
+    "retry_read": "重新辨識", "lottery_reminder": "加進領獎提醒",
+}
+
 
 def category_for(doc_type: str | None, chosen: str | None = None) -> str:
     """文件歸哪一類:上傳時選了大類就照選的;沒選就依文件類型,分不出來(公文、其他)歸「未分類」。"""

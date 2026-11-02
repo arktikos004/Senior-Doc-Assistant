@@ -27,6 +27,7 @@ from src.config import AppConfig, PathsConfig
 from src.providers import MockAnalyzer
 from src.store import Store
 from web.app import CSRF_FIELD, create_app
+from web.access import Identity
 
 # 樣板 {{ csrf_input() }} 產生的隱藏欄位
 _TOKEN_FIELD = re.compile(rf'name="{CSRF_FIELD}" value="([^"]+)"')
@@ -60,6 +61,22 @@ def cfg(tmp_path: Path) -> AppConfig:
     c = AppConfig(paths=paths, provider="mock")
     c.ensure_dirs()
     return c
+
+
+@pytest.fixture(autouse=True)
+def isolated_identity(monkeypatch):
+    """既有網頁測試一律注入本機身分；驗證憑證的測試直接使用真正的 resolver。"""
+    class LocalResolver:
+        def resolve(self, request):
+            return Identity(None, True)
+    monkeypatch.setattr("web.app.AccessIdentityResolver", LocalResolver)
+
+
+@pytest.fixture(autouse=True)
+def quick_results(monkeypatch):
+    """上傳改在背景辨識(web/jobs.py);MockAnalyzer 一下就做完,等久一點就直接拿到結果頁,既有測試照舊。
+    要看進度頁的測試自己把等待時間改成 0。"""
+    monkeypatch.setattr("web.app.QUICK_RESULT_SECONDS", 30.0)
 
 
 @pytest.fixture

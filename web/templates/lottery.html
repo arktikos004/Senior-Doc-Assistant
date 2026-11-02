@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}統一發票對獎 - {{ BRAND_FULL }}{% endblock %}
+{% block content %}
+<nav class="crumbs" aria-label="位置"><a href="/">首頁</a><span aria-hidden="true">/</span><a href="/cabinet?cat=財產資產">財產資產</a><span aria-hidden="true">/</span><span>統一發票對獎</span></nav>
+<header class="page-head">
+  <div class="page-head__text">
+    <h1>統一發票對獎</h1>
+    <p class="lede">照財政部公告輸入這一期的中獎號碼，程式幫您比對讀過的發票。結果只供參考，以公告和發票正本為準。</p>
+  </div>
+</header>
+
+{% if v.periods|length > 1 %}
+{# 期別:有發票的每一期都列出來,一般連結,沒有 JS 也能換 #}
+<nav class="lot-periods" aria-label="對獎期別">
+  {% for p in v.periods %}
+  <a class="lot-period" href="{{ p.href }}"{% if p.current %} aria-current="true"{% endif %}>{{ p.label }}<small>{{ p.count }} 張</small></a>
+  {% endfor %}
+</nav>
+{% endif %}
+
+<section class="panel" aria-labelledby="lot-numbers">
+  {# 號碼由家人照公告輸入;不是登入表單,一律關掉自動填入。長輩看得到號碼,不能改 #}
+  <form class="lot-form" method="post" action="/lottery" novalidate data-send-once>
+    {{ csrf_input() }}
+    <input type="hidden" name="period" value="{{ v.period }}">
+    <h2 id="lot-numbers">{{ v.period_label }}的號碼</h2>
+    <div class="lot-grid">
+      {% for f in v.fields %}
+      <div class="field-row">
+        <label class="field-label" for="lot-{{ f.name }}">{{ f.label }}</label>
+        {% if f.error %}<span class="field-hint field-hint--error" id="lot-{{ f.name }}-error">{{ icon("alert") }}<span>{{ f.error }}</span></span>{% endif %}
+        <input class="text-input" id="lot-{{ f.name }}" name="{{ f.name }}" value="{{ f.value }}" inputmode="numeric"
+          maxlength="12" autocomplete="off" spellcheck="false"
+          {%- if not v.can_edit %} readonly{% endif %}{% if f.error %} aria-invalid="true" aria-describedby="lot-{{ f.name }}-error"{% endif %}>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="field-row field-row--short">
+      <label class="field-label" for="lot-claim">領獎期限</label>
+      <span class="field-hint" id="lot-claim-hint">照公告上的日期填（遇到假日會順延），提醒會用這一天</span>
+      {% if v.claim_error %}<span class="field-hint field-hint--error" id="lot-claim-error">{{ icon("alert") }}<span>{{ v.claim_error }}</span></span>{% endif %}
+      <input class="text-input" type="date" id="lot-claim" name="claim_by" value="{{ v.claim_by }}" autocomplete="off"
+        aria-describedby="lot-claim-hint{% if v.claim_error %} lot-claim-error{% endif %}"
+        {%- if not v.can_edit %} readonly{% endif %}{% if v.claim_error %} aria-invalid="true"{% endif %}>
+    </div>
+    {% if v.can_edit %}
+    <button class="btn btn--primary btn--lg" type="submit">{{ icon("check") }}對獎</button>
+    {% else %}
+    <p class="field-hint">號碼由家人照公告輸入。</p>
+    {% endif %}
+  </form>
+</section>
+
+<section class="section" aria-labelledby="lot-result">
+  <div class="section__head"><h2 id="lot-result">比對結果</h2><span class="muted">{{ v.rows|length }} 張</span></div>
+  {% if not v.has_numbers %}
+  <p class="empty-line">{{ icon("dash") }}<span>還沒有這一期的號碼。{% if v.can_edit %}照公告輸入號碼，按「對獎」就會比對。{% else %}請家人照公告輸入號碼。{% endif %}</span></p>
+  {% endif %}
+  {% if v.rows or v.skipped or v.taxed %}
+  <div class="panel">
+    {% if v.rows %}
+    <ul class="lot-results">
+      {% for r in v.rows %}
+      <li>
+        <a class="lot-no" href="{{ r.href }}">{{ r.number }}</a>
+        {% if r.meta %}<span class="lot-meta">{{ r.meta }}</span>{% endif %}
+        {% if r.hit %}
+        <span class="lot-hit">{{ icon("star") }}<span>{{ r.hit }}</span></span>
+        <span class="field-hint">{{ r.hint }}</span>
+        {% if r.remind and r.remind.done %}
+        <span class="lot-done">{{ icon("check") }}<span>已經加進「要記得的事」，可以在<a href="{{ r.href }}">這張發票的頁面</a>取消。</span></span>
+        {% elif r.remind %}
+        <form method="post" action="/lottery/remind" data-send-once>{{ csrf_input() }}
+          <input type="hidden" name="doc_id" value="{{ r.remind.doc_id }}">
+          <input type="hidden" name="period" value="{{ v.period }}">
+          <button class="btn btn--secondary" type="submit">{{ icon("calendar") }}加進「要記得的事」</button>
+        </form>
+        {% endif %}
+        {% elif v.has_numbers %}
+        <span class="lot-miss">沒有中獎</span>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if v.skipped %}
+    <p class="lot-skip">還有 {{ v.skipped }} 張發票的號碼沒有經過 QR Code 核對，不比對；這幾張請拿正本自己對照公告。</p>
+    {% endif %}
+    {% if v.taxed %}
+    <p class="lot-skip">另有 {{ v.taxed }} 張有買方統編（打統編），依規定不能兌獎，不比對。</p>
+    {% endif %}
+  </div>
+  {% elif v.has_numbers %}
+  <p class="empty-line">{{ icon("dash") }}<span>這一期沒有讀過的發票。</span></p>
+  {% endif %}
+  <p class="field-hint lot-foot">系統不會替您領獎，也不會去查財政部的資料；中獎發票請保留正本。</p>
+</section>
+{% endblock %}

@@ -39,7 +39,7 @@ def test_malformed_doc_id_is_chinese_page_not_json(client):
 @pytest.mark.parametrize("doc_id", ["99999999999999999999", "-99999999999999999999", str(2 ** 63), "0"])
 def test_doc_id_beyond_sqlite_range_is_404_not_500(client, doc_id):
     """超出 SQLite 整數範圍的編號當成找不到這份文件:不是 500,伺服器紀錄也不留 traceback(SEC-11)。"""
-    for url in (f"/doc/{doc_id}", f"/doc/{doc_id}/file", f"/doc/{doc_id}/correct"):
+    for url in (f"/doc/{doc_id}", f"/doc/{doc_id}/file", f"/doc/{doc_id}/prepared", f"/doc/{doc_id}/correct"):
         r = client.get(url)
         assert r.status_code == 404 and "找不到這份文件" in r.text, url
     assert client.post(f"/doc/{doc_id}/correct", data={"amount": "1"}).status_code == 404
@@ -107,7 +107,7 @@ def test_rule_checks_are_not_shown_as_proven(client, add_doc):
     html = client.get(f"/doc/{add_doc(result)}").text
     assert '<span class="check__status">通過</span>' in html
     assert "檢查通過 2 項" in html and "相符" not in html
-    assert "沒有 QR Code 可以比對" in html and "不能證明讀對" in html
+    assert "這張帳單沒有讀到超商條碼" in html and "不能證明讀對" in html     # 帳單沒有 QR:說的是條碼
     assert "已檢查" in html and "已核對" not in html
 
 
@@ -120,6 +120,24 @@ def test_qr_match_is_the_only_thing_called_a_match(client, add_doc):
     assert '<span class="check__status">相符</span>' in html and '<span class="check__status">通過</span>' in html
     assert "QR Code 相符 1 項" in html and "比對發票上的 QR Code" in html
     assert "與 QR 相符" in html                      # 金額那一列有獨立證據
+
+
+def test_bill_barcode_match_says_barcode_and_its_limit(client, add_doc):
+    # 帳單的獨立證據是超商條碼:說「條碼相符」,並說清楚條碼只能證明金額,不能證明帳單屬實
+    result = dict(BILL, verification={
+        "條碼應繳金額": {"status": "pass", "detail": "條碼上的應繳金額 1,854 元，和讀到的金額一樣", "fields": ["amount"]},
+        "繳費期限": {"status": "pass", "detail": "格式正確且不早於出帳日", "fields": ["fields.due_date"]},
+    }, verified_confidence=0.85)
+    html = client.get(f"/doc/{add_doc(result)}").text
+    assert "條碼相符 1 項" in html and "與條碼相符" in html and "QR Code" not in html
+    assert "不能證明帳單屬實" in html
+
+
+def test_review_reason_names_the_bill_barcode():
+    from web.render import review_reason
+    result = dict(BILL, verification={
+        "條碼應繳金額": {"status": "fail", "detail": "條碼上的應繳金額是 1,854 元", "fields": ["amount"]}})
+    assert review_reason(result) == "讀到的金額和帳單上的超商條碼不一樣，請對照原件確認。"
 
 
 def test_actions_are_labelled_by_tier(client, store, add_doc):
@@ -207,6 +225,52 @@ def test_file_served_from_archive(cfg, client, add_doc):
     assert "no-store" in r.headers["cache-control"]      # 原件可能是藥袋,不快取
     assert f'src="/doc/{doc_id}/file"' in client.get(f"/doc/{doc_id}").text
 
+
+
+def _photo_on_table(path) -> None:
+    """合成手機照片:深色桌面上放一張白紙,紙上有幾行黑塊當字。"""
+    from PIL import Image, ImageDraw
+
+    photo = Image.new("RGB", (1600, 1200), (90, 70, 50))
+    sheet = Image.new("RGB", (500, 760), "white")
+    draw = ImageDraw.Draw(sheet)
+    for y in range(60, 700, 45):
+        draw.rectangle([50, y, 420, y + 16], fill="black")
+    photo.paste(sheet, (300, 200))
+    photo.save(path)
+
+
+def test_prepared_image_is_served_like_the_original(cfg, client, add_doc):
+    """「系統處理後送給 AI 的影像」:即時對原件重跑前處理(這張會裁到紙張),不快取,不另外存檔。"""
+    import io
+
+    from PIL import Image
+
+    target = cfg.paths.archive / "收據" / "photo.png"
+    target.parent.mkdir(parents=True)
+    _photo_on_table(target)
+    doc_id = add_doc(BILL, target=target)
+    before = sorted(p.name for p in cfg.paths.archive.rglob("*"))
+
+    r = client.get(f"/doc/{doc_id}/prepared")
+
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+    assert "no-store" in r.headers["cache-control"] and r.headers["x-content-type-options"] == "nosniff"
+    assert Image.open(io.BytesIO(r.content)).size[0] < 600                       # 裁到紙張,不是整張照片
+    assert sorted(p.name for p in cfg.paths.archive.rglob("*")) == before        # 沒有多存檔
+    page = client.get(f"/doc/{doc_id}").text
+    assert f'src="/doc/{doc_id}/prepared"' in page and "系統處理後送給 AI 的影像" in page
+    assert "依目前的設定重新產生" in page
+
+
+def test_prepared_image_needs_a_readable_original(cfg, client, add_doc):
+    missing = add_doc(BILL)                                                       # 原件不在
+    assert client.get(f"/doc/{missing}/prepared").status_code == 404
+    assert "系統處理後送給 AI 的影像" not in client.get(f"/doc/{missing}").text
+    broken = cfg.paths.archive / "broken.png"
+    broken.write_bytes(bytes.fromhex("89504e470d0a1a0a") + b"fake")   # PNG 檔頭、內容是壞的
+    r = client.get(f"/doc/{add_doc(BILL, target=broken)}/prepared")
+    assert r.status_code == 404 and "Traceback" not in r.text
 
 # 每種收得下的副檔名該回的型別(.WEBP:歸檔沿用原檔的副檔名,大小寫不一定)
 _ORIGINAL_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp",

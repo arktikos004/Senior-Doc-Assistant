@@ -22,7 +22,7 @@ from src.store import Store
 from src.verify import einvoice
 from test_web_static import _problems
 from web.app import CSRF_FIELD
-from web.render import correction_values, parse_correction
+from web.render import correct_view, correction_values, parse_correction
 
 ISSUED = date.today() - timedelta(days=2)
 DUE = ISSUED + timedelta(days=20)
@@ -409,7 +409,7 @@ def test_reject_by_document_id(client, cfg, store, review_doc, flash_text):
     asked = client.post(f"/doc/{doc_id}/reject", data={})           # 還沒確認:不退回,回一頁確認頁(SEC-02)
     assert asked.status_code == 400 and "<h1>確定要退回這份文件嗎？</h1>" in asked.text
     assert "這份文件會改成「讀不出來」，請長輩重新拍一張。" in asked.text and "確定退回</button>" in asked.text
-    assert f'<a class="btn btn--secondary btn--lg" href="/doc/{doc_id}/correct">先不要</a>' in asked.text
+    assert f'<a class="btn btn--secondary btn--lg" href="/doc/{doc_id}">先不要</a>' in asked.text
     assert store.get_document(doc_id)["action"] == "review" and (cfg.paths.review / "blur.png").exists()
     form = browser_form(asked.text, f"/doc/{doc_id}/reject")
     assert {k: v for k, v in form.items() if k != CSRF_FIELD} == {"confirm_reject": "1"}
@@ -477,10 +477,10 @@ def test_restore_racing_with_a_correction_cannot_revive_the_replaced_reminder(
     token = restoring.csrf_token()
     read_done, corrected, real = threading.Event(), threading.Event(), Store.set_action_status
 
-    def slow_write(self, action_id, status):
+    def slow_write(self, action_id, status, **kwargs):
         read_done.set()                 # 走到這裡,「是不是已被取代」已經檢查過了
         corrected.wait(timeout=_WAIT)   # 沒有鎖:等更正做完才寫;有鎖:更正進不來,等不到就寫
-        return real(self, action_id, status)
+        return real(self, action_id, status, **kwargs)
 
     monkeypatch.setattr(Store, "set_action_status", slow_write)
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -573,3 +573,78 @@ def test_initial_values_round_trip_without_changes():
     changes, _, errors = parse_correction(result, _form(pairs))
     assert errors == {}
     assert changes["fields.items"] == result["fields"]["items"]
+
+
+# ---- 一鍵改成 QR/條碼上的值 ---------------------------------------------------------
+
+def _invoice_with_qr_conflict():
+    return {"doc_type": "發票", "date": "2026-06-08", "vendor": "合成示範超市", "amount": 514.0,
+            "invoice_number": "QP94525678", "confidence": 0.95, "verified_confidence": 0.10,
+            "verification": {"QR 總計額": {"status": "fail", "detail": "QR 記載總計 244，辨識金額為 514",
+                                         "fields": ["amount"], "expected": {"amount": 244}},
+                             "QR 開立日期": {"status": "pass", "detail": "相符", "fields": ["date"]}}}
+
+
+def test_qr_conflict_offers_the_qr_value_next_to_the_field(client, review_doc):
+    doc_id = review_doc(_invoice_with_qr_conflict())
+    html = client.get(f"/doc/{doc_id}/correct").text
+    assert "發票上的 QR Code 記的總計是" in html and "244 元" in html and "現在填的是 514 元" in html
+    assert 'data-fill-target="f-amount"' in html and 'data-fill-value="244"' in html
+    assert re.search(r'<div class="evidence-fix__act" data-fill-wrap hidden>', html)   # 沒有 JS 時按鈕不出現,照著打
+    assert html.count('class="evidence-fix"') == 1                                     # 只有矛盾的那一欄
+
+
+def test_bill_barcode_conflict_offers_the_barcode_amount(client, review_doc):
+    result = {"doc_type": "帳單", "date": "2026-10-01", "vendor": "合成電力", "amount": 1236.0, "confidence": 0.9,
+              "fields": {"due_date": "2026-10-20", "bill_kind": "電費"},
+              "verification": {"條碼應繳金額": {"status": "fail", "detail": "條碼上的應繳金額是 1,286 元",
+                                             "fields": ["amount"], "expected": {"amount": 1286}}}}
+    html = client.get(f"/doc/{review_doc(result)}/correct").text
+    assert "帳單上的超商條碼記的應繳金額是" in html and "1,286 元" in html and 'data-fill-value="1286"' in html
+
+
+def test_no_machine_readable_value_means_no_offer(client, review_doc):
+    html = client.get(f"/doc/{review_doc()}/correct").text
+    assert 'class="evidence-fix"' not in html and "data-fill-target" not in html
+
+
+def _fixes(result, values=None):
+    view = correct_view({"id": 1, "result": result}, values, file_url=None)
+    return {f["name"]: f["fix"] for f in view["fields"] if f["fix"]}
+
+
+def test_offer_disappears_once_the_field_holds_the_machine_readable_value():
+    """表單重畫(例如別欄打錯)時,家人已經改成 QR 上的值就不再提;1,286、全形數字也算同一個金額。"""
+    result = _invoice_with_qr_conflict()
+    values = correction_values(result)
+    assert _fixes(result, dict(values, amount="244")) == {}
+    assert _fixes(result, dict(values, amount="２４４")) == {}
+    assert _fixes(result, dict(values, amount=""))["amount"]["current"] == "空白"
+    bill = {"doc_type": "帳單", "amount": 1236.0, "fields": {"bill_kind": "電費"},
+            "verification": {"條碼應繳金額": {"status": "fail", "fields": ["amount"], "expected": {"amount": 1286}}}}
+    assert _fixes(bill, dict(correction_values(bill), amount="1,286")) == {}
+
+
+def test_offer_covers_qr_date_and_number_but_not_fields_off_the_form():
+    """日期寫成年月日、發票號碼照原樣;更正表單上沒有的欄位(賣方統編)不給,只有失敗的獨立證據才給。"""
+    result = dict(_invoice_with_qr_conflict(), date="2026-06-09", invoice_number="QP94525679", verification={
+        "QR 開立日期": {"status": "fail", "fields": ["date"], "expected": {"date": "2026-06-08"}},
+        "QR 字軌號碼": {"status": "fail", "fields": ["invoice_number"], "expected": {"invoice_number": "QP94525678"}},
+        "QR 賣方統編": {"status": "fail", "fields": ["fields.seller_tax_id"], "expected": {"fields.seller_tax_id": "12345675"}},
+        "日期合理": {"status": "fail", "fields": ["date"], "expected": {"date": "2026-01-01"}},       # 規則檢查:不算
+        "QR 總計額": {"status": "pass", "fields": ["amount"], "expected": {"amount": 244}}})
+    fixes = _fixes(result)
+    assert set(fixes) == {"date", "invoice_number"}
+    assert (fixes["date"]["value"], fixes["date"]["shown"], fixes["date"]["current"]) == (
+        "2026-06-08", "2026年6月8日", "2026年6月9日")
+    assert fixes["invoice_number"]["lead"] == "發票上的 QR Code 記的發票號碼是"
+
+
+def test_offer_values_are_escaped_and_never_sent_by_themselves(client, review_doc):
+    """機讀碼上的字照樣當資料:畫面上跳脫;按鈕是 type=button,不會自己送出表單。"""
+    result = dict(_invoice_with_qr_conflict(), verification={
+        "QR 字軌號碼": {"status": "fail", "fields": ["invoice_number"],
+                     "expected": {"invoice_number": '"><script>alert(1)</script>'}}})
+    html = client.get(f"/doc/{review_doc(result)}/correct").text
+    assert "<script>alert(1)" not in html and _problems(html) == []
+    assert re.search(r'<button class="btn btn--primary" type="button" data-fill-target="f-invoice_number"', html)
