@@ -48,7 +48,7 @@ def test_render_keeps_structure_and_escapes_everything():
     html = str(manual.html)
     assert manual.toc == (("m-1", "1. 第一節"),)
     assert "給誰看" not in html and "開頭這段要留著" in html and "引言要留著" in html
-    assert '<h2 id="m-1">1. 第一節</h2>' in html and '<h3 id="s-1-1">1.1 小節</h3>' in html    # 小節有錨點:「在此頁面上」
+    assert '<h2 id="m-1">1. 第一節</h2>' in html and '<h3 id="s-1-1">1.1 小節</h3>' in html    # 小節有錨點:「這一篇的內容」
     assert "<li>第一項，<strong>粗體</strong>續行<ul><li>第二層 <code>程式字</code></li></ul></li>" in html
     assert "<li>連結</li>" in html and "部署指南.md" not in html                   # 連結只留文字
     assert "<ol><li>第一步</li><li>第二步</li></ol>" in html and '<ol start="5"><li>第五步</li></ol>' in html

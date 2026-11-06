@@ -462,8 +462,8 @@
     });
   }
 
-  // ---- data-collapse-narrow:手冊文章的「在此頁面上」(Impeccable 稽核,11/5) ----
-  // 電腦上一直打開,摘要只是標題:按了不收,Tab 也不停在上面。手機與平板先收起來,按「在此頁面上」才打開,
+  // ---- data-collapse-narrow:手冊文章的「這一篇的內容」(Impeccable 稽核,11/5) ----
+  // 電腦上一直打開,摘要只是標題:按了不收,Tab 也不停在上面。手機與平板先收起來,按「這一篇的內容」才打開,
   // 免得十幾個連結排在內文前面。轉向或改視窗寬度時跟著換;沒有 JS(或沒有 matchMedia)時一直打開
   document.querySelectorAll("details[data-collapse-narrow]").forEach(function (fold) {
     if (!window.matchMedia) return;

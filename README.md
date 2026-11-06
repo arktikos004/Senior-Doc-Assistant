@@ -55,7 +55,7 @@ python -m venv .venv
 
 Windows 把 `.venv/bin/python` 換成 `.venv\Scripts\python`。展示模式的讀值是預錄的模擬資料，核對、決策與行動都是真實程式的結果。
 
-測試：`.venv/bin/python -m pytest -q`（2,562 個，不連網、不呼叫真實模型）。
+測試：`.venv/bin/python -m pytest -q`（2,564 個，不連網、不呼叫真實模型）。
 
 ### 用真實模型
 

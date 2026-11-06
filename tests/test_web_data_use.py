@@ -66,3 +66,11 @@ def test_this_computer_is_not_gated_and_can_read_the_notice(client):
     assert client.get("/", follow_redirects=False).status_code == 200
     page = client.get("/data-use").text
     assert "資料怎麼用" in page and "我看過了" not in page          # 本機不必按,說明照樣看得到
+
+
+def test_notice_says_what_it_keeps_without_describing_itself(client):
+    """humanizer 掃描(11/6):開頭不再介紹這一頁自己(下面四個標題就是那四件事);不會做的事只寫付款與回覆,
+    不否認沒人提過的「簽名」。"""
+    page = client.get("/data-use").text
+    assert "「看有」會存下您上傳的文件。</p>" in page and "這一頁說明" not in page
+    assert "不會替您付款或送出回覆。" in page and "簽名" not in page

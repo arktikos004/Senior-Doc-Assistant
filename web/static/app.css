@@ -807,7 +807,7 @@ html[data-font="xlarge"] { font-size: 125%; }    /* 20px */
 /* ---- 使用手冊:說明中心(使用者 11/5,照 Claude 說明中心) ----
    首頁(/help):置中的標題、一句引導與搜尋框;下面是「現在的情況」與主題清單,一列一篇:編號(序列,窄體數字)、
    標題(深墨字加底線的連結)、一句摘要。搜尋結果同一種列。文章頁(/help/<編號>):內文最寬 44rem;寬螢幕右邊是
-   「在此頁面上」,捲動時跟著;平板以下放在內文上面。最下面是上一篇與下一篇 */
+   「這一篇的內容」,捲動時跟著;平板以下放在內文上面。最下面是上一篇與下一篇 */
 .help-hero { display: grid; justify-items: center; gap: var(--s2); margin-bottom: var(--s8); text-align: center; }
 .help-hero h1 { font-size: 2rem; font-weight: 800; line-height: 1.25; }
 .help-hero__lead { color: var(--ink-2); font-size: 1.1rem; }
@@ -837,7 +837,7 @@ html[data-font="xlarge"] { font-size: 125%; }    /* 20px */
 .help-toc a:hover { color: var(--ink); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: .2em; }
 .help-article__body h2 { margin-top: var(--s12); font-size: 1.25rem; }   /* 一篇裡的小節(第二層) */
 .help-article__body > h2:first-child { margin-top: 0; }
-/* 「在此頁面上」:電腦上摘要只是標題;手機與平板收起來,寫幾個小節、有展開箭頭(app.js 的 data-collapse-narrow) */
+/* 「這一篇的內容」:電腦上摘要只是標題;手機與平板收起來,寫幾個小節、有展開箭頭(app.js 的 data-collapse-narrow) */
 .help-toc__fold > summary { display: flex; align-items: center; gap: var(--s2); list-style: none; cursor: default; }
 .help-toc__fold > summary::-webkit-details-marker { display: none; }
 .help-toc__count, .help-toc__chev { display: none; }

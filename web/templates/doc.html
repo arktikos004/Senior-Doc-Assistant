@@ -323,7 +323,7 @@
   <summary class="fold__head"><h2 id="audit-title">操作紀錄</h2><span class="muted">最近 50 筆</span>{{ icon("chevron-right", "fold__chev") }}</summary>
   <ul class="audit-list">{% for event in audit_events %}
   <li><p><b>{{ event.event_label }}</b>，{{ event.actor }}{% if event.role_label %}（{{ event.role_label }}）{% endif %}</p><p class="muted">{{ event.when }}</p>{% if event.detail %}<p>{{ event.detail }}</p>{% endif %}</li>
-  {% else %}<li class="muted">還沒有操作紀錄。舊版未記錄的操作者不會補填。</li>{% endfor %}</ul>
+  {% else %}<li class="muted">還沒有操作紀錄。以前沒記下的操作者，不會再補上。</li>{% endfor %}</ul>
 </details>
 {% endif %}
 {% endblock %}

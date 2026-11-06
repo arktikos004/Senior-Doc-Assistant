@@ -1,6 +1,6 @@
 """使用手冊改成說明中心(使用者 11/5:「使用手冊不是說要向 claude 那樣?」,選了「說明中心+短文章」)。
 /help 是首頁:搜尋手冊、主題清單(每篇一句摘要、幾個小節);/help/<編號> 是那一篇:導覽路徑、更新日期、
-「在此頁面上」、上一篇與下一篇。手冊還是只有一份 docs/使用手冊.md。不呼叫模型。"""
+「這一篇的內容」、上一篇與下一篇。手冊還是只有一份 docs/使用手冊.md。不呼叫模型。"""
 import re
 
 from web.manual import load_manual, render_manual, search_manual
@@ -49,7 +49,7 @@ def test_each_big_section_becomes_one_article_with_its_summary_and_subsections()
     assert first.summary == "從哪裡打開、分頁在哪裡。" and second.summary == "怎麼拍照。"
     assert "從哪裡打開" not in str(first.html) and "怎麼拍照" not in str(second.html)     # 摘要不重複放進內文
     assert second.sections == (("s-2-1", "2.1 拍清楚"), ("s-2-2", "2.2 選類型"))
-    # 一篇自己一頁,標題是 h1,小節就是第二層(Impeccable 稽核:h3 接在「在此頁面上」的 h2 後面,讀屏會當成它的子項)
+    # 一篇自己一頁,標題是 h1,小節就是第二層(Impeccable 稽核:h3 接在「這一篇的內容」的 h2 後面,讀屏會當成它的子項)
     assert '<h2 id="s-2-1">2.1 拍清楚</h2>' in str(second.html) and "<h3" not in str(second.html)
     assert "這段引言是內文，不是摘要" in str(second.html)                                  # 小節裡的引言照舊是內文
     assert [p.anchor for p in second.parts] == ["", "s-2-1", "s-2-2"] and "把紙放平" in second.parts[1].text
@@ -81,8 +81,22 @@ def test_real_manual_describes_the_v5_screens():
     assert manual.updated == "2026 年 11 月 6 日"
     assert "藍" not in text and "電腦版在左邊" not in text and "目前所在的分頁有底線" not in text
     for said in ("最上面是一條深色的橫列", "目前所在的分頁是黃色的", "黃色的按鈕", "紅牌", "黃牌",
-                 "結果頁只有一顆黃色的主要按鈕", "黃色的主要按鈕是 更正讀值", "一整塊深色的看板"):
+                 "結果頁只有一顆黃色的主要按鈕", "黃色的主要按鈕是「更正讀值」", "一整塊深色的看板"):
         assert said in text, said
+
+
+def test_real_manual_names_buttons_in_quotes_and_bolds_only_warnings():
+    """humanizer 掃描(使用者 11/6 選「1–13 全部改」):按鈕與畫面上的字一律用「」,同一句不再一個粗體、一個「」;
+    粗體只留給收不回來、隱私與不會通知家人的句子,以及段落開頭的小標。也不再有破折號。"""
+    from web.manual import MANUAL_PATH
+
+    text = MANUAL_PATH.read_text(encoding="utf-8").split("## 11. 給開發者")[0]
+    bold = re.findall(r"\*\*(.+?)\*\*", text)
+    assert len(bold) <= 16, bold
+    assert "——" not in text and "按 **" not in text
+    for kept in ("退回之後在系統裡沒辦法復原。", "刪除後無法復原", "檔案裡有文件內容，請存在安全的地方。", "系統不會通知家人"):
+        assert kept in bold, kept
+    assert "按「換一張」重拍；不重拍也可以直接按「開始辨識」" in text
 
 
 def test_topic_rows_use_narrow_numbers_and_underlined_titles():
@@ -148,7 +162,7 @@ def test_on_this_page_is_folded_on_phones_and_always_open_on_computers(client):
     html = client.get("/help/3").text
     toc = re.search(r'<nav class="help-toc" aria-labelledby="on-this-page">(.*?)</nav>', html, re.S).group(1)
     assert '<details class="help-toc__fold" open data-collapse-narrow>' in toc
-    assert '<summary><h2 id="on-this-page">在此頁面上</h2>' in toc
+    assert '<summary><h2 id="on-this-page">這一篇的內容</h2>' in toc
 
 
 _COLLAPSE_FLOW = r"""
