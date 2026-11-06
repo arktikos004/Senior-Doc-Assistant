@@ -1,11 +1,12 @@
 {% extends "base.html" %}
+{% from "_note.html" import note %}
+{% from "_field.html" import ff, ff_described %}
 {% block title %}統一發票對獎 - {{ BRAND_FULL }}{% endblock %}
 {% block content %}
 <nav class="crumbs" aria-label="位置"><a href="/">首頁</a><span aria-hidden="true">/</span><a href="/cabinet?cat=財產資產">財產資產</a><span aria-hidden="true">/</span><span>統一發票對獎</span></nav>
 <header class="page-head">
   <div class="page-head__text">
     <h1>統一發票對獎</h1>
-    <p class="lede">照財政部公告輸入這一期的中獎號碼，程式幫您比對讀過的發票。結果只供參考，以公告和發票正本為準。</p>
   </div>
 </header>
 
@@ -19,40 +20,38 @@
 {% endif %}
 
 <section class="panel" aria-labelledby="lot-numbers">
-  {# 號碼由家人照公告輸入;不是登入表單,一律關掉自動填入。長輩看得到號碼,不能改 #}
-  <form class="lot-form" method="post" action="/lottery" novalidate data-send-once>
+  {# 號碼由家人照公告輸入;不是登入表單,一律關掉自動填入。長輩看得到號碼,不能改(readonly 不做欄位檢查)。
+     全部都必填,不標星號。離開欄位才檢查(data-error),送出時伺服器照樣再檢查,寫在框的正下方、留住剛填的字 #}
+  <form class="lot-form" method="post" action="/lottery" novalidate data-send-once data-warn-unsaved>
     {{ csrf_input() }}
     <input type="hidden" name="period" value="{{ v.period }}">
     <h2 id="lot-numbers">{{ v.period_label }}的號碼</h2>
     <div class="lot-grid">
       {% for f in v.fields %}
-      <div class="field-row">
-        <label class="field-label" for="lot-{{ f.name }}">{{ f.label }}</label>
-        {% if f.error %}<span class="field-hint field-hint--error" id="lot-{{ f.name }}-error">{{ icon("alert") }}<span>{{ f.error }}</span></span>{% endif %}
-        <input class="text-input" id="lot-{{ f.name }}" name="{{ f.name }}" value="{{ f.value }}" inputmode="numeric"
-          maxlength="12" autocomplete="off" spellcheck="false"
-          {%- if not v.can_edit %} readonly{% endif %}{% if f.error %} aria-invalid="true" aria-describedby="lot-{{ f.name }}-error"{% endif %}>
-      </div>
+      {% set fid = "lot-" ~ f.name %}
+      {% call ff(fid, f.label, help=v.number_help, error=f.error) %}
+      <input class="text-input ff__input" id="{{ fid }}" name="{{ f.name }}" value="{{ f.value }}" placeholder=" " inputmode="numeric"
+        maxlength="12" autocomplete="off" spellcheck="false"
+        {%- if v.can_edit %} required pattern="{{ v.number_pattern }}" data-error="{{ v.number_error }}"{% else %} readonly{% endif %}
+        aria-describedby="{{ ff_described(fid, v.number_help) }}"{% if f.error %} aria-invalid="true"{% endif %}>
+      {% endcall %}
       {% endfor %}
     </div>
-    <div class="field-row field-row--short">
-      <label class="field-label" for="lot-claim">領獎期限</label>
-      <span class="field-hint" id="lot-claim-hint">照公告上的日期填（遇到假日會順延），提醒會用這一天</span>
-      {% if v.claim_error %}<span class="field-hint field-hint--error" id="lot-claim-error">{{ icon("alert") }}<span>{{ v.claim_error }}</span></span>{% endif %}
-      <input class="text-input" type="date" id="lot-claim" name="claim_by" value="{{ v.claim_by }}" autocomplete="off"
-        aria-describedby="lot-claim-hint{% if v.claim_error %} lot-claim-error{% endif %}"
-        {%- if not v.can_edit %} readonly{% endif %}{% if v.claim_error %} aria-invalid="true"{% endif %}>
+    <div class="field-row--short">
+      {% call ff("lot-claim", "領獎期限", fixed=true, error=v.claim_error) %}
+      <input class="text-input ff__input" type="date" id="lot-claim" name="claim_by" value="{{ v.claim_by }}" placeholder=" " autocomplete="off"
+        {%- if v.can_edit %} required data-error="{{ v.claim_required }}"{% else %} readonly{% endif %}
+        aria-describedby="{{ ff_described('lot-claim') }}"{% if v.claim_error %} aria-invalid="true"{% endif %}>
+      {% endcall %}
     </div>
     {% if v.can_edit %}
     <button class="btn btn--primary btn--lg" type="submit">{{ icon("check") }}對獎</button>
-    {% else %}
-    <p class="field-hint">號碼由家人照公告輸入。</p>
     {% endif %}
   </form>
 </section>
 
 <section class="section" aria-labelledby="lot-result">
-  <div class="section__head"><h2 id="lot-result">比對結果</h2><span class="muted">{{ v.rows|length }} 張</span></div>
+  <div class="section__head"><div class="section__title"><h2 id="lot-result">比對結果</h2>{{ note("結果只供參考，以公告和發票正本為準。系統不會替您領獎，也不會去查財政部的資料；中獎發票請保留正本。") }}</div><span class="muted">{{ v.rows|length }} 張</span></div>
   {% if not v.has_numbers %}
   <p class="empty-line">{{ icon("dash") }}<span>還沒有這一期的號碼。{% if v.can_edit %}照公告輸入號碼，按「對獎」就會比對。{% else %}請家人照公告輸入號碼。{% endif %}</span></p>
   {% endif %}
@@ -93,6 +92,5 @@
   {% elif v.has_numbers %}
   <p class="empty-line">{{ icon("dash") }}<span>這一期沒有讀過的發票。</span></p>
   {% endif %}
-  <p class="field-hint lot-foot">系統不會替您領獎，也不會去查財政部的資料；中獎發票請保留正本。</p>
 </section>
 {% endblock %}

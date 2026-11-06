@@ -4,11 +4,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#F6F8FB" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#101A2C" media="(prefers-color-scheme: dark)">
+  {# 手機瀏覽器的網址列和頂列同色(深墨);圖示由 tools/make_icons.py 產生 #}
+  <meta name="theme-color" content="#14212B">
   <title>{% block title %}{{ BRAND_FULL }}{% endblock %}</title>
   <link rel="manifest" href="/static/manifest.webmanifest">
-  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="icon" href="/static/favicon-32.png" type="image/png" sizes="32x32">
+  <link rel="icon" href="/static/icon-192.png" type="image/png" sizes="192x192">
+  <link rel="apple-touch-icon" href="/static/icon-180.png">
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/roles.css">
   <script src="/static/app.js" defer></script>
@@ -17,36 +19,37 @@
 <body>
   <a class="skip-link" href="#main">跳到主要內容</a>
   <div class="shell">
-    {# 電腦:左邊固定選單(品牌、導覽、安心說明);手機與平板:頂部品牌列 + 「選單」按鈕 #}
+    {# v5 車站時刻表(11/6):全寬的深墨頂列,左邊字標(「看」「有」兩塊黃色翻牌)與誰在用,右邊六個分頁;
+       放不下時(手機、字放大)分頁收進「選單」。安心說明在使用手冊。
+       分頁名稱一律兩個字(使用者 11/4:「盡量讓字數統一」),頁面標題照舊寫全名(家人確認、待複核、使用手冊…)。
+       待處理的數字是名稱右上角的紅色小標(使用者 11/5),不佔位置;只給能確認的家人,長輩不放紅色數字催他(同選單的小圓點) #}
     {% macro nav_links(cls) %}
+        {% set counts = (nav or {}) if permissions is not defined or permissions.can_confirm else {} %}
         <a class="{{ cls }}" href="/"{% if active == "home" %} aria-current="page"{% endif %}>{{ icon("home") }}<span>首頁</span></a>
-        <a class="{{ cls }}" href="/cabinet"{% if active == "cabinet" %} aria-current="page"{% endif %}>{{ icon("folder") }}<span>文件櫃</span></a>
-        <a class="{{ cls }}" href="/confirm"{% if active == "confirm" %} aria-current="page"{% endif %}>{{ icon("family") }}<span>家人確認</span>{% if nav and nav.confirm %}<span class="count">{{ nav.confirm }}<span class="visually-hidden"> 件待確認</span></span>{% endif %}</a>
-        <a class="{{ cls }}" href="/review"{% if active == "review" %} aria-current="page"{% endif %}>{{ icon("tray") }}<span>待複核</span>{% if nav and nav.review %}<span class="count">{{ nav.review }}<span class="visually-hidden"> 份待複核</span></span>{% endif %}</a>
+        <a class="{{ cls }}" href="/cabinet"{% if active == "cabinet" %} aria-current="page"{% endif %}>{{ icon("folder") }}<span>文件</span></a>
+        <a class="{{ cls }}" href="/confirm"{% if active == "confirm" %} aria-current="page"{% endif %}>{{ icon("family") }}<span class="tab">確認{% if counts.confirm %}<span class="nav-badge">{{ counts.confirm }}<span class="visually-hidden"> 件待確認</span></span>{% endif %}</span></a>
+        <a class="{{ cls }}" href="/review"{% if active == "review" %} aria-current="page"{% endif %}>{{ icon("tray") }}<span class="tab">複核{% if counts.review %}<span class="nav-badge">{{ counts.review }}<span class="visually-hidden"> 份待複核</span></span>{% endif %}</span></a>
         <a class="{{ cls }}" href="/settings"{% if active == "settings" %} aria-current="page"{% endif %}>{{ icon("gear") }}<span>設定</span></a>
+        <a class="{{ cls }}" href="/help"{% if active == "help" %} aria-current="page"{% endif %}>{{ icon("info") }}<span>手冊</span></a>
     {% endmacro %}
     <aside class="side">
-      <a class="wordmark" href="/"><img class="wordmark__logo" src="/static/logo.svg" alt="" width="38" height="38"><span translate="no"><b>{{ BRAND_NAME }}</b><small>{{ BRAND_SUB }}</small></span></a>
-      <nav class="side__nav" aria-label="主要">{{ nav_links("side__link") }}</nav>
-      {# 手機與平板:分頁收進「選單」(<details>,沒有 JS 也能開);按鈕上放待處理總數,家人才不會漏看 #}
-      {% set pending = ((nav or {}).get("confirm") or 0) + ((nav or {}).get("review") or 0) %}
-      <details class="menu">
-        <summary class="menu__btn">{{ icon("menu") }}<span>選單</span>{% if pending %}<span class="count">{{ pending }}<span class="visually-hidden"> 件待處理</span></span>{% endif %}</summary>
-        <nav class="menu__panel" aria-label="主要">{{ nav_links("menu__link") }}</nav>
-      </details>
-      {% if trust %}
-      <div class="trust side__trust">{% for ic, text in trust %}<p>{{ icon(ic) }}<span>{{ text }}</span></p>{% endfor %}</div>
-      {% endif %}
-    </aside>
-    <main id="main" class="main" tabindex="-1">
+      {# 牌上的字只給眼睛看;讀屏念藏起來的品牌名 #}
+      <a class="wordmark" href="/"><span class="brandflap" aria-hidden="true">{% for c in BRAND_NAME %}<span class="brandflap__d">{{ c }}</span>{% endfor %}</span><span class="visually-hidden" translate="no">{{ BRAND_NAME }}</span></a>
       {% if identity is defined and identity %}
       <p class="identity"><span>{{ icon("family") }}{{ identity.role_label }}</span><span>{{ identity.label }}</span></p>
       {% endif %}
+      <nav class="side__nav" aria-label="主要">{{ nav_links("side__link") }}</nav>
+      {# 手機與平板:分頁收進「選單」(<details>,沒有 JS 也能開)。按鈕只放漢堡圖示(使用者 11/4),「選單」兩個字只給讀屏念;
+         待處理總數(家人確認 + 待複核)是右上角的小圓點,家人才不會漏看;長輩不能確認,不放紅色數字催他 #}
+      {% set pending = (((nav or {}).get("confirm") or 0) + ((nav or {}).get("review") or 0)) if permissions is not defined or permissions.can_confirm else 0 %}
+      <details class="menu">
+        <summary class="menu__btn">{{ icon("menu") }}<span class="visually-hidden">選單</span>{% if pending %}<span class="menu__badge">{{ pending }}<span class="visually-hidden"> 件待處理</span></span>{% endif %}</summary>
+        <nav class="menu__panel" aria-label="主要">{{ nav_links("menu__link") }}</nav>
+      </details>
+    </aside>
+    <main id="main" class="main" tabindex="-1">
       {% if msg %}<p class="msg" role="status">{{ icon("check") }}<span>{{ msg }}</span></p>{% endif %}
       {% block content %}{% endblock %}
-      {% if trust %}
-      <footer class="trust foot-trust">{% for ic, text in trust %}<p>{{ icon(ic) }}<span>{{ text }}</span></p>{% endfor %}</footer>
-      {% endif %}
     </main>
   </div>
   {# 共用確認框:不可逆的動作(退回)按下前先問一次,取代瀏覽器內建的確認視窗。

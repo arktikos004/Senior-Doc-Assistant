@@ -1,10 +1,10 @@
 {% extends "base.html" %}
+{% from "_note.html" import note %}
 {% block title %}設定 - {{ BRAND_FULL }}{% endblock %}
 {% block content %}
 <header class="page-head">
   <div class="page-head__text">
     <h1>設定</h1>
-    <p class="lede">看系統現在怎麼運作，調整這台裝置的字級與朗讀；會影響全家的設定改動都會留紀錄。</p>
   </div>
 </header>
 
@@ -12,13 +12,12 @@
   {% if permissions is not defined or permissions.can_manage %}
   <section class="panel set-card" aria-labelledby="members-title">
     <h2 id="members-title">家庭成員</h2>
-    <p class="field-hint">家人負責確認、更正與管理；長輩可查看、退回與調整提醒。</p>
     <div><a class="btn btn--secondary" href="/settings/members">{{ icon("family") }}管理家庭成員</a></div>
   </section>
   {% endif %}
   {# 1. 系統狀態:只看。依目前生效的設定與本機模型的連線寫(render.settings_view) #}
   <section class="panel set-card" aria-labelledby="status-title">
-    <h2 id="status-title">系統狀態 <span class="tag">只看，不能改</span></h2>
+    <h2 id="status-title">系統狀態</h2>
     <dl class="kv">
       {% for row in v.status %}
       <dt>{{ row.label }}</dt>
@@ -29,7 +28,7 @@
 
   {# 2. 這台裝置:存在這個瀏覽器(app.js),不送到伺服器。沒有 JS 時只顯示預設值,選項停用 #}
   <section class="panel set-card" aria-labelledby="device-title">
-    <h2 id="device-title">這台裝置 <span class="tag">只存在這台手機或電腦</span></h2>
+    <h2 id="device-title">這台裝置</h2>
     {% for p in v.prefs %}
     <fieldset class="kinds">
       <legend>{{ p.label }}</legend>
@@ -40,16 +39,15 @@
       </div>
     </fieldset>
     {% endfor %}
-    <p class="field-hint">改了馬上生效，不影響家裡其他人的手機。</p>
     <p class="field-hint" role="status" data-pref-unsaved hidden>這個瀏覽器不讓網頁記住設定（例如無痕模式），換頁後會回到預設。</p>
     <noscript><p class="field-hint">這個瀏覽器沒有開啟 JavaScript，字級與朗讀速度沒辦法調整。</p></noscript>
   </section>
 
-  {# 3. 系統設定:會影響全家。規則在 src/settings.py(門檻不低於 80%、雲端要金鑰、藥袋一律本機),每次改動都留紀錄 #}
+  {# 3. 系統設定:會影響全家。規則在 src/settings.py(門檻不低於 80%、雲端要金鑰、藥袋與收據一律本機),每次改動都留紀錄 #}
   {% if permissions is not defined or permissions.can_manage %}
   <section class="panel set-card" aria-labelledby="system-title">
-    <h2 id="system-title">系統設定 <span class="tag">會影響全家</span></h2>
-    <form class="set-form" method="post" action="/settings" data-settings-form novalidate>
+    <div class="section__title"><h2 id="system-title">系統設定</h2>{{ note(v.lockline) }}</div>
+    <form class="set-form" method="post" action="/settings" data-settings-form novalidate data-warn-unsaved>
       {{ csrf_input() }}
       {% if v.errors %}
       <p class="field-error" role="alert">{{ icon("alert") }}<span>{{ v.errors|join(" ") }}</span></p>
@@ -70,16 +68,16 @@
       </fieldset>
       {% if v.cloud_hint %}<p class="field-hint" id="provider-hint">{{ v.cloud_hint }}</p>{% endif %}
       {% endif %}
-      <p class="lockline">{{ icon("lock") }}<span>{{ v.lockline }}</span></p>
-      <div class="field-row">
-        <label class="field-label" for="auto-threshold">自動存檔門檻</label>
-        <span class="field-hint" id="auto-threshold-hint">只能調得更嚴，不能低於 80%</span>
-        <select class="text-input" id="auto-threshold" name="auto_threshold" aria-describedby="auto-threshold-hint"{% if v.threshold_error %} aria-invalid="true"{% endif %}>
+      {# 只有幾個選項,單選平鋪(表單規範第 10 點);沒過就寫在選項正下方 #}
+      <fieldset class="kinds"{% if v.threshold_error %} aria-describedby="threshold-error"{% endif %}>
+        <legend>自動存檔門檻</legend>
+        <div class="chips">
           {% for t in v.thresholds %}
-          <option value="{{ t.value }}"{% if t.selected %} selected{% endif %}>{{ t.label }}</option>
+          <label class="chip"><input class="chip__input" type="radio" name="auto_threshold" value="{{ t.value }}"{% if t.selected %} checked{% endif %}><span>{{ t.label }}</span></label>
           {% endfor %}
-        </select>
-      </div>
+        </div>
+        {% if v.threshold_error %}<p class="ff__error" id="threshold-error" role="alert">{{ icon("alert") }}<span>{{ v.threshold_error }}</span></p>{% endif %}
+      </fieldset>
       <div class="form-actions">
         <button class="btn btn--primary btn--lg" type="submit" data-save>{{ icon("check") }}儲存設定</button>
         {% if not v.demo %}
@@ -106,9 +104,8 @@
 
   {# 4. 資料管理:匯出不含影像;刪除只動文件與四個資料夾裡的原件,設定與設定紀錄保留 #}
   <section class="panel set-card danger-zone" aria-labelledby="data-title">
-    <h2 id="data-title">資料管理</h2>
-    <p class="field-hint">匯出的檔案含有文件內容，請存在安全的地方。刪除後無法復原。</p>
-    <p class="field-hint"><a href="/data-use">資料怎麼用：存了什麼、放在哪裡、誰看得到</a></p>
+    <div class="section__title"><h2 id="data-title">資料管理</h2>{{ note("匯出的檔案含有文件內容，請存在安全的地方。刪除後無法復原。") }}</div>
+    <p><a href="/data-use">資料怎麼用</a></p>
     <form class="set-form" method="post" action="/settings/delete">
       {{ csrf_input() }}
       {# 沒有 JS 就沒有確認框:改成要先勾選才送得出去(瀏覽器內建的必填檢查,不用 JS)。

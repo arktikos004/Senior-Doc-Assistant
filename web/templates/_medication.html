@@ -1,11 +1,12 @@
 {# 服藥時間表:m = render.medication_view(payload)。只顯示藥袋上印的字,不補任何藥物知識。
-   on_card:家人確認卡片才顯示院所/日期/藥師電話與聲明(結果頁的欄位表與上方聲明已有,不重複)。 #}
+   on_card:家人確認卡片才顯示院所/日期/藥師電話(結果頁的欄位表已有,不重複),排成兩欄的 <dl>:欄名一欄、內容一欄。
+   時間表是一塊看板(v5),時段寫在一樣寬的牌上(早、中、晚、需要時、未標時段)。藥袋聲明在標題旁的「說明」裡。 #}
 {% macro medication(m, on_card=false) %}
 {% if on_card and m.info %}
-<div class="med-info">{% for line in m.info %}<p>{{ line }}</p>{% endfor %}</div>
+<dl class="med-info">{% for label, value in m.info %}<dt>{{ label }}：</dt><dd>{{ value }}</dd>{% endfor %}</dl>
 {% endif %}
 {% if m.slots or m.prn or m.unscheduled %}
-<dl class="slots" data-speak-part>
+<dl class="slots board" data-speak-part>
   {% for slot, names in m.slots %}
   <div class="slots__row"><dt class="slot">{{ slot }}</dt><dd>{{ names|join("、") }}</dd></div>
   {% endfor %}
@@ -19,12 +20,9 @@
 </dl>
 {% endif %}
 {% if m.note or m.extra %}
-<div class="med-info">
+<div class="med-more">
   {% if m.note %}<p>{{ m.note }}</p>{% endif %}
-  {% for key, value in m.extra %}<p>{{ key }}：{{ value }}</p>{% endfor %}
+  {% if m.extra %}<dl class="med-info">{% for key, value in m.extra %}<dt>{{ key }}：</dt><dd>{{ value }}</dd>{% endfor %}</dl>{% endif %}
 </div>
-{% endif %}
-{% if on_card %}
-<p class="disclaimer disclaimer--compact" role="note">{{ icon("info") }}<span>{{ m.disclaimer or MEDICATION_DISCLAIMER }}</span></p>
 {% endif %}
 {% endmacro %}

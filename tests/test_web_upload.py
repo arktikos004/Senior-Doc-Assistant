@@ -1,4 +1,5 @@
-"""上傳路由測試:大小/副檔名限制、檔名重產、大類與類型提示、隱私分流、轉到結果頁(不呼叫模型、不連網)。"""
+"""上傳路由測試:大小/副檔名限制、檔名重產、類型選項(11/4 起只選類型;舊版首頁送來的大類照舊收)、隱私分流、
+轉到結果頁(不呼叫模型、不連網)。"""
 import json
 import re
 import shutil
@@ -10,7 +11,7 @@ import httpx
 import pytest
 
 import web.app as web_app
-from src.models import CATEGORIES, CATEGORY_DOCS, DOC_TYPES, SENSITIVE_CATEGORIES, ExtractionResult
+from src.models import CATEGORIES, DOC_TYPES, SENSITIVE_CATEGORIES, ExtractionResult
 from src.prompts import get_prompt
 from src.providers import MockAnalyzer, OllamaAnalyzer, RoutingAnalyzer
 from src.providers.workers_ai import WorkersAIAnalyzer
@@ -77,8 +78,9 @@ def test_home_has_capture_input_and_type_choices(client):
     assert 'accept="image/*,application/pdf"' in html
     assert 'capture="environment"' in html
     assert re.search(r'value="不確定"\s+checked', html)
-    for value in ("藥袋", "帳單", "公文", "發票", "收據"):
+    for value in ("帳單", "公文", "藥袋", "收據"):
         assert f'value="{value}"' in html
+    assert ">發票／收據</span>" in html and 'value="發票"' not in html     # 發票和收據合成一個選項
     assert 'aria-live="polite"' in html
     # 本機/展示模式所有文件都在這台電腦辨識,不必特別說明藥袋(雲端模式才顯示,見下一個測試)
     assert "只在這台電腦處理" not in html
@@ -95,14 +97,15 @@ def _cloud_cfg(tmp_path):
     return cfg
 
 
-def test_cloud_mode_says_sensitive_categories_stay_local(tmp_path):
+def test_cloud_mode_says_which_types_stay_local(tmp_path):
+    """雲端模式的上傳區照實際分流寫:只看上傳時選的類型,不再提大類(上傳不選大類了)。"""
     from fastapi.testclient import TestClient
 
     cfg = _cloud_cfg(tmp_path)
     html = TestClient(create_app(cfg, analyzer=MockAnalyzer(cfg))).get("/").text
-    assert "醫療與保險、身分證明兩類只在這台電腦處理，不會送到雲端。" in html
-    # 上傳區不加身分證明類的說明(使用者 10/3);說明留在文件櫃
-    assert "拍了會交給家人複核" not in html and "data-kinds-none" not in html
+    upload_area = html.split('<section class="panel upload"')[1].split("</section>")[0]
+    assert "藥袋、發票／收據，以及選「不確定」的文件只在這台電腦上辨識；帳單、公文會交給雲端模型讀取。" in upload_area
+    assert not any(category in upload_area for category in CATEGORIES) and "拍了會交給家人複核" not in upload_area
 
 
 def test_upload_redirects_to_result_page(client, upload):
@@ -121,20 +124,21 @@ def test_upload_redirects_to_result_page(client, upload):
 
 
 def test_uncertain_becomes_none_and_known_types_pass_through(client, analyzer, upload):
-    for choice in ("不確定", "藥袋", "帳單", "公文", "發票", "收據", "亂填的類型"):
+    """「不確定」與白名單以外的值當作沒選;舊版首頁的「發票」併進「發票／收據」(送「收據」,一律本機)。"""
+    for choice in ("不確定", "藥袋", "帳單", "公文", "收據", "發票", "亂填的類型"):
         assert upload(client, doc_type=choice).status_code == 303
-    assert analyzer.hints == [None, "藥袋", "帳單", "公文", "發票", "收據", None]
+    assert analyzer.hints == [None, "藥袋", "帳單", "公文", "收據", "收據", None]
 
 
-def _category_rows(html: str) -> dict[str, list[str]]:
-    """第一列每個大類 → 選了它之後第二列留下的選項(data-kinds)。"""
-    return {category: kinds.split()
-            for category, kinds in re.findall(r'name="category" value="([^"]+)"[^>]*data-kinds="([^"]*)"', html)}
+def _type_chips(html: str) -> list[tuple[str, str]]:
+    """首頁上傳區的類型選項:(送出值, 畫面文字),照畫面順序。"""
+    return re.findall(r'<input class="chip__input" type="radio" name="doc_type" value="([^"]+)"[^>]*><span>([^<]+)</span>',
+                      html)
 
 
 def test_every_form_value_reaches_pipeline_exactly(client, monkeypatch, upload):
-    """隱私分流只認 DOC_TYPES、CATEGORIES 與清單上的原字串:畫面上每個大類留下的每個選項,送到 process_file
-    都必須一字不差。沒選大類:五種類型當類型提示;選了大類:清單上的名稱當 label(類型提示由 Pipeline 依清單決定)。"""
+    """隱私分流只認 DOC_TYPES 的原字串:首頁每個類型選項送到 process_file 都必須一字不差(「不確定」是 None),
+    首頁不送大類,也沒有名稱(label)。"""
     seen = []
     original = web_app.Pipeline.process_file
 
@@ -143,18 +147,11 @@ def test_every_form_value_reaches_pipeline_exactly(client, monkeypatch, upload):
         return original(self, path, doc_type_hint, category=category, label=label, **kwargs)
 
     monkeypatch.setattr(web_app.Pipeline, "process_file", spy)
-    rows = _category_rows(client.get("/").text)
-    assert list(rows) == ["不確定", *CATEGORIES]
-    for category, values in rows.items():
-        seen.clear()
-        assert values[-1] == "不確定"                                   # 照樣稿:「不確定」在最後
-        for value in values:
-            assert upload(client, category=category, doc_type=value).status_code == 303
-        if category == "不確定":
-            assert seen == [(v, None, None) for v in values[:-1]] + [(None, None, None)]
-            assert all(v in DOC_TYPES for v in values[:-1])
-        else:
-            assert seen == [(None, category, v) for v in values[:-1]] + [(None, category, None)]
+    values = [value for value, _ in _type_chips(client.get("/").text)]
+    assert values[-1] == "不確定" and all(v in DOC_TYPES for v in values[:-1])   # 「不確定」在最後
+    for value in values:
+        assert upload(client, doc_type=value).status_code == 303
+    assert seen == [(v, None, None) for v in values[:-1]] + [(None, None, None)]
 
 
 def test_medication_hint_shows_disclaimer(client, upload):
@@ -280,122 +277,100 @@ def test_home_empty_state_invites_first_upload(client):
     assert "拍下第一張" in client.get("/").text
 
 
-# ---- 先選大類,再選這一類裡的哪一種 -----------------------------------------------------------
+# ---- 上傳只選類型(使用者 11/4);大類只在文件櫃 --------------------------------------------------
 
 def _doc_id(response) -> int:
     return int(response.headers["location"].rsplit("/", 1)[1])
 
 
-def test_home_offers_category_first_then_kind(client):
-    """第一列:不確定 + 四大類(各有圖示);兩列預設都是不確定。每個大類帶著第二列要留下的選項(data-kinds:
-    這一類清單上的名稱,照 CATEGORY_DOCS 的順序,最後是「不確定」)與標題;沒選大類留下五種類型。
-    第二列沒有 JS 時只看得到五種類型 + 不確定,各類的常見文件先藏著;上傳區不寫任何說明(使用者 10/3)。"""
+def test_home_offers_types_only(client):
+    """上傳只選類型:帳單、公文、藥袋、發票／收據、不確定,預設「不確定」,不用先打開;四大類只在文件櫃。
+    發票和收據合成一個選項、送「收據」(一律本機)。本機模式的上傳區不寫說明。"""
     html = client.get("/").text
-    assert "這是哪一類？" in html and "是哪一種文件？" in html
-    assert re.search(r'name="category" value="不確定" checked', html)
-    assert re.search(r'name="doc_type" value="不確定" checked data-kinds-unsure', html)
-    first_row = html.split("這是哪一類？")[1].split("</fieldset>")[0]
-    assert first_row.count("<svg") == 5
-    rows = _category_rows(html)
-    legends = dict(re.findall(r'name="category" value="([^"]+)"[^>]*data-kinds-legend="([^"]*)"', html))
-    assert rows["不確定"] == ["藥袋", "帳單", "發票", "收據", "公文", "不確定"] and legends["不確定"] == "是哪一種文件？"
-    for category, docs in CATEGORY_DOCS.items():
-        assert rows[category] == [name for name, _ in docs] + ["不確定"]
-        assert legends[category] == f"{category}裡的哪一種？"
-    chips = re.findall(r'<label class="chip"( hidden)?><input class="chip__input" type="radio" name="doc_type" '
-                       r'value="([^"]+)"', html)
-    assert [value for hidden, value in chips if not hidden] == rows["不確定"]    # 沒有 JS 時看得到的
-    kinds = [value for _, value in chips]
-    assert len(kinds) == len(set(kinds)) and set(kinds) == {v for values in rows.values() for v in values}
-    for values in rows.values():                          # app.js 依大類篩出來的順序和清單一樣
-        assert [k for k in kinds if k in values] == values
+    assert _type_chips(html) == [("帳單", "帳單"), ("公文", "公文"), ("藥袋", "藥袋"), ("收據", "發票／收據"),
+                                 ("不確定", "不確定")]
+    assert re.search(r'name="doc_type" value="不確定" checked', html)
     upload_area = html.split('<section class="panel upload"')[1].split("</section>")[0]
-    assert "upload__note" not in upload_area and "拍了會交給家人複核" not in upload_area   # 本機模式:沒有說明
+    assert 'name="category"' not in upload_area and "<details" not in upload_area
+    assert not any(category in upload_area for category in CATEGORIES)
+    assert "upload__note" not in upload_area                         # 本機模式:沒有說明
+    # 選好照片後才用得到的:縮圖的位置、「換一張」
+    assert "data-file-photo" in upload_area and ">換一張</button>" in upload_area
 
 
-# 用假的 DOM 跑真的 app.js:兩列的選項照伺服器畫出來的(__DATA__),換大類後看第二列留下哪些、選中哪一個
-_KINDS_FLOW = r"""
-const src = require("fs").readFileSync(__APP_JS__, "utf8"), data = __DATA__;
+# 用假的 DOM 跑真的 app.js:選檔 → 縮圖、「換一張」、類型與「開始辨識」;換一張 → 回到兩顆按鈕;太大的檔不算選好
+_PICK_FLOW = r"""
+const src = require("fs").readFileSync(__APP_JS__, "utf8"), state = {};
 function el(attrs = {}) {
-  return {attrs, value: attrs.value, hidden: false, checked: false, textContent: "", listeners: {},
+  return {attrs, hidden: false, textContent: "", listeners: {}, children: [],
     getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
     setAttribute(k, v) { this.attrs[k] = String(v); }, removeAttribute(k) { delete this.attrs[k]; },
     addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); },
     fire(type) { (this.listeners[type] || []).forEach(fn => fn({type, target: this, preventDefault() {}})); },
-    focus() {}};
+    querySelector(sel) { return sel === "img" ? this.children[0] || null : null; },
+    appendChild(child) { this.children.push(child); child.remove = () => { this.children = []; }; },
+    focus() { state.focus = this; }};
 }
-function radios(list, checked) {   // 同一組 radio:選了一個,其他自動取消(和瀏覽器一樣)
-  list.forEach((node, i) => {
-    let on = checked[i];
-    Object.defineProperty(node, "checked", {get: () => on, set: v => {
-      if (v) list.forEach(other => { if (other !== node) other.off(); });
-      on = Boolean(v);
-    }});
-    node.off = () => { on = false; };
-  });
-  return list;
+function fileInput() {      // 和瀏覽器一樣:value 設成空字串就清掉選好的檔
+  const input = el({type: "file"});
+  let files = null;
+  Object.defineProperty(input, "files", {get: () => files, set: v => { files = v; }});
+  Object.defineProperty(input, "value", {get: () => (files ? "C:\\fakepath\\x" : ""), set: v => { if (v === "") files = null; }});
+  return input;
 }
-const categories = radios(data.categories.map(c => el({value: c.value, "data-kinds": c.kinds,
-  "data-kinds-legend": c.legend})), data.categories.map(c => c.checked));
-const kinds = radios(data.kinds.map(k => {
-  const chip = Object.assign(el(), {hidden: k.hidden});
-  return Object.assign(el(Object.assign({value: k.value}, k.unsure ? {"data-kinds-unsure": ""} : {})),
-                       {closest: () => chip});
-}), data.kinds.map(k => k.checked));
-const title = el(), named = {"[data-kinds-group]": el(), "[data-kinds-title]": title,
-  "[data-kinds-unsure]": kinds.find(k => "data-kinds-unsure" in k.attrs), "[data-file-error]": Object.assign(el(), {hidden: true})};
-const form = Object.assign(el(), {
-  querySelector: sel => sel === 'input[name="category"]:checked' ? categories.find(c => c.checked) || null
-    : sel === 'input[name="doc_type"]:checked' ? kinds.find(k => k.checked) || null : named[sel] || el(),
-  querySelectorAll: sel => ({'input[type="file"]': [el()], 'input[name="doc_type"]': kinds,
-                             'input[name="category"]': categories})[sel] || []});
+const camera = fileInput(), pick = fileInput();
+const named = {"[data-file-chosen]": Object.assign(el(), {hidden: true}), "[data-file-name]": el(),
+  "[data-file-photo]": el(), "[data-file-reset]": el(), "[data-file-error]": Object.assign(el(), {hidden: true}),
+  "[data-file-error-text]": el(), "[data-submit]": el(), "[data-submit-label]": el(), "[data-progress]": el(),
+  "[data-upload-status]": el(), "[data-wait]": el(), "[data-wait-seconds]": el()};
+const form = Object.assign(el({"data-max-bytes": "1000"}), {
+  querySelector: sel => named[sel] || null,
+  querySelectorAll: sel => (sel === 'input[type="file"]' ? [camera, pick] : [])});
 const doc = {documentElement: el(), addEventListener() {}, querySelectorAll: () => [],
-             querySelector: sel => sel === "[data-upload-form]" ? form : null};
-new Function("window", "document", src)({addEventListener() {}, localStorage: {getItem: () => null}}, doc);
-const pick = (list, value) => { const node = list.find(x => x.value === value); node.checked = true; return node; };
-const state = () => ({title: title.textContent, shown: kinds.filter(k => !k.closest().hidden).map(k => k.value),
-                      checked: (kinds.find(k => k.checked) || {}).value});
-const out = {initial: state()};
-pick(categories, "醫療與保險").fire("change"); out.health = state();
-pick(kinds, "保單"); pick(categories, "生活契約").fire("change"); out.living = state();
-pick(kinds, "公文"); pick(categories, "財產資產").fire("change"); out.assets = state();
-pick(categories, "不確定").fire("change"); out.none = state();
-pick(categories, "身分證明").fire("change"); out.identity = state();
+             querySelector: sel => (sel === "[data-upload-form]" ? form : null), createElement: () => el()};
+const URLs = {createObjectURL: () => "blob:fake", revokeObjectURL() {}};
+new Function("window", "document", "URL", src)(
+  {addEventListener() {}, localStorage: {getItem: () => null}, URL: URLs}, doc, URLs);
+const chosen = named["[data-file-chosen]"], photo = named["[data-file-photo]"];
+const view = () => ({ready: form.getAttribute("data-ready"), chosen: !chosen.hidden, photos: photo.children.length,
+                     name: named["[data-file-name]"].textContent, error: !named["[data-file-error]"].hidden});
+const out = {initial: view()};
+camera.files = [{name: "IMG_0001.jpg", size: 10, type: "image/jpeg"}];
+camera.fire("change");
+out.picked = Object.assign(view(), {focus: state.focus === named["[data-submit]"]});
+named["[data-file-reset]"].fire("click");
+out.again = Object.assign(view(), {focus: state.focus === camera, files: camera.files});
+pick.files = [{name: "big.jpg", size: 5000, type: "image/jpeg"}];
+pick.fire("change");
+out.big = Object.assign(view(), {files: pick.files});
 console.log(JSON.stringify(out));
 """
 _NODE = shutil.which("node")
 
 
 @pytest.mark.skipif(_NODE is None, reason="沒有 node，略過前端流程測試")
-def test_kinds_follow_the_chosen_category_in_app_js(client):
-    """app.js 依第一列只留那一類清單上的名稱 + 不確定,標題跟著換;被藏起來的選項正被選著就改回「不確定」,
-    兩類都有的(公文)留著;沒選大類回到五種類型。"""
-    html = client.get("/").text
-    data = {
-        "categories": [{"value": v, "checked": bool(c), "kinds": k, "legend": legend} for v, c, k, legend in re.findall(
-            r'name="category" value="([^"]+)"( checked)? data-kinds="([^"]*)" data-kinds-legend="([^"]*)"', html)],
-        "kinds": [{"value": v, "hidden": bool(h), "checked": bool(c), "unsure": bool(u)} for h, v, c, u in re.findall(
-            r'<label class="chip"( hidden)?><input class="chip__input" type="radio" name="doc_type" value="([^"]+)"'
-            r'( checked)?( data-kinds-unsure)?>', html)],
-    }
-    script = (_KINDS_FLOW.replace("__APP_JS__", json.dumps(str(STATIC_DIR / "app.js")))
-              .replace("__DATA__", json.dumps(data, ensure_ascii=False)))
-    r = json.loads(subprocess.run([_NODE, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=30, check=True).stdout)
-    five = ["藥袋", "帳單", "發票", "收據", "公文", "不確定"]
-    assert r["initial"] == {"title": "是哪一種文件？", "shown": five, "checked": "不確定"}
-    assert r["health"] == {"title": "醫療與保險裡的哪一種？", "checked": "不確定",
-                           "shown": ["藥袋", "醫療收據", "保單", "診斷證明", "檢驗報告", "公文", "不確定"]}
-    assert r["living"] == {"title": "生活契約裡的哪一種？", "checked": "不確定",        # 保單被藏起來 → 不確定
-                           "shown": ["水電瓦斯費", "電信費", "管理費", "租約", "公文", "不確定"]}
-    assert r["assets"] == {"title": "財產資產裡的哪一種？", "checked": "公文",           # 兩類都有的公文留著
-                           "shown": ["發票", "收據", "稅單", "存摺", "房地權狀", "公文", "不確定"]}
-    assert r["none"] == {"title": "是哪一種文件？", "shown": five, "checked": "公文"}
-    assert r["identity"] == {"title": "身分證明裡的哪一種？", "checked": "不確定",
-                             "shown": ["身分證", "健保卡", "戶口名簿", "駕照", "護照", "印鑑證明", "不確定"]}
+def test_choosing_a_photo_swaps_the_buttons_for_a_preview_in_app_js():
+    """一次一個主要按鈕(使用者 11/4):選好照片 → data-ready="true"(app.css 收起兩顆按鈕,改顯示類型與「開始辨識」)、
+    縮圖、焦點到「開始辨識」;「換一張」清掉檔案、收起縮圖、回到兩顆按鈕;超過大小的檔不算選好,寫出錯誤。"""
+    script = _PICK_FLOW.replace("__APP_JS__", json.dumps(str(STATIC_DIR / "app.js")))
+    r = json.loads(subprocess.run([_NODE, "-e", script], capture_output=True, text=True, encoding="utf-8",
+                                  timeout=30, check=True).stdout)
+    assert r["initial"] == {"ready": "false", "chosen": False, "photos": 0, "name": "", "error": False}
+    assert r["picked"] == {"ready": "true", "chosen": True, "photos": 1, "name": "IMG_0001.jpg", "error": False,
+                           "focus": True}
+    assert r["again"] == {"ready": "false", "chosen": False, "photos": 0, "name": "IMG_0001.jpg", "error": False,
+                          "focus": True, "files": None}
+    assert r["big"]["ready"] == "false" and r["big"]["error"] and r["big"]["files"] is None
+
+
+def test_upload_steps_are_styled_by_the_ready_state():
+    """app.css:還沒選照片時類型與「開始辨識」收起來,選好後收起兩顆按鈕(和 app.js 的 data-ready 對得上)。"""
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    assert '[data-ready="false"] .upload__row' in css and '[data-ready="true"] .drop__btns { display: none; }' in css
 
 
 def test_category_choice_reaches_pipeline_and_is_stored(cfg, client, analyzer, upload):
-    """敏感大類要求本機;清單上的名稱換成清單的類型提示(水電瓦斯費 → 帳單),不在這一類清單上的(財產資產 + 藥袋)
+    """(還開著舊版首頁的表單才會送大類,伺服器照舊收)敏感大類要求本機;清單上的名稱換成清單的類型提示(水電瓦斯費 → 帳單),不在這一類清單上的(財產資產 + 藥袋)
     當作沒選;文件歸使用者選的大類,沒選就依類型(MockAnalyzer 一律讀成發票)。"""
     store = Store(cfg.paths.db_path)
     cases = [("醫療與保險", "公文"), ("身分證明", "不確定"), ("生活契約", "水電瓦斯費"), ("財產資產", "藥袋"),
@@ -425,19 +400,16 @@ def test_extra_form_fields_cannot_turn_off_local_only(client, analyzer, upload):
     assert r.status_code == 303 and analyzer.local_only == [True]
 
 
-def test_error_page_keeps_both_choices(client):
-    """沒選檔就按送出:錯誤頁保留剛才選的大類與這一類的名稱,長輩不必重選;沒選大類時保留類型。
-    第二列只留伺服器收得下的值:不在所選大類清單上的(生活契約 + 藥袋)回到「不確定」。"""
-    r = client.post("/upload", data={"category": "生活契約", "doc_type": "水電瓦斯費"})
-    assert r.status_code == 400 and "請先拍照" in r.text
-    assert re.search(r'name="category" value="生活契約" checked', r.text)
-    assert re.search(r'name="doc_type" value="水電瓦斯費" checked', r.text)
-    assert not re.search(r'value="不確定" checked', r.text)
+def test_error_page_keeps_the_chosen_type(client):
+    """沒選檔就按送出:錯誤頁留住剛才選的類型,長輩不必重選;只留類型選項收得下的值。
+    舊版的「發票」是現在的「發票／收據」;舊版首頁送來的大類與名稱(生活契約 + 水電瓦斯費)不是類型,回到「不確定」。"""
     r = client.post("/upload", data={"doc_type": "帳單"})
+    assert r.status_code == 400 and "請先拍照" in r.text
     assert re.search(r'name="doc_type" value="帳單" checked', r.text)
-    r = client.post("/upload", data={"category": "生活契約", "doc_type": "藥袋"})
-    assert re.search(r'name="category" value="生活契約" checked', r.text)
-    assert re.search(r'name="doc_type" value="不確定" checked', r.text) and "藥袋\" checked" not in r.text
+    r = client.post("/upload", data={"doc_type": "發票"})
+    assert re.search(r'name="doc_type" value="收據" checked', r.text)
+    r = client.post("/upload", data={"category": "生活契約", "doc_type": "水電瓦斯費"})
+    assert re.search(r'name="doc_type" value="不確定" checked', r.text) and 'name="category"' not in r.text
 
 
 _LETTER_REPLY = {"doc_type": "公文", "date": "2026-09-28", "vendor": "範例區公所", "confidence": 0.9,
@@ -482,9 +454,23 @@ def _cloud_prompt(request: httpx.Request) -> str:
     return next(p["text"] for p in parts if p["type"] == "text")
 
 
+def test_cloud_mode_routes_by_type_end_to_end(tmp_path, monkeypatch, form_client, upload):
+    """驗收(雲端模式,首頁只選類型):帳單、公文 → 雲端、用各自的提示詞;藥袋、發票／收據(收據)、舊版的「發票」、
+    不確定 → 本機,類型提示照樣交給本機挑提示詞(收據與發票共用發票版)。"""
+    client, sent, local, _ = _cloud_client(tmp_path, monkeypatch, form_client)
+    for choice in ("帳單", "公文"):
+        assert upload(client, doc_type=choice).status_code == 303
+    assert [_cloud_prompt(r) for r in sent] == [get_prompt("帳單")[0], get_prompt("公文")[0]] and local == []
+    for choice in ("藥袋", "收據", "發票", "不確定"):
+        assert upload(client, doc_type=choice).status_code == 303
+    assert len(sent) == 2
+    assert [c["messages"][0]["content"] for c in local] == [
+        get_prompt("藥袋")[0], get_prompt("收據")[0], get_prompt("收據")[0], get_prompt(None)[0]]
+
+
 def test_cloud_mode_routes_by_category_end_to_end(tmp_path, monkeypatch, form_client, upload):
-    """驗收(雲端模式):醫療與保險 + 公文 → 本機、用公文的提示詞;生活契約 + 水電瓦斯費 → 雲端、用帳單的提示詞;
-    沒選大類照舊分流。"""
+    """驗收(雲端模式,還開著舊版首頁送來的大類):醫療與保險 + 公文 → 本機、用公文的提示詞;
+    生活契約 + 水電瓦斯費 → 雲端、用帳單的提示詞;沒選大類照類型分流。"""
     client, sent, local, _ = _cloud_client(tmp_path, monkeypatch, form_client)
 
     assert upload(client, category="醫療與保險", doc_type="公文").status_code == 303

@@ -53,10 +53,11 @@ def test_pages_link_manifest_and_external_scripts(client):
 
 
 def test_brand_is_khuannu_on_every_page(client):
-    """10/1 定案:短名稱「看有」+ 副標;撞名的舊名稱不能再出現在任何頁面。"""
+    """10/1 定案:短名稱「看有」+ 副標;撞名的舊名稱不能再出現在任何頁面。
+    v5(11/6):頂列的字標是「看」「有」兩塊翻牌,讀屏念藏起來的品牌名;副標寫在頁面標題。"""
     for url in ("/", "/confirm", "/review", "/doc/999"):
         html = client.get(url).text
-        assert "<b>看有</b><small>高齡家庭文書輔助</small>" in html and "看有 高齡家庭文書輔助</title>" in html, url
+        assert '<span class="visually-hidden" translate="no">看有</span>' in html and "看有 高齡家庭文書輔助</title>" in html, url
         assert not _OLD_NAMES.search(html), url
 
 
@@ -65,8 +66,10 @@ def test_manifest_is_valid(client):
     assert r.status_code == 200
     data = json.loads(r.text)
     assert data["name"].startswith("看有") and data["short_name"] == "看有" and data["start_url"] == "/"
-    icon = data["icons"][0]
-    assert client.get(icon["src"]).status_code == 200 and icon["type"] == "image/svg+xml"
+    assert data["theme_color"] == "#14212B"          # 和頂列同色
+    for icon in data["icons"]:                       # tools/make_icons.py 產生的 PNG
+        assert client.get(icon["src"]).status_code == 200 and icon["type"] == "image/png"
+    assert {icon["sizes"] for icon in data["icons"]} == {"192x192", "512x512"}
 
 
 def test_static_assets_do_not_load_external_resources():
@@ -164,6 +167,24 @@ def test_speech_only_uses_local_voices():
     out = subprocess.run([_NODE, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
     picked = [p["name"] if p else None for p in json.loads(out.stdout)]
     assert picked == ["Meijia", None, "Hanhan", None, "Tingting", None]
+
+
+@pytest.mark.skipif(_NODE is None, reason="沒有 node,略過前端純函式測試")
+def test_speech_skips_what_is_only_for_the_eyes():
+    """結果頁的期限畫成翻牌(aria-hidden,只給眼睛看):聽重點唸旁邊藏起來的原文,不會唸成「1 1 / 1 8」(v5,11/6)。"""
+    script = (
+        "require(%r); const said = globalThis.ReadAloud.spokenText;"
+        "const t = (s) => ({nodeType: 3, nodeValue: s});"
+        "const el = (attrs, ...kids) => ({nodeType: 1, childNodes: kids, getAttribute: (k) => k in attrs ? attrs[k] : null});"
+        "const flap = el({'aria-hidden': 'true'}, ...'11/18'.split('').map((c) => el({}, t(c))), el({}, t('前繳費')));"
+        "const line = el({'data-speak-part': ''}, flap, el({'class': 'visually-hidden'}, t('11月18日前繳費')), t(' '), el({}, t('還有 12 天')));"
+        "console.log(JSON.stringify([said(line), said(el({}, t('這是電費帳單'))), said(el({'aria-hidden': 'false'}, t('看得到'))),"
+        "said({nodeType: 8, nodeValue: '註解'})]))"
+    ) % str(STATIC_DIR / "speech.js")
+    out = subprocess.run([_NODE, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
+    assert json.loads(out.stdout) == ["11月18日前繳費 還有 12 天", "這是電費帳單", "看得到", ""]
+    js = (STATIC_DIR / "speech.js").read_text(encoding="utf-8")
+    assert "spokenText(el)" in js and not re.search(r"\bel\.textContent", js)   # 收集 data-speak-part 的字用它,不用 textContent
 
 
 # 用假的 DOM 跑 app.js 的確認框流程(真的瀏覽器行為另外用 CDP 截圖自評);requestSubmit 和瀏覽器一樣當場觸發 submit
@@ -370,20 +391,20 @@ function node(name, attrs = {}, text = "") {
     fire(type) { (this.listeners[type] || []).forEach(fn => fn({type, target: this, preventDefault() {}})); }};
 }
 const input = node("input");
-const label = node("label", {}, "顯示密碼");
-const button = node("button", {"data-show-password": "pdf-password", "aria-pressed": "false"});
-button.querySelector = sel => sel === "span" ? label : null;
+const button = node("button", {"data-show-password": "pdf-password", "aria-pressed": "false", "aria-label": "顯示密碼"});
 const doc = {activeElement: null, addEventListener() {}, querySelector: () => null,
              getElementById: id => id === "pdf-password" ? input : null,
              documentElement: {setAttribute() {}, getAttribute() { return null; }},
              querySelectorAll: sel => sel === "[data-show-password]" ? [button] : []};
 const win = Object.assign(node("window"), {setTimeout(fn) { fn(); }, HTMLFormElement: {prototype: {}}});
 new Function("window", "document", "HTMLFormElement", src)(win, doc, win.HTMLFormElement);
-const seen = [{hidden: button.hidden, type: input.type, pressed: button.getAttribute("aria-pressed"), label: label.textContent}];
+const state = () => ({hidden: button.hidden, type: input.type, pressed: button.getAttribute("aria-pressed"),
+                      label: button.getAttribute("aria-label")});
+const seen = [state()];
 button.fire("click");
-seen.push({hidden: button.hidden, type: input.type, pressed: button.getAttribute("aria-pressed"), label: label.textContent});
+seen.push(state());
 button.fire("click");
-seen.push({hidden: button.hidden, type: input.type, pressed: button.getAttribute("aria-pressed"), label: label.textContent});
+seen.push(state());
 console.log(JSON.stringify({seen, focused: input.focused}));
 """
 
@@ -396,7 +417,7 @@ def test_show_password_button_is_hidden_without_js():
 
 @pytest.mark.skipif(_NODE is None, reason="沒有 node,略過前端流程測試")
 def test_show_password_toggles_between_hidden_and_shown():
-    """「顯示密碼」:有 JS 才出現;按一下顯示、再按一下遮回去,按鈕狀態與文字跟著換,焦點回到密碼欄。"""
+    """密碼欄的眼睛:有 JS 才出現;按一下顯示、再按一下遮回去,按鈕狀態與名稱(讀屏念的)跟著換,焦點回到密碼欄。"""
     script = _SHOW_PASSWORD_FLOW.replace("__APP_JS__", json.dumps(str(STATIC_DIR / "app.js")))
     out = subprocess.run([_NODE, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
     r = json.loads(out.stdout)
@@ -536,3 +557,127 @@ def test_progress_page_reloads_when_the_server_cannot_answer():
 def test_progress_page_refreshes_without_js():
     html = (TEMPLATES_DIR / "progress.html").read_text(encoding="utf-8")
     assert '<noscript><meta http-equiv="refresh" content="3"></noscript>' in html
+
+
+_BLUR_CHECK_FLOW = r"""
+const src = require("fs").readFileSync(__APP_JS__, "utf8");
+function node(attrs = {}) {
+  return {attrs, hidden: true, textContent: "", value: "", required: true, valid: false, listeners: {},
+    getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
+    setAttribute(k, v) { this.attrs[k] = String(v); }, removeAttribute(k) { delete this.attrs[k]; },
+    addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); },
+    fire(type) { (this.listeners[type] || []).forEach(fn => fn({type, target: this})); },
+    checkValidity() { return this.valid; }};
+}
+const box = node(), text = node();
+const field = {querySelector: sel => sel === "[data-ff-error]" ? box : sel === "[data-ff-error-text]" ? text : null};
+const input = Object.assign(node({"data-error": "請輸入 8 位數字。"}), {closest: () => field, validity: {badInput: false}});
+const doc = {addEventListener() {}, querySelector: () => null, getElementById: () => null,
+             documentElement: {setAttribute() {}, getAttribute() { return null; }},
+             querySelectorAll: sel => sel === ".ff__input[data-error]" ? [input] : []};
+new Function("window", "document", src)({addEventListener() {}, localStorage: {getItem: () => null}}, doc);
+const state = () => ({shown: !box.hidden, text: text.textContent, invalid: input.getAttribute("aria-invalid")});
+const seen = [];
+input.value = "123"; input.fire("input"); seen.push(state());          // 邊打字不報錯
+input.fire("blur"); seen.push(state());                                // 離開欄位才檢查
+input.value = "12345678"; input.valid = true; input.fire("input"); seen.push(state());   // 改對了馬上收掉
+input.required = false; input.value = ""; input.valid = false; input.validity.badInput = true;   // 選填的日期只填一半
+input.fire("blur"); seen.push(state());
+console.log(JSON.stringify(seen));
+"""
+
+
+@pytest.mark.skipif(_NODE is None, reason="沒有 node,略過前端流程測試")
+def test_fields_are_checked_when_leaving_not_while_typing():
+    """表單規範第 11 點:邊打字不報錯;離開欄位才檢查,不對就在框的正下方寫怎麼改;改對了馬上收掉。"""
+    script = _BLUR_CHECK_FLOW.replace("__APP_JS__", json.dumps(str(STATIC_DIR / "app.js")))
+    out = subprocess.run([_NODE, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
+    assert json.loads(out.stdout) == [
+        {"shown": False, "text": "", "invalid": None},
+        {"shown": True, "text": "請輸入 8 位數字。", "invalid": "true"},
+        {"shown": False, "text": "請輸入 8 位數字。", "invalid": None},
+        {"shown": True, "text": "日期沒有填完整，請把年、月、日都填好。", "invalid": "true"},   # 選填的也要說,不然原值會被清掉
+    ]
+
+
+# 用假的 DOM 跑 app.js 的「說明」小框(<details class="note">);真的瀏覽器的樣子與動畫另外用 CDP 截圖自評。
+# 畫面寬 375;b 的小框排出來是 200–460,超出右邊
+_NOTE_POPUP_FLOW = r"""
+const src = require("fs").readFileSync(__APP_JS__, "utf8");
+const later = [];
+function el(name) {
+  return {name, attrs: {}, open: false, focused: 0, listeners: {}, rect: {left: 0, right: 0},
+    style: {props: {}, setProperty(k, v) { this.props[k] = v; }},
+    hasAttribute(k) { return k in this.attrs; },
+    setAttribute(k, v) { this.attrs[k] = String(v); },
+    removeAttribute(k) { delete this.attrs[k]; },
+    addEventListener(type, fn) { (this.listeners[type] = this.listeners[type] || []).push(fn); },
+    getBoundingClientRect() { return this.rect; },
+    focus() { this.focused += 1; },
+    fire(type) {
+      const ev = {type, target: this, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }};
+      (this.listeners[type] || []).slice().forEach(fn => fn(ev));
+      return ev;
+    }};
+}
+function note(name, left, right) {   // 圖示在畫面最左邊;小框排版的位置是 left–right(淡入縮放不算)
+  const n = el(name), summary = el(name + "-summary"), body = el(name + "-body");
+  Object.assign(body, {offsetLeft: left, offsetWidth: right - left, rect: {left: left + 6, right: right - 6}});
+  n.querySelector = sel => ({summary, ".note__body": body})[sel] || null;
+  n.contains = t => t === n || t === summary || t === body;
+  return {n, summary, body};
+}
+const a = note("a", 100, 300), b = note("b", 200, 460), outside = el("outside");
+const heard = {};
+const doc = {activeElement: null, querySelector: () => null,
+             documentElement: {clientWidth: 375, setAttribute() {}, getAttribute() { return null; }},
+             addEventListener(type, fn) { (heard[type] = heard[type] || []).push(fn); },
+             querySelectorAll: sel => sel === "details.note" ? [a.n, b.n] : []};
+const page = (type, extra) => (heard[type] || []).forEach(fn => fn(Object.assign({type}, extra)));
+const win = {setTimeout(fn) { later.push(fn); }, addEventListener() {}, HTMLFormElement: {prototype: {}}};
+new Function("window", "document", "HTMLFormElement", src)(win, doc, win.HTMLFormElement);
+const flush = () => { while (later.length) later.shift()(); };
+const state = () => ({a: a.n.open, aClosing: a.n.hasAttribute("data-closing"),
+                      b: b.n.open, bClosing: b.n.hasAttribute("data-closing")});
+const out = {};
+{ // 按 a 的圖示:由 app.js 打開(擋掉瀏覽器自己的開關),放得下就不挪
+  const ev = a.summary.fire("click"); page("click", {target: a.summary});
+  out.open = [ev.defaultPrevented, state(), a.body.style.props["--note-shift"]];
+}
+{ // 再按 b:一次只開一個,a 淡出後才真的關;b 的小框往左挪到離畫面右邊 16px
+  b.summary.fire("click"); page("click", {target: b.summary});
+  const mid = state(); a.body.fire("animationend"); flush();
+  out.switch = [mid, state(), b.body.style.props["--note-shift"]];
+}
+{ // 點小框裡面(選字、按裡面的連結)不收;點外面、焦點移到外面都收起
+  page("click", {target: b.body}); const inside = state();
+  page("click", {target: outside}); const closing = state(); flush();
+  a.summary.fire("click"); page("focusin", {target: outside}); const left = state(); flush();
+  out.dismiss = [inside, closing, left, state()];
+}
+{ // Esc:收起,焦點回到圖示
+  a.summary.fire("click"); page("keydown", {key: "Escape"}); flush();
+  out.esc = [state(), a.summary.focused];
+}
+{ // 打開時再按一次圖示也是收起,一樣淡出
+  b.summary.fire("click"); const ev = b.summary.fire("click"); const mid = state(); flush();
+  out.again = [ev.defaultPrevented, mid, state()];
+}
+console.log(JSON.stringify(out));
+"""
+
+
+@pytest.mark.skipif(_NODE is None, reason="沒有 node,略過前端流程測試")
+def test_note_popup_opens_one_at_a_time_and_closes_softly():
+    """「說明」的小框(使用者 11/5:用彈出視窗呈現、加一點過渡動畫):一次只開一個;點外面、焦點離開、Esc、再按一次圖示
+    都會收起,收起前先淡出(data-closing);超出畫面右邊時往左挪(--note-shift),不會撐出橫向捲軸。"""
+    script = _NOTE_POPUP_FLOW.replace("__APP_JS__", json.dumps(str(STATIC_DIR / "app.js")))
+    out = subprocess.run([_NODE, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
+    r = json.loads(out.stdout)
+    closed = {"a": False, "aClosing": False, "b": False, "bClosing": False}
+    assert r["open"] == [True, dict(closed, a=True), "0px"]
+    assert r["switch"] == [dict(closed, a=True, aClosing=True, b=True), dict(closed, b=True), "-101px"]
+    assert r["dismiss"] == [dict(closed, b=True), dict(closed, b=True, bClosing=True),
+                            dict(closed, a=True, aClosing=True), closed]
+    assert r["esc"] == [closed, 1]
+    assert r["again"] == [True, dict(closed, b=True, bClosing=True), closed]

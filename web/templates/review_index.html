@@ -4,14 +4,12 @@
 <header class="page-head">
   <div class="page-head__text">
     <h1>待複核（{{ items|length }}）</h1>
-    <p class="lede">核對不符、缺少必要欄位或讀值沒把握的文件會放在這裡。{% if permissions is not defined or permissions.can_correct %}點進去對照原件更正讀值，存檔後會重新核對。{% else %}點進去可查看內容與原件，讀錯的地方請家人協助更正。{% endif %}</p>
   </div>
 </header>
 {% if not items %}
 <p class="empty">目前沒有待複核的文件。</p>
 {% else %}
 <div class="tbl tbl--review">
-  <div class="tbl__row tbl__row--head" aria-hidden="true"><span></span><span>文件與原因</span><span>驗證信心</span><span></span></div>
   <ul class="tbl__list">
     {% for it in items %}
     <li><a class="tbl__row" href="{{ it.href if permissions is not defined or permissions.can_correct else (it.doc_href or it.href|replace('/correct', '')) }}">
@@ -22,8 +20,8 @@
         <span class="tbl__sub">{{ it.reason }}</span>
         <span class="tbl__sub">{{ it.when }} 上傳</span>
       </span>
-      {# 顯示依核對結果算的驗證信心,不把 AI 自評當成可信度(原則 1) #}
-      <span class="tbl__meta"><span class="tbl__when">{% if it.confidence is not none %}<span class="tbl__cell-label">驗證信心 </span><span class="conf {{ conf_class(it.confidence) }}">{{ fmt_pct(it.confidence) }}</span>{% else %}沒有可核對的項目{% endif %}</span></span>
+      {# 顯示依核對結果算的驗證信心,不把 AI 自評當成可信度(原則 1)。v5:列尾一塊一樣寬的狀態牌(render.review_row 的 tile) #}
+      <span class="tbl__meta"><span class="tile tile--{{ it.tile }}">{% if it.confidence is not none %}驗證信心 {{ fmt_pct(it.confidence) }}{% else %}沒有可核對的項目{% endif %}</span></span>
       {{ icon("chevron-right", "tbl__chev") }}
     </a></li>
     {% endfor %}

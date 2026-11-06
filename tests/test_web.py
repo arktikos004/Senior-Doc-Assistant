@@ -84,12 +84,12 @@ def test_status_message_is_whitelisted(client, flash_text):
 
 def test_redirect_messages_come_from_the_whitelist():
     """轉址帶的訊息都在白名單內(不在的話頁面不會顯示);新增訊息忘了登記,轉址時就直接失敗。"""
-    used = {web_app.MSG_CORRECTED, web_app.MSG_REJECTED, web_app.MSG_CATEGORY} | {
+    used = {web_app.MSG_CORRECTED, web_app.MSG_REJECTED, web_app.MSG_CATEGORY, web_app.MSG_NO_CHANGE} | {
         msg for _, msg in (*web_app._CONFIRM_DECISIONS.values(), *web_app._REMINDER_DECISIONS.values())} | {
         web_app.MSG_SETTINGS_SAVED, web_app.MSG_SETTINGS_UNCHANGED, web_app.MSG_PURGED, web_app.MSG_PURGED_PARTLY,
         web_app.MSG_UPLOAD_CANCELLED, web_app.MSG_DOC_DELETED,
         web_app.MSG_REMINDER_DONE, web_app.MSG_REMINDER_UNDONE,
-        web_app.MSG_LOTTERY_SAVED, web_app.MSG_LOTTERY_REMINDED, web_app.MSG_LOTTERY_ALREADY}
+        web_app.MSG_LOTTERY_SAVED, web_app.MSG_LOTTERY_REMINDED, web_app.MSG_LOTTERY_ALREADY, web_app.MSG_SEEN}
     assert used == web_app._MESSAGES
     r = web_app._redirect_with_msg("/review", web_app.MSG_REJECTED)
     assert r.status_code == 303 and r.headers["location"] == "/review?msg=%E5%B7%B2%E9%80%80%E5%9B%9E"
@@ -100,6 +100,5 @@ def test_redirect_messages_come_from_the_whitelist():
 
 
 def test_review_list_does_not_blame_ai(client):
-    """轉人工是程式依固定規則決定的(使用者 10/2 決定):待複核頁的說明不寫成「AI 沒把握」。"""
-    html = client.get("/review").text
-    assert "核對不符、缺少必要欄位或讀值沒把握" in html and "AI 沒把握" not in html
+    """轉人工是程式依固定規則決定的(使用者 10/2 決定):待複核頁不寫成「AI 沒把握」。"""
+    assert "AI 沒把握" not in client.get("/review").text

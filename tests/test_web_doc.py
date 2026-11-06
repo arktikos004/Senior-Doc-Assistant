@@ -54,7 +54,7 @@ def test_result_page_shows_summary_fields_and_speak_button(client, add_doc):
     assert "1,854 元" in html
     assert "2099年10月15日" in html                  # 繳費期限用長輩看得懂的寫法
     assert "繳費期限" in html and "示範電力公司" in html
-    assert "data-speak" in html and "唸給我聽" in html
+    assert "data-speak" in html and "聽重點" in html and "唸給我聽" not in html
     assert "data-speak-unsupported" in html          # 瀏覽器不支援時的說明
     assert "不提供醫療建議" not in html
 
@@ -425,11 +425,10 @@ def test_reminder_stays_on_the_web_without_calendar_file(client, store, add_doc)
     assert client.get(f"/doc/{doc_id}/action/{aid}.ics").status_code == 404
     page, home = client.get(f"/doc/{doc_id}").text, client.get("/").text
     for html in (page, home):
-        assert "已列入提醒" in html
         assert "行事曆" not in html and f"/action/{aid}.ics" not in html   # 不宣稱、也不提供加入行事曆
-    assert "到期前會列在首頁「要記得的事」" in page
+    assert "已列入提醒" in page
     assert "提前 3 天提醒" not in page                                    # 沒有東西會提前通知,就不寫
-    assert "繳電費" in home and "10月15日前" in home
+    assert "繳電費" in home and "10/15 前" in home
 
 
 def test_w1c_calendar_description_lines_are_separate(client, store, add_doc):

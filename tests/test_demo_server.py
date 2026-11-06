@@ -47,6 +47,7 @@ def test_seeded_demo_lists_the_bill_and_the_letter_on_todays_home_page(demo):
 
     from web.app import create_app
     html = TestClient(create_app(cfg, analyzer=analyzer)).get("/").text
-    month, day = date_parts(make_demo_docs.demo_dates(today)["bill_due"].isoformat())
-    assert f"範例電力公司，{month}{day}日前" in html
-    assert "範例市稅務局，" in html
+    section = html[html.index('id="remind-title"'):html.index('id="recent-title"')]
+    due = make_demo_docs.demo_dates(today)["bill_due"]
+    assert "範例電力公司" in section and f"{due.month}/{due.day} 前" in section
+    assert "範例市稅務局" in section

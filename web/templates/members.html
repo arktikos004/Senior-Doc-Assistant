@@ -1,39 +1,64 @@
 {% extends "base.html" %}
+{% from "_field.html" import ff, ff_described %}
 {% block title %}家庭成員 - {{ BRAND_FULL }}{% endblock %}
+{# 角色只有兩個選項,單選平鋪(表單規範第 10 點)。一位成員一張表單,radio 只在同一張表單裡互斥 #}
+{% macro role_choice(role, error="", error_id="") %}
+<fieldset class="kinds"{% if error %} aria-describedby="{{ error_id }}"{% endif %}>
+  <legend>角色</legend>
+  <div class="chips">
+    <label class="chip"><input class="chip__input" type="radio" name="role" value="family"{% if role != "elder" %} checked{% if error %} autofocus{% endif %}{% endif %}><span>家人</span></label>
+    <label class="chip"><input class="chip__input" type="radio" name="role" value="elder"{% if role == "elder" %} checked{% if error %} autofocus{% endif %}{% endif %}><span>長輩</span></label>
+  </div>
+  {% if error %}<p class="ff__error" id="{{ error_id }}" role="alert">{{ icon("alert") }}<span>{{ error }}</span></p>{% endif %}
+</fieldset>
+{% endmacro %}
 {% block content %}
 <nav class="crumbs" aria-label="位置"><a href="/settings">設定</a><span aria-hidden="true">/</span><span>家庭成員</span></nav>
-<header class="page-head"><div class="page-head__text"><h1>家庭成員</h1><p class="lede">分清楚誰來把關，也保留長輩的決定權。</p></div></header>
+<header class="page-head"><div class="page-head__text"><h1>家庭成員</h1></div></header>
 {% if saved %}<p class="msg" role="status">{{ icon("check") }}家庭成員已更新。</p>{% endif %}
-{% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
-<section class="panel set-card"><h2>誰可以做什麼</h2>
-  <ul class="plain-list"><li><b>家人</b>：確認服藥表、更正讀值、管理成員與資料。</li>
-  <li><b>長輩</b>：上傳、查看、退回事項，取消或恢復提醒。</li>
-  <li><b>名單外的登入者</b>：只能查看。這台電腦直接開啟時可管理家庭成員。</li></ul>
-  <p class="field-hint">請填入每位成員登入時使用的電子郵件。至少保留一位家人。</p>
-</section>
 <section class="section" aria-labelledby="member-list-title"><div class="section__head"><h2 id="member-list-title">目前的成員</h2><span class="muted">{{ members|length }} 位</span></div>
 {% for member in members %}
+{# 這位成員的表單沒過:說明寫在那一欄正下方,焦點也移過去,不必自己往下找(members_page) #}
+{% set mine = error if error_email == member.email else "" %}
+{% set name_id = "name-" ~ loop.index %}
+{# 名字和電子郵件排在一起;成員之間一條細線。「儲存變更」「移除成員」一樣寬、置中,移除和儲存隔開一段距離 #}
 <article class="panel set-card member-card">
-  <h3>{{ member.display_name or member.email }}</h3><p class="member-email">{{ member.email }}</p>
-  <form method="post" action="/settings/members" class="member-form">
+  <div class="member-card__head"><h3>{{ member.display_name or member.email }}</h3><p class="member-email">{{ member.email }}</p></div>
+  <form method="post" action="/settings/members" class="family-form" novalidate>
     {{ csrf_input() }}<input type="hidden" name="email" value="{{ member.email }}">
-    <label for="name-{{ loop.index }}">稱呼<input id="name-{{ loop.index }}" name="display_name" maxlength="40" value="{{ member.display_name or '' }}"></label>
-    <label for="role-{{ loop.index }}">角色<select id="role-{{ loop.index }}" name="role"><option value="family"{% if member.role == "family" %} selected{% endif %}>家人</option><option value="elder"{% if member.role == "elder" %} selected{% endif %}>長輩</option></select></label>
-    <button class="btn btn--primary" type="submit">儲存變更<span class="visually-hidden">：{{ member.email }}</span></button>
+    {% set name_error = mine if error_field == "display_name" else "" %}
+    {% call ff(name_id, "稱呼", optional=true, error=name_error) %}
+    <input class="text-input ff__input" id="{{ name_id }}" name="display_name" maxlength="40" placeholder=" " value="{{ member.display_name or '' }}"
+           aria-describedby="{{ ff_described(name_id) }}"{% if name_error %} aria-invalid="true" autofocus{% endif %}>
+    {% endcall %}
+    {{ role_choice(member.role, mine if error_field != "display_name" else "", "role-error-" ~ loop.index) }}
+    {# 一頁一個主要按鈕(使用者 11/4):主要的是下面的「加入成員」,每位成員的「儲存變更」用次要按鈕 #}
+    <button class="btn btn--secondary" type="submit">儲存變更<span class="visually-hidden">：{{ member.email }}</span></button>
   </form>
   <form method="post" action="/settings/members/remove" class="member-remove">
     {{ csrf_input() }}<input type="hidden" name="email" value="{{ member.email }}">
-    <button class="btn btn--secondary" type="submit" data-confirm-title="確定移除這位成員嗎？" data-confirm="移除後，這位成員只能查看，不能更正或確認。" data-confirm-ok="確定移除" data-confirm-field="confirmed">移除成員<span class="visually-hidden">：{{ member.email }}</span></button>
+    <button class="btn btn--danger" type="submit" data-confirm-title="確定移除這位成員嗎？" data-confirm="移除後，這位成員只能查看，不能更正或確認。" data-confirm-ok="確定移除" data-confirm-field="confirmed">移除成員<span class="visually-hidden">：{{ member.email }}</span></button>
   </form>
 </article>
 {% else %}<p class="empty">還沒有家庭成員。先加入一位家人，再加入長輩。</p>{% endfor %}
 </section>
-<section class="panel set-card" aria-labelledby="add-member-title"><h2 id="add-member-title">加入家庭成員</h2>
-<form method="post" action="/settings/members" class="member-form">
+<section class="section panel set-card" aria-labelledby="add-member-title"><h2 id="add-member-title">加入家庭成員</h2>
+{# 大部分必填,只在「稱呼」標選填(表單規範)。伺服器照樣再檢查一次;沒過就寫在那一欄正下方,留住剛填的字 #}
+{% set new_error = error if error and not error_email else "" %}
+{% set email_error = new_error if error_field == "email" else "" %}
+{% set new_name_error = new_error if error_field == "display_name" else "" %}
+<form method="post" action="/settings/members" class="family-form" novalidate>
 {{ csrf_input() }}
-<label for="member-email">登入電子郵件<input id="member-email" name="email" type="email" maxlength="254" required autocomplete="off" value="{{ values.email or '' }}"></label>
-<label for="member-name">稱呼（選填）<input id="member-name" name="display_name" maxlength="40" value="{{ values.display_name or '' }}"></label>
-<label for="member-role">角色<select id="member-role" name="role"><option value="family"{% if values.role != "elder" %} selected{% endif %}>家人</option><option value="elder"{% if values.role == "elder" %} selected{% endif %}>長輩</option></select></label>
+{% call ff("member-email", "登入電子郵件", error=email_error) %}
+<input class="text-input ff__input" id="member-email" name="email" type="email" maxlength="254" required autocomplete="off" autocapitalize="off"
+       spellcheck="false" placeholder=" " value="{{ values.email or '' }}" data-error="{{ email_rule }}"
+       aria-describedby="{{ ff_described('member-email') }}"{% if email_error %} aria-invalid="true" autofocus{% endif %}>
+{% endcall %}
+{% call ff("member-name", "稱呼", optional=true, error=new_name_error) %}
+<input class="text-input ff__input" id="member-name" name="display_name" maxlength="40" placeholder=" " value="{{ values.display_name or '' }}"
+       aria-describedby="{{ ff_described('member-name') }}"{% if new_name_error %} aria-invalid="true" autofocus{% endif %}>
+{% endcall %}
+{{ role_choice(values.role, new_error if error_field == "role" else "", "member-role-error") }}
 <button class="btn btn--primary" type="submit">加入成員</button>
 </form></section>
 {% endblock %}

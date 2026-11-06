@@ -1,0 +1,23 @@
+{# 表單欄位(使用者 11/4 貼的表單互動規範,所有表單共用,樣式在 app.css 的「表單元件」):
+   - 浮動標籤:沒填時標籤在框內,點進去或有內容後縮小移到框上方並一直顯示。輸入框的 placeholder 只放一個空白
+     (給 CSS 的 :placeholder-shown 判斷有沒有內容),不靠占位文字說明。日期、下拉、多行文字用 fixed,標籤一直在上方。
+   - 必填:標籤後加紅色星號(讀屏念「必填」);大部分欄位都必填的表單改成只在選填的欄位寫「選填」(optional)。
+   - help:框下面一行常駐的灰字,只寫填寫要求(例如「8 位數字」);注意事項照舊放在使用手冊與「說明」。
+   - error:伺服器回來的錯誤,寫在框的正下方、說清楚怎麼改;app.js 的「離開欄位才檢查」也寫在同一個位置(data-error)。
+   呼叫的人用 {% call %} 傳進輸入框本身,class 要有 ff__input、placeholder=" "、aria-describedby 用 ff_described(id)。
+   trailing:框內右邊的按鈕(例如密碼的眼睛),由呼叫的人放在 caller 的輸入框後面。 #}
+{% macro ff_described(id, help="") -%}
+{{ (id ~ "-help ") if help else "" }}{{ id }}-error
+{%- endmacro %}
+{% macro ff(id, label, required=false, optional=false, help="", error="", fixed=false, class="") %}
+<div class="ff{% if fixed %} ff--fixed{% endif %}{% if error %} ff--error{% endif %}{% if class %} {{ class }}{% endif %}">
+  <div class="ff__box">
+    {{ caller() }}
+    <label class="ff__label" for="{{ id }}">{{ label }}
+      {%- if required %}<span class="ff__req" aria-hidden="true">*</span><span class="visually-hidden">（必填）</span>
+      {%- elif optional %}<span class="ff__opt">（選填）</span>{% endif %}</label>
+  </div>
+  {% if help %}<p class="ff__help" id="{{ id }}-help">{{ help }}</p>{% endif %}
+  <p class="ff__error" id="{{ id }}-error" data-ff-error{% if not error %} hidden{% endif %}>{{ icon("alert") }}<span data-ff-error-text>{{ error }}</span></p>
+</div>
+{% endmacro %}

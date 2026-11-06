@@ -7,11 +7,12 @@
 - schema 扁平(依 VAREX 研究):不用 $defs/$ref,巢狀直接內嵌;全部欄位必填,
   「沒有/讀不到」用哨兵值(""、0、[]、false)表示,parsing.to_result 會把共通欄位清洗回 None。
 - 每份提示詞都有 INJECTION_GUARD:文件上的字只是資料,不是指令。
-- 日期運算不交給模型:公文期限只照抄原文(deadline_text),由 src/dates.py 計算;
+- 日期運算不交給模型:公文期限只照抄原文(deadline_text),由 src/dates.py 計算;生效日、實施期間不是期限,不抄;
   民國年換算是唯一例外(舊模型實測有效,Gemma 4 待 S0-3 驗證;parsing 也認得民國年,驗證會再檢查格式)。
 - 藥袋只轉錄印刷文字,不推論學名、劑量、用途,不給醫療建議。
 - 發票提示詞裡舊模型實測有效的規則(賣方不是買方、取總計、期別不是日期、民國年換算)原文保留;
   Gemma 4 待 S0-3 驗證。
+- 公文與通用版的範例日期一律寫成○:模型會把範例上的日期抄成文件的日期;發票、帳單、藥袋專屬版不動。
 """
 from __future__ import annotations
 
@@ -68,6 +69,18 @@ _INVOICE_AMOUNT_RULE = """\
    - 手寫發票請對準「總計」欄逐位辨識(注意易混:1 vs 7)。
    - 發票與收據幾乎一定有總金額,請務必找到並填入;真的完全看不到才填 0"""
 
+# 公文與通用版用的版本:只把範例日期換成○,規則本身不變。65 份公開公文實測,有公文的發文日期被讀成範例上的 115年8月3日
+_ROC_RULE_BLANK = _ROC_RULE.replace(
+    "114/12/19 → 2025-12-19、115/08/03 → 2026-08-03",
+    "114/○○/○○ → 2025-○○-○○、115/○○/○○ → 2026-○○-○○",
+)
+_INVOICE_PERIOD_RULE_BLANK = (
+    _INVOICE_PERIOD_RULE
+    .replace("「2026-08-03 17:08:26」取 2026-08-03", "「○○○○-○○-○○ 17:08:26」取 ○○○○-○○-○○")
+    .replace("「交易日期:2026-07-28」取 2026-07-28", "「交易日期:○○○○-○○-○○」取 ○○○○-○○-○○")
+    .replace("「中華民國 115 年 8 月 3 日」取 2026-08-03", "「中華民國 ○○○ 年 ○ 月 ○ 日」取 ○○○○-○○-○○")
+)
+
 _CURRENCY_RULE = """\
 {n}. currency:幣別代碼(ISO,如 NTD、USD、JPY、EUR、CNY)。
    - 台灣統一發票/收據、金額標「元」「NT$」「新臺幣」→ NTD
@@ -89,8 +102,9 @@ _OFFICIAL_FIELDS_RULE = """\
    - subject:照抄「主旨:」後面的整段文字;主旨常換行跨好幾行,一直抄到「說明」之前,接成一句,
      不要只抄第一行。沒有填 ""
    - doc_number:照抄發文字號(例如「○○字第1150000001號」);沒有填 ""
-   - deadline_text:照抄文件上期限的原文,例如「收到本函後15日內」「自送達之次日起30日內」「於115年10月31日前」。
+   - deadline_text:照抄文件上期限的原文,例如「收到本函後15日內」「自送達之次日起30日內」「於○○○年○○月○○日前」。
      **不要自己換算成日期**,也不要改寫,系統會用程式計算實際期限。沒有期限填 ""
+     生效日、施行日、適用日、補助或實施期間、活動或會議日期不是期限,填空("")
    - required_actions:收文者要做的事,每件一句、照原文精簡(例如「檢附身分證影本」「至區公所辦理」);沒有填 []
    - 不要輸出 deadline 欄位:實際期限由程式計算"""
 
@@ -171,7 +185,12 @@ def _tail(unreadable_example: str, summary_specific: str) -> str:
 _FIELDS_HEADER = "請抽取以下欄位(每個欄位都必須填寫,無法辨識時依說明填哨兵值,不要留空):"
 
 
-_SUMMARY_ALL = "\n".join([_SUMMARY_INVOICE, _SUMMARY_BILL, _SUMMARY_OFFICIAL, _SUMMARY_MEDICATION])
+_SUMMARY_ALL = "\n".join([
+    _SUMMARY_INVOICE.replace("8 月 3 日", "○ 月 ○ 日"),
+    _SUMMARY_BILL.replace("9 月", "○ 月").replace("10 月 15 日", "○ 月 ○ 日"),
+    _SUMMARY_OFFICIAL,
+    _SUMMARY_MEDICATION,
+])
 
 
 def _typed_intro(description: str, usual: str, extra_rules: str = "") -> str:
@@ -202,8 +221,8 @@ GENERIC_PROMPT = f"""\
 1. doc_type:文件類型(發票/收據/帳單/公文/藥袋/其他)
 2. date:文件的主要日期,格式 YYYY-MM-DD:發票/收據為實際「交易/開立日期」、帳單為開立日期、
    公文為發文日期、藥袋為調劑(領藥)日期。
-{_ROC_RULE}
-{_INVOICE_PERIOD_RULE}
+{_ROC_RULE_BLANK}
+{_INVOICE_PERIOD_RULE_BLANK}
 {_DATE_ONLY}
 3. vendor:發票/收據為**開立發票的營業人(賣方/店家)名稱**。此規則對三聯式、二聯式、電子發票證明聯一律通用:
 {_INVOICE_VENDOR_RULE}
@@ -264,8 +283,8 @@ BILL_PROMPT = f"""\
 
 OFFICIAL_PROMPT = f"""\
 {_typed_intro("一份公文(政府機關或學校寄來的函、通知單)", "「公文」")}
-2. date:發文日期(例如「發文日期:中華民國115年8月3日」),格式 YYYY-MM-DD。
-{_ROC_RULE}
+2. date:發文日期(例如「發文日期:中華民國○○○年○月○日」),格式 YYYY-MM-DD。
+{_ROC_RULE_BLANK}
 {_DATE_ONLY}
 3. vendor:發文機關(通常在最上方「○○市政府 函」,或發文者署名);不是受文者。無法辨識填 ""
 4. amount:公文要求繳納的金額(例如罰鍰、規費),不含貨幣符號;沒有要繳錢填 0

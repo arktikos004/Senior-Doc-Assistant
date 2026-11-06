@@ -16,7 +16,8 @@ COMMON_FIELDS: tuple[str, ...] = ("doc_type", "date", "vendor", "amount", "curre
 #   發票:seller_tax_id 賣方統編、buyer_tax_id 買方統編、random_code 隨機碼、period 期別原文
 #   帳單:due_date 繳費期限 YYYY-MM-DD、bill_kind 電費/水費/瓦斯/電信/其他
 #   公文:subject 主旨、doc_number 發文字號、deadline_text 期限原文(例「收到本函後15日內」)、
-#         deadline 由程式計算的 YYYY-MM-DD(模型不填)、required_actions 應辦事項(字串清單)
+#         deadline 由程式計算的 YYYY-MM-DD(模型不填)、deadline_basis 怎麼起算的那句話(程式寫,模型不填)、
+#         received_date 收到日期(家人在更正頁填,模型不填)、required_actions 應辦事項(字串清單)
 #   藥袋:items 藥品清單,每項 {name, dose_text, frequency_text, timing, prn, days};
 #         timing 為「早/中/晚/睡前」清單,prn 表示「需要時」服用;pharmacist_phone 藥師電話
 # 共通欄位對應:公文的 vendor 為發文機關、date 為發文日期;藥袋的 vendor 為醫療院所、date 為調劑日期。
@@ -74,8 +75,8 @@ ROLE_LABELS: dict[str, str] = {"elder": "長輩", "family": "家人"}
 AUDIT_EVENTS: dict[str, str] = {
     "confirm": "確認", "reject": "退回", "cancel_reminder": "取消提醒", "restore_reminder": "恢復提醒",
     "correct": "更正讀值", "reject_document": "退回文件", "category": "調整文件分類",
-    "complete_reminder": "記下已繳／已辦好", "undo_complete": "改回還沒繳／還沒辦",
-    "retry_read": "重新辨識", "lottery_reminder": "加進領獎提醒",
+    "complete_reminder": "標示已繳費／已辦理", "undo_complete": "改回未繳／未辦",
+    "retry_read": "重新辨識", "lottery_reminder": "加進領獎提醒", "retype": "更正文件類型", "seen_reject": "收起退回通知",
 }
 
 

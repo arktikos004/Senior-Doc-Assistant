@@ -1,0 +1,6 @@
+{# 標題旁的「說明」:畫面上只留標題,真的重要的事按了才看得到(使用者 11/4);其他都在使用手冊。
+   按鈕是 ⓘ 圖示(使用者 11/5),「說明」兩個字只給讀屏念;前面沒有標題可以接的(PDF 密碼頁、更正頁藥品那一格)傳 label,
+   圖示旁照樣寫字,才不會只剩一個圖示。<details> 沒有 JS 也能開,讀屏會報可以展開。要放連結就用 {% call note() %}…{% endcall %} #}
+{% macro note(text="", label="") %}
+<details class="note"><summary>{{ icon("info", "note__icon") }}{% if label %}<span class="note__label">{{ label }}</span>{% else %}<span class="visually-hidden">說明</span>{% endif %}</summary><div class="note__body">{{ text }}{% if caller %}{{ caller() }}{% endif %}</div></details>
+{% endmacro %}

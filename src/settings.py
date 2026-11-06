@@ -4,7 +4,7 @@
 - 辨識模式(provider):ollama「只用這台電腦」/ workers_ai「可以用雲端備援」。
 - 自動存檔門檻(auto_threshold):驗證信心達到才自動存檔。
 安全底線寫死在這裡,設定改不掉:門檻只能在 0.80–0.98(不能比預設鬆);雲端備援要這台電腦設好帳號與
-金鑰的環境變數才能開;展示模式(mock)不換辨識模式;藥袋一律只在本機辨識。存的值每次讀出來都重新
+金鑰的環境變數才能開;展示模式(mock)不換辨識模式;藥袋與收據一律只在本機辨識。存的值每次讀出來都重新
 驗證(effective_config),被直接改資料庫的不合規則值不會生效;config.yaml 把門檻寫得比 0.80 低也不生效
 (以 0.80 計)。每次改動都由 Store.set_setting 留紀錄。
 """
@@ -33,7 +33,8 @@ PURGED = "purged"                # 不是設定:「刪除全部資料」的時�
 PROVIDER_CHOICES = ("ollama", "workers_ai")   # 設定頁能選的辨識模式(mock 只能由 config.yaml 指定)
 THRESHOLD_MIN, THRESHOLD_MAX = 0.80, 0.98     # 門檻只能調得更嚴:不能低於預設的 0.80
 THRESHOLD_CHOICES = (0.80, 0.85, 0.90, 0.95)  # 設定頁的選項
-ALWAYS_LOCAL = "藥袋"                          # 特種個資:不論設定,一律只在本機辨識
+# 不論設定,一律只在本機辨識:藥袋是特種個資;收據可能是醫療收據,上傳前分不出來(使用者 11/4)
+ALWAYS_LOCAL: tuple[str, ...] = ("藥袋", "收據")
 
 MSG_DEMO = "展示模式不能切換辨識模式。"
 MSG_PROVIDER = "辨識模式只能選「只用這台電腦」或「可以用雲端備援」。"
@@ -84,7 +85,7 @@ def effective_config(cfg: AppConfig, store: Store) -> AppConfig:
     """目前生效的設定:config.yaml 的值(cfg),再套上設定頁存在 SQLite 的值。回傳新的物件,不改 cfg。
 
     存的值每次都重新驗證,不合規則就沿用 config.yaml:門檻要在 0.80–0.98、雲端備援要有帳號與金鑰、
-    展示模式不換辨識模式。藥袋一律在 local_only_doc_types 裡(config.yaml 漏寫也補上)。
+    展示模式不換辨識模式。藥袋與收據(ALWAYS_LOCAL)一律在 local_only_doc_types 最前面(config.yaml 漏寫也補上)。
     config.yaml 的門檻也守同一條底線:寫得比 0.80 低(或不是數字)就以 0.80 生效;比 0.80 嚴的照它寫的。
     """
     stored = store.get_settings()
@@ -101,9 +102,7 @@ def effective_config(cfg: AppConfig, store: Store) -> AppConfig:
             changes["auto_threshold"] = parse_threshold(stored[THRESHOLD])
         except SettingsError:
             pass   # 不合規則的值(被直接改資料庫)不生效
-    local_only = tuple(cfg.local_only_doc_types)
-    if ALWAYS_LOCAL not in local_only:
-        local_only = (ALWAYS_LOCAL, *local_only)
+    local_only = tuple(dict.fromkeys((*ALWAYS_LOCAL, *cfg.local_only_doc_types)))
     return replace(cfg, local_only_doc_types=local_only, **changes)
 
 

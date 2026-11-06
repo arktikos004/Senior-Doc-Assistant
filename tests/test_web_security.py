@@ -56,7 +56,7 @@ def test_html_pages_have_security_headers_and_are_not_stored(client, url):
     assert r.headers["cache-control"] == "no-store"      # 頁面含個資:瀏覽器與代理都不存
 
 
-@pytest.mark.parametrize("url", ["/static/app.css", "/static/app.js", "/static/icon.svg"])
+@pytest.mark.parametrize("url", ["/static/app.css", "/static/app.js", "/static/favicon-32.png"])
 def test_static_files_have_security_headers_and_stay_cacheable(client, url):
     r = client.get(url)
     assert r.status_code == 200
@@ -194,7 +194,8 @@ def test_every_post_form_on_the_pages_carries_the_token(plain_client, seeded):
     forms = []
     for url in ("/", "/confirm", f"/doc/{ids['review']}/correct", f"/doc/{ids['doc']}"):
         forms += _POST_FORMS.findall(client.get(url).text)
-    assert len(forms) == 8          # 上傳、首頁「繳好了」、家人確認、更正存檔與退回、取消提醒、結果頁退回事項、刪除這份文件
+    # 上傳、首頁「已繳費」、家人確認、更正存檔與退回、結果頁的已繳費與取消提醒、結果頁退回事項、刪除這份文件
+    assert len(forms) == 9
     hidden = f'<input type="hidden" name="{CSRF_FIELD}" value="{client.cookies.get(CSRF_COOKIE)}">'
     assert all(hidden in body for body in forms)
 

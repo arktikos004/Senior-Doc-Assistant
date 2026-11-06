@@ -248,6 +248,19 @@ def test_job_board_times_each_step_and_forgets_old_jobs():
     assert board.get(job.token, "me") is None
 
 
+def test_only_the_step_in_progress_lights_up():
+    """v5:只亮目前走到的那一步(月台黃實心點、深墨框);做完的是深墨的勾,還沒到的是淡框。
+    綠色只留給核對通過,所以「做完了」不用綠;也不用舊的藍。"""
+    from web.render import STATIC_DIR
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    section = css.split("/* ---- 上傳後的進度頁")[1].split("/* ---- 重複上傳的提示")[0]
+    now = re.search(r"\.step--now \.step__dot \{[^}]*\}", section).group(0)
+    assert "background: var(--signal)" in now and "border-color: var(--on-primary)" in now
+    done = re.search(r"\.step--done \.step__dot \{[^}]*\}", section).group(0)
+    assert "border-color: var(--ink)" in done and "background" not in done
+    assert "var(--green)" not in section and "var(--primary)" not in section
+
+
 def test_progress_view_wording():
     base = {"seconds": {"received": 0.31}, "queued": False, "ahead": 0, "elapsed": 1.5}
     v = progress_view(base, token="t", provider="ollama", is_pdf=False, label="", has_photo=True)

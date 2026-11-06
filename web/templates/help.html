@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "_field.html" import ff, ff_described %}
+{% block title %}使用手冊 - {{ BRAND_FULL }}{% endblock %}
+{% block content %}
+{# 說明中心(使用者 11/5,照 Claude 說明中心):最上面搜尋手冊,下面是主題,每個主題一篇,寫一句摘要與幾個小節。
+   「現在的情況」依目前的辨識模式寫(render.trust_notes):資料在哪裡處理、AI 的界線、核對是誰做的,其他頁面不放 #}
+<header class="help-hero">
+  <h1>使用手冊</h1>
+  <p class="help-hero__lead">搜尋答案，或依主題瀏覽</p>
+  <form class="search help-search" method="get" action="/help" role="search">
+    {% call ff("help-q", "搜尋手冊") %}
+    <input class="text-input ff__input" id="help-q" name="q" type="search" value="{{ query }}" maxlength="{{ query_max }}"
+           autocomplete="off" placeholder=" " aria-describedby="{{ ff_described('help-q') }}">
+    {% endcall %}
+    <button class="btn btn--secondary search__btn" type="submit">{{ icon("search") }}<span class="visually-hidden">搜尋</span></button>
+  </form>
+</header>
+
+<section class="help-now" aria-label="現在的情況">
+  {% for ic, text in trust %}<p>{{ text }}</p>{% endfor %}
+</section>
+
+{% if query %}
+<section class="section help-list" aria-labelledby="help-found">
+  <div class="section__head"><h2 id="help-found">搜尋「{{ query }}」</h2><span class="muted">{{ hits|length }} 筆</span></div>
+  {% if hits %}
+  <ul class="help-rows">
+    {% for h in hits %}
+    <li><a class="help-hit" href="{{ h.href }}"><b>{{ h.title }}</b>{% if h.title != h.topic %}<span class="help-row__where">{{ h.topic }}</span>{% endif %}<span class="help-row__text">{{ h.snippet }}</span></a></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="empty">沒有找到。換個字試試，例如「拍照」「提醒」「退回」。</p>
+  {% endif %}
+  <p class="more"><a href="/help">看全部主題</a></p>
+</section>
+{% else %}
+{% if manual.intro %}<div class="help-intro">{{ manual.intro }}</div>{% endif %}
+<nav class="section help-list manual__toc" aria-labelledby="help-topics">
+  <div class="section__head"><h2 id="help-topics">主題</h2><span class="muted">{{ manual.topics|length }} 篇</span></div>
+  <ul class="help-rows">
+    {% for t in manual.topics %}
+    <li><a class="help-topic" href="/help/{{ t.number }}"><span class="help-topic__num" aria-hidden="true">{{ t.number }}</span><span class="help-topic__main"><b>{{ t.title }}</b>{% if t.summary %}<span class="help-row__text">{{ t.summary }}</span>{% endif %}</span></a></li>
+    {% endfor %}
+  </ul>
+</nav>
+{% endif %}
+{% endblock %}

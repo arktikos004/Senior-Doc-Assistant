@@ -1,8 +1,8 @@
 {# 文件清單(首頁「最近看過的文件」與文件櫃共用):rows 是 render.doc_row 的結果,每列連到結果頁。
-   電腦版有欄名列(aria-hidden,只給眼睛看);手機版改成兩行,見 app.css 的 .tbl #}
+   v5(使用者 11/6:「欄位要對齊 統一大小」):每一列都是標題、時間、狀態三欄,上下對齊;標題是深墨加底線的連結,
+   狀態一樣寬,要注意的是實心小牌,沒事的是淡字。電腦版一行、手機版兩行,見 app.css 的 .tbl 與 .tbl--docs #}
 {% macro doc_table(rows) %}
-<div class="tbl">
-  <div class="tbl__row tbl__row--head" aria-hidden="true"><span></span><span>文件</span><span>上傳時間</span><span>狀態</span><span></span></div>
+<div class="tbl tbl--docs">
   <ul class="tbl__list">
     {% for d in rows %}
     <li><a class="tbl__row" href="/doc/{{ d.id }}">

@@ -76,8 +76,8 @@ class AppConfig:
     paths: PathsConfig = field(default_factory=PathsConfig)
     preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
     provider: str = "ollama"          # ollama / workers_ai / mock
-    # 隱私分流:這些類型不論 provider 為何,一律只在本機推論(藥袋屬特種個資)
-    local_only_doc_types: tuple[str, ...] = ("藥袋",)
+    # 隱私分流:這些類型不論 provider 為何,一律只在本機推論(藥袋屬特種個資;收據可能是醫療收據,使用者 11/4)
+    local_only_doc_types: tuple[str, ...] = ("藥袋", "收據")
     auto_threshold: float = 0.80
     group_by_month: bool = True
     filename_template: str = "{date}_{doc_type}_{vendor}_{amount}"

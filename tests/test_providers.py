@@ -412,7 +412,7 @@ def test_routing_flags_cloud_result_that_is_local_only_type(tmp_path, caplog):
     router, _, _ = _routing(cloud_doc_type="藥袋")
 
     with caplog.at_level(logging.WARNING, logger="src.providers.routing"):
-        result = router.analyze(tmp_path / "x.png", doc_type_hint="收據")
+        result = router.analyze(tmp_path / "x.png", doc_type_hint="帳單")      # 收據也一律本機,改用帳單
 
     assert "藥袋" in result.notes and "雲端" in result.notes
     assert any(r.levelno == logging.WARNING and "藥袋" in r.getMessage() for r in caplog.records)

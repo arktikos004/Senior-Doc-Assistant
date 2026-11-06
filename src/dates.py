@@ -3,6 +3,7 @@
 LLM 做日期運算不可靠,所以模型只負責「照抄」期限原文(例如「收到本函後15日內」),
 換算成實際日期一律在這裡用程式算。所有函式都不讀系統時間:基準日(發文日期或
 上傳日期)由呼叫端傳入,測試才能重現。算不出來或結果不合理一律回 None,不猜。
+只寫了從哪天開始、沒寫到哪天截止的原文(生效日、施行日、實施期間)不是期限,也回 None。
 
 期間計算依行政程序法第 48 條(準用民法第 120~122 條):
 - 以日、星期、月定期間者,始日不算入:「收到本函後15日內」= 基準日 + 15 日。
@@ -47,6 +48,11 @@ _PLACEHOLDER_BASE = 0xE000
 # 明示起算日:「自即日起」「自<日期>起」(該日算入);「<日期>之次日起」則不算入
 _EXPLICIT_START_RE = re.compile(r"(?P<ph>[-])\s*(?P<next>之?次日)?\s*(?:起|開始)")
 _TODAY_START_RE = re.compile(r"即日\s*(?:起|開始)")
+
+# 有開始的字、卻沒有截止的字:生效日或實施期間,不是期限(「自115年1月1日起適用」「補助期程115年8月1日至116年7月31日」)。
+# 65 份公開公文實測被當成期限 9 次;真的期限都寫了截止的字(「15日內」「10月31日前」「12月31日止」),不受影響
+_START_WORDS_RE = re.compile(r"起|生效|施行|適用|實施|期程")
+_END_WORDS_RE = re.compile(r"前|止|截止|截至|內|為限")   # 「截至115年12月31日」也是截止
 
 
 def _normalize(text: str) -> str:
@@ -159,32 +165,59 @@ def is_plausible_deadline(deadline: date, base: date) -> bool:
     return base <= deadline <= _add_years(base, MAX_DEADLINE_YEARS)
 
 
-def resolve_deadline(text: str | None, base: date | str | None) -> date | None:
-    """把期限原文換算成日期;失敗或不合理回 None。
-
-    text:模型照抄的期限原文,例「收到本函後15日內」「自送達之次日起30日內」「於115年10月31日前」。
-    base:基準日(發文日期或上傳日期),date 或日期字串,由呼叫端決定,本函式不讀系統時間。
-    """
-    base_date = _as_date(base)
-    if base_date is None or not text or len(str(text)) > MAX_DEADLINE_TEXT:
-        return None
-
-    normalized = _normalize(str(text))
+def _stash_dates(text: str) -> tuple[str, list[date | None]]:
+    """把文字裡寫明的日期換成佔位符,回傳 (換好的文字, 那些日期);寫壞的日期是 None。"""
     found: list[date | None] = []
 
     def _stash(m: re.Match) -> str:
         found.append(_match_to_date(m))
         return chr(_PLACEHOLDER_BASE + len(found) - 1)
 
-    rest = _DATE_RE.sub(_stash, normalized)
+    return _DATE_RE.sub(_stash, _normalize(text)), found
+
+
+def _deadline_parts(text: str | None) -> tuple[str, list[date], re.Match | None] | None:
+    """resolve_deadline 與 deadline_uses_base 共用的前處理:換掉寫明的日期、找相對期限。
+    原文本身就算不出期限時回 None,兩個函式才會一致。"""
+    if not text or len(str(text)) > MAX_DEADLINE_TEXT:
+        return None
+    rest, found = _stash_dates(str(text))
     if any(d is None for d in found):  # 文字裡有寫壞的日期(例 13 月),寧可不算
         return None
-
+    if _START_WORDS_RE.search(rest) and not _END_WORDS_RE.search(rest):  # 生效日、實施期間不是期限
+        return None
     rel = _RELATIVE_RE.search(rest)
+    if rel and not _to_int(rel.group("n")):  # 「0日內」
+        return None
+    return rest, found, rel
+
+
+def deadline_uses_base(text: str | None) -> bool:
+    """這段期限原文要不要靠基準日才算得出來:「收到本函後15日內」「自即日起30日內」要;
+    「於115年10月31日前」「自115年10月1日起30日內」寫明了日期,不要。
+    和 resolve_deadline 走同一道前處理:原文本身算不出期限(例「自115年1月1日起適用」)回 False。"""
+    parts = _deadline_parts(text)
+    if parts is None:
+        return False
+    rest, _, rel = parts
+    return bool(rel) and not _EXPLICIT_START_RE.search(rest[: rel.start()])
+
+
+def resolve_deadline(text: str | None, base: date | str | None) -> date | None:
+    """把期限原文換算成日期;失敗或不合理回 None。
+
+    text:模型照抄的期限原文,例「收到本函後15日內」「自送達之次日起30日內」「於115年10月31日前」。
+    base:基準日(發文日期或上傳日期),date 或日期字串,由呼叫端決定,本函式不讀系統時間。
+    只寫了從哪天開始、沒寫截止的原文(例「自115年1月1日起適用」)不是期限,回 None。
+    """
+    base_date = _as_date(base)
+    parts = _deadline_parts(text)
+    if base_date is None or parts is None:
+        return None
+
+    rest, found, rel = parts
     if rel:
         n = _to_int(rel.group("n"))
-        if not n:
-            return None
         start, start_counts = base_date, False
         explicit = _EXPLICIT_START_RE.search(rest[: rel.start()])
         if explicit:
@@ -192,7 +225,10 @@ def resolve_deadline(text: str | None, base: date | str | None) -> date | None:
             start_counts = explicit.group("next") is None
         elif _TODAY_START_RE.search(rest[: rel.start()]):
             start_counts = True
-        deadline = _period_end(start, n, rel.group("unit"), start_counts)
+        try:
+            deadline = _period_end(start, n, rel.group("unit"), start_counts)
+        except (OverflowError, ValueError):   # 「收到本函後99999999999日內」:算出來超過日曆範圍,寧可不算
+            return None
     elif found:
         deadline = found[-1]  # 「於115年10月31日前」:直接取寫明的日期
     else:

@@ -5,8 +5,9 @@
 # 模型一律使用非中資的開源模型;預設 Google Gemma 4(Apache 2.0)
 model:
   provider: "ollama"               # ollama(本機)/ workers_ai(Cloudflare 雲端)/ mock
-  local_only_doc_types:            # 隱私分流:這些類型永遠只在本機推論,不送雲端
+  local_only_doc_types:            # 隱私分流:這些類型永遠只在本機推論,不送雲端(程式另外一律補上藥袋與收據)
     - 藥袋
+    - 收據                         # 首頁的「發票／收據」;收據可能是醫療收據
 
 ollama:
   host: "http://localhost:11434"   # Ollama 服務位址(需 Ollama >= 0.22 才支援 Gemma 4)

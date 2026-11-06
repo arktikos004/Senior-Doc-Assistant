@@ -12,6 +12,7 @@ from typing import Any, Callable
 from .dates import parse_date
 from .models import COMMON_FIELDS, DOC_TYPES, ExtractionResult
 from .prompts import JSON_ONLY_REMINDER, TYPE_FIELDS
+from .verify.checks import guessed_timing
 
 log = logging.getLogger(__name__)
 
@@ -124,7 +125,30 @@ def _clean_fields(value, doc_type: str) -> dict[str, Any]:
     # 換不了就保留原文,交給核對判「沒通過」,不猜
     if doc_type == "帳單" and fields.get("due_date"):
         fields["due_date"] = clean_date(fields["due_date"]) or fields["due_date"]
+    if doc_type == "藥袋" and isinstance(fields.get("items"), list):
+        fields["items"] = [_drop_guessed_timing(item) for item in fields["items"]]
     return fields
+
+
+def _drop_guessed_timing(item: Any) -> Any:
+    """用法只印次數、沒印時段字(每日三次、TID)時,模型標的時段是推測的,清掉(使用者 11/4):系統只照抄藥袋,
+    不把「一天三次」換算成早、中、晚(Non-Goal 1)。判斷和核對「服藥時段印在藥袋上」同一套(guessed_timing);
+    這種藥在服藥時間表列在「未標時段」,時段請依藥袋或詢問藥師。模型原本的回答還留在 raw。"""
+    if isinstance(item, dict) and item.get("timing") and guessed_timing(item):
+        return {**item, "timing": []}
+    return item
+
+
+def with_doc_type(result: ExtractionResult, doc_type: str) -> ExtractionResult:
+    """家人指定了類型(src/review.py 的 retype_document):不管模型判成什麼都照這個類型,欄位依這個類型重新清洗。
+
+    doc_type 只來自固定清單,模型讀到的文字決定不了類型(原則 3)。要從原始回應重洗:模型判成別的類型時,
+    to_result 已經把這個類型的欄位濾掉了。
+    """
+    raw = result.raw.get("fields") if isinstance(result.raw, dict) else None
+    result.doc_type = doc_type
+    result.fields = _clean_fields(raw if isinstance(raw, dict) else result.fields, doc_type)
+    return result
 
 
 def to_result(raw: dict[str, Any]) -> ExtractionResult:

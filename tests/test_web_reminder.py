@@ -17,19 +17,18 @@ def _raw(tier="auto", status="pending", kind="calendar", action_id=7):
 
 def test_auto_reminder_offers_cancel():
     status = _answer(BILL, _raw())["status"]
-    assert status["text"] == "已列入提醒" and status["sub"] == "到期前會列在首頁「要記得的事」"
+    assert status["text"] == "已列入提醒"
     assert status["toggle"] == {"id": 7, "decision": "cancel", "label": "取消提醒", "icon": "x"}
 
 
 def test_cancelled_reminder_offers_restore():
     status = _answer(BILL, _raw(status="rejected"))["status"]
     assert (status["text"], status["class"]) == ("已取消提醒", "off")
-    assert status["sub"] == "首頁「要記得的事」不會再列出"
     assert status["toggle"]["decision"] == "restore" and status["toggle"]["label"] == "恢復提醒"
 
 
 @pytest.mark.parametrize("raw", [
-    _raw(tier="confirm"),                                   # 等家人確認:到「家人確認」處理
+    _raw(tier="confirm"),                                   # 等家人確認:去確認
     _raw(tier="confirm", status="done"),                    # 家人已確認:不提供取消或恢復
 ])
 def test_reminders_needing_family_have_no_toggle(raw):

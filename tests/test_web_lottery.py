@@ -12,6 +12,7 @@ from conftest import FormClient
 from src.lottery import REMINDER_TITLE
 from src.providers import MockAnalyzer
 from src.verify.einvoice import QR_BUYER_CONSUMER
+from test_web_cabinet import css_rule
 from web.access import Identity
 from web.app import CSRF_COOKIE, CSRF_FIELD, create_app
 from web.render import setting_change_text
@@ -86,7 +87,7 @@ def test_family_saves_numbers_and_sees_who_may_have_won(client, store, add_doc, 
 def test_wrong_numbers_keep_what_was_typed(client, store):
     r = client.post("/lottery", data={**FORM, "special": "1234", "grand": "８７６５４３２１"})
     assert r.status_code == 400
-    assert "請輸入公告上的 8 碼數字" in r.text and 'value="1234"' in r.text and 'aria-invalid="true"' in r.text
+    assert "請輸入公告上的 8 位數字" in r.text and 'value="1234"' in r.text and 'aria-invalid="true"' in r.text
     assert 'value="８７６５４３２１"' in r.text                                  # 剛填的值留著
     assert f"lottery:{PERIOD}" not in store.get_settings()
 
@@ -152,7 +153,7 @@ def test_elders_can_add_reminders_but_not_change_numbers(cfg, store, add_doc):
     family.post("/lottery", data=FORM)
     elder = _member(cfg, store, "elder")
     html = elder.get(f"/lottery?period={PERIOD}").text
-    assert "號碼由家人照公告輸入。" in html and "readonly" in html and ">對獎</button>" not in html
+    assert "readonly" in html and ">對獎</button>" not in html
     assert elder.post("/lottery", data={**FORM, "special": "99999999"}).status_code == 403
     assert _remind(elder, doc).status_code == 303
     [action] = _lottery_actions(store, doc)
@@ -218,3 +219,17 @@ def test_invoice_without_a_qr_buyer_check_is_not_compared(client, store, add_doc
     assert "可能中了" not in html and "打統編" not in html
     assert "還有 1 張發票的號碼沒有經過 QR Code 核對，不比對" in html
     assert _remind(client, doc).status_code == 409
+
+
+def test_periods_and_numbers_use_narrow_digits(client, add_doc):
+    """v5(使用者 11/6):對獎的期別與號碼用窄體數字(--font-num);期別一格一樣寬,目前這一期和選中的選項一樣,
+    月台黃底、深墨框與字(不再只是黃框:黃框和瓷白只差 1.5:1,看不出來)。"""
+    add_doc(_invoice())
+    add_doc(_invoice("AB11112222", day="2026-08-01"))
+    html = client.get(f"/lottery?period={PERIOD}").text
+    assert re.search(r'<a class="lot-period" href="[^"]+" aria-current="true">115 年 9、10 月期<small>', html)
+    for selector in (".lot-period", ".lot-form h2", ".lot-grid .text-input", ".lot-results .lot-no"):
+        assert "font-family: var(--font-num)" in css_rule(selector), selector
+    assert "min-width: 14rem" in css_rule(".lot-period")
+    chosen = css_rule('.lot-period[aria-current="true"]')
+    assert "background: var(--signal)" in chosen and "border-color: #14212B" in chosen and "color: #14212B" in chosen

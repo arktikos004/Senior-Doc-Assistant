@@ -29,7 +29,7 @@ def test_all_names_are_marked_as_sample():
 
 @pytest.mark.parametrize("as_of", [date(2026, 11, 7), date(2026, 3, 1), date(2027, 1, 2)])
 def test_dates_keep_the_reminders_on_the_home_page_on_the_demo_day(as_of):
-    """文件日期不晚於展示日(核對允許到隔天),期限在展示日或之後(首頁濾掉過期的提醒);跨月、跨年也成立。"""
+    """文件日期不晚於展示日(核對允許到隔天),期限在展示日或之後(過期的提醒會標成逾期);跨月、跨年也成立。"""
     d = make_demo_docs.demo_dates(as_of)
     for key in ("bill_issued", "dispensed", "letter_issued", "letter_applied"):
         assert d[key] <= as_of, key

@@ -1,73 +1,78 @@
 {% extends "base.html" %}
 {% from "_medication.html" import medication %}
+{% from "_note.html" import note %}
+{% from "_flap.html" import flap %}
 {% block title %}家人確認 - {{ BRAND_FULL }}{% endblock %}
 {% block content %}
+{# 一次一件(使用者 11/5):整頁只有一顆「確認」。確認或退回後回到這一頁,顯示下一件;沒有了就寫都確認完了。
+   長輩照權限只能退回,所以多一塊等待的狀態牌,也要能看下一件,不會卡在第一件。
+   v5 車站時刻表(11/6):期限類排成看板上的一列;「確認」「退回」一樣寬,中間隔開(樣式在 app.css 的 T3 段落) #}
+{% set can_confirm = permissions is not defined or permissions.can_confirm %}
 <header class="page-head">
   <div class="page-head__text">
     <h1>家人確認</h1>
-    {% if permissions is not defined or permissions.can_confirm %}
-    <p class="lede">系統依固定規則，把需要您點頭的事列在這裡，一件一張。請對照原件，沒問題就按「確認」，不對就按「退回」。</p>
-    {% elif permissions.can_reject %}
-    <p class="lede">這些事項正在等家人確認。您可以查看內容，不對就按「退回」；服藥時間表由家人確認後才生效。</p>
-    {% else %}
-    <p class="lede">這些事項正在等家人確認。您目前可以查看內容與原件。</p>
-    {% endif %}
+    {% if item %}<p class="page-head__meta">第 {{ position }} 件，共 {{ total }} 件</p>{% endif %}
   </div>
 </header>
-{% if items %}
-<ul class="confirm-list">
-  {% for a in items %}
-  <li class="panel confirm">
-    <div class="confirm__head">
-      <span class="type-icon">{{ icon(a.kind_icon) }}</span>
-      <div class="confirm__title">
-        <h2>{{ a.kind_label }}</h2>
-        <p class="muted">{{ a.doc_title }}，{{ a.doc_when }} 上傳</p>
-      </div>
-      <a class="confirm__link" href="/doc/{{ a.document_id }}#original">看原件與全文{{ icon("chevron-right") }}</a>
+{% if gone %}<p class="confirm__gone" role="status">這件事可能已經有人處理了。</p>{% endif %}
+{% if item %}
+{% set a = item %}
+<section class="panel confirm" aria-labelledby="confirm-title">
+  <div class="confirm__head">
+    <span class="type-icon">{{ icon(a.kind_icon) }}</span>
+    <div class="confirm__title">
+      <div class="section__title"><h2 id="confirm-title">{{ a.kind_label }}</h2>{% if a.medication %}{{ note(a.medication.disclaimer or MEDICATION_DISCLAIMER) }}{% endif %}</div>
+      <p class="muted">{{ a.doc_title }}，{{ a.doc_when }} 上傳{% if a.waited %}，已等 {{ a.waited }} 天{% endif %}</p>
     </div>
-    {# 寬螢幕:左邊是要確認的內容,右邊直接放原件照片,方便逐項對照 #}
-    <div class="confirm__body{% if a.thumb_url %} confirm__body--photo{% endif %}">
-      <div class="confirm__content">
-        {% if a.medication %}
-        {{ medication(a.medication, on_card=true) }}
-        {% elif a.kind == "calendar" %}
-        <div class="confirm__event">
-          {% if a.month %}<span class="cal" aria-hidden="true"><b>{{ a.month }}</b><span>{{ a.day }}</span></span>{% endif %}
-          <div><p class="confirm__what">{{ a.title }}</p>{% if a.date_text %}<p class="confirm__date">{{ a.date_text }}</p>{% endif %}</div>
-        </div>
-        {% else %}
-        <p class="confirm__what">{{ a.title }}</p>
-        {% for line in a.lines %}<p class="todo-item__line">{{ line }}</p>{% endfor %}
-        {% endif %}
+    <a class="confirm__link" href="/doc/{{ a.document_id }}#original">看原件與全文{{ icon("chevron-right") }}</a>
+  </div>
+  {# 寬螢幕:左邊是要確認的內容,右邊直接放原件照片,方便逐項對照 #}
+  <div class="confirm__body{% if a.thumb_url %} confirm__body--photo{% endif %}">
+    <div class="confirm__content">
+      {% if a.medication %}
+      {{ medication(a.medication, on_card=true) }}
+      {% elif a.kind == "calendar" %}
+      {# 看板上的一列:翻牌(月、日;只給眼睛看)、事項與日期全文(讀屏念這一句)、逾期是紅色狀態牌。沒有日期就不畫牌 #}
+      <div class="confirm__event board">
+        {% if a.month %}{{ flap(a.month, a.day) }}{% endif %}
+        <div><p class="confirm__what">{{ a.title }}</p>{% if a.date_text %}<p class="confirm__date">{{ a.date_text }}{% if a.overdue %}<span class="tile tile--manual confirm__late">{{ a.overdue }}</span>{% endif %}</p>{% endif %}
+          {% if a.basis %}{% call note() %}{{ a.basis }}{% if permissions is not defined or permissions.can_correct %} <a href="/doc/{{ a.document_id }}/correct#f-fields-received_date">填收到日期</a>{% endif %}{% endcall %}{% endif %}</div>
       </div>
-      {% if a.thumb_url %}
-      <a class="confirm__photo" href="/doc/{{ a.document_id }}#original"><img src="{{ a.thumb_url }}" alt="{{ a.doc_title }}的原件" loading="lazy" decoding="async"
-        {%- if a.thumb_size %} width="{{ a.thumb_size[0] }}" height="{{ a.thumb_size[1] }}"{% endif %}></a>
+      {% else %}
+      <p class="confirm__what">{{ a.title }}</p>
+      {% for line in a.lines %}<p class="todo-item__line">{{ line }}</p>{% endfor %}
       {% endif %}
     </div>
-    {% if permissions is not defined or permissions.can_confirm or permissions.can_reject %}
-    <form class="confirm__actions" method="post" action="/confirm/{{ a.id }}">
-      {{ csrf_input() }}
-      {% if permissions is not defined or permissions.can_confirm %}
-      <button class="btn btn--primary btn--lg" type="submit" name="decision" value="done">{{ icon("check") }}確認<span class="visually-hidden">：{{ a.kind_label }}（{{ a.doc_title }}）</span></button>
-      {% endif %}
-      {# 退回在系統內沒有復原,按下前先用確認框問一次(app.js 的 button[data-confirm];框在 base.html)。
-         按了「確定退回」app.js 才補上確認欄位(data-confirm-field);伺服器沒收到就不退回,改回一頁確認頁再問 #}
-      {% if permissions is not defined or permissions.can_reject %}
-      <button class="btn btn--secondary btn--lg" type="submit" name="decision" value="rejected"
-              data-confirm-title="{{ a.reject_ask.title }}" data-confirm="{{ a.reject_ask.message }}"
-              data-confirm-ok="{{ a.reject_ask.ok }}" data-confirm-field="{{ a.reject_ask.field }}">{{ icon("x") }}退回<span class="visually-hidden">：{{ a.kind_label }}（{{ a.doc_title }}）</span></button>
-      {% endif %}
-    </form>
+    {% if a.thumb_url %}
+    <a class="confirm__photo" href="/doc/{{ a.document_id }}#original"><img src="{{ a.thumb_url }}" alt="{{ a.doc_title }}的原件" loading="lazy" decoding="async"
+      {%- if a.thumb_size %} width="{{ a.thumb_size[0] }}" height="{{ a.thumb_size[1] }}"{% endif %}></a>
     {% endif %}
-  </li>
-  {% endfor %}
-</ul>
+  </div>
+  {% if not can_confirm %}<p class="confirm__wait"><span class="tile tile--wait">等待家人確認</span></p>{% endif %}
+  {% if can_confirm or permissions.can_reject %}
+  <form class="confirm__actions" method="post" action="/confirm/{{ a.id }}">
+    {{ csrf_input() }}
+    {% if can_confirm %}
+    <button class="btn btn--primary btn--lg" type="submit" name="decision" value="done">{{ icon("check") }}確認<span class="visually-hidden">：{{ a.kind_label }}（{{ a.doc_title }}）</span></button>
+    {% endif %}
+    {# 退回在系統內沒有復原,按下前先用確認框問一次(app.js 的 button[data-confirm];框在 base.html)。
+       按了「確定退回」app.js 才補上確認欄位(data-confirm-field);伺服器沒收到就不退回,改回一頁確認頁再問 #}
+    {% if permissions is not defined or permissions.can_reject %}
+    <button class="btn btn--secondary btn--lg" type="submit" name="decision" value="rejected"
+            data-confirm-title="{{ a.reject_ask.title }}" data-confirm="{{ a.reject_ask.message }}"
+            data-confirm-ok="{{ a.reject_ask.ok }}" data-confirm-field="{{ a.reject_ask.field }}">{{ icon("x") }}退回<span class="visually-hidden">：{{ a.kind_label }}（{{ a.doc_title }}）</span></button>
+    {% endif %}
+  </form>
+  {% endif %}
+  {% if next_item %}<p class="confirm__more"><a class="confirm__next" href="/confirm?item={{ next_item.id }}">{{ next_item.label }}</a></p>{% endif %}
+</section>
 {% else %}
-<p class="empty">目前沒有要確認的事項。拍了藥袋或有期限的文件後，需要您點頭的會列在這裡。</p>
+<div class="confirm__done">
+  <p>都確認完了</p>
+  <a class="btn btn--primary btn--lg" href="/">{{ icon("home") }}回首頁</a>
+</div>
 {% endif %}
-{% if nav.review %}
-<p class="more"><a href="/review">另有 {{ nav.review }} 份文件等待複核</a></p>
+{% if nav.review and (permissions is not defined or permissions.can_correct) %}
+<p class="more more--center"><a href="/review">另有 {{ nav.review }} 份文件等待複核</a></p>
 {% endif %}
 {% endblock %}

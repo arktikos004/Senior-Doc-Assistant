@@ -32,7 +32,14 @@ vendor 只當參考(商家全名與簡稱難以嚴格比對,採雙向包含即�
   解得開 → 自動接受,以 QR 的日期與總計額比對標準答案(類型視為發票);解不開或沒有 QR 的類型 → 轉人工。
 - C `模型加分層核對`:現行流程 verify_or_flag(result, path) + decide(),archive = 自動接受。
 
-指標(每種做法;整體,以及依 doc_type、split、template、condition 分組;C 另依證據類別分組):
+三個指標一起報(method_summary;每種做法,整體與各分組都有):
+- 關鍵欄位讀對率 = 關鍵欄位全對 ÷ 樣本數,不管決策;辨識失敗算錯,B 只有解得開 QR 的才有讀值。
+- 錯誤自動接受率 = 自動接受卻有關鍵欄位錯 ÷ 自動接受(「接受錯誤比例」)。
+- 正確且免更正完成率 = 自動接受(不用人看)而且關鍵欄位全對 ÷ 樣本數;轉人工與辨識失敗都算沒完成,
+  所以全部轉人工時錯誤歸零、這個比例也歸零。藥袋的自動接受只代表文件歸檔,服藥時間表一律等家人確認(只是不用更正)。
+- 帳單期限、公文期限各自獨立一列,同樣三個指標只看期限那一欄(deadline_metrics),不能用整體平均掩蓋。
+
+其他指標(每種做法;整體,以及依 doc_type、split、template、condition 分組;C 另依證據類別分組):
 - 自動接受比例、接受結果中的錯誤比例、轉人工比例(review + failed)、接受結果中各欄位錯誤數(method_summary)。
   只比正確率不夠:全部轉人工也能讓錯誤歸零,卻失去服務價值,所以三個比例一起看。
 - 期限錯誤:接受結果中帳單 due_date、公文期限錯的件數與比例,帳單、公文分開(deadline_summary)。
@@ -485,6 +492,13 @@ def qr_only(path: Path, truth: GroundTruth) -> dict[str, Any]:
     return _outcome(ACCEPTED, "解得開 QR,直接採用 QR 的日期與總計額", row["correct"], row["fields"])
 
 
+def _unread_deadline(truth: GroundTruth) -> dict[str, Any] | None:
+    """辨識失敗時的「期限」:沒有讀值,但標準答案有期限就留著,文件才不會從期限那一列的分母消失。"""
+    name = DEADLINE_FIELDS.get(truth.doc_type, "").removeprefix("fields.")
+    due = _text((truth.fields or {}).get(name))
+    return {"標準答案": due, "讀值": None} if due else None
+
+
 def evaluate_file(analyzer, path: Path, truth: GroundTruth, *, cfg: AppConfig | None = None,
                   hint: str | None = None, received_on: date | None = None) -> dict[str, Any]:
     """對一個樣本跑「辨識 → 三種做法的決策 → 與標準答案比對」,回傳逐筆紀錄。
@@ -512,7 +526,7 @@ def evaluate_file(analyzer, path: Path, truth: GroundTruth, *, cfg: AppConfig | 
         return {
             **label, "耗時秒": round(time.perf_counter() - t0, 2),
             "correct": False, "confidence": 0.0, "score": 0.0, "fields": {}, "vendor_ok": None,
-            "藥袋": None, "期限": None, "辨識結果": None, "錯誤": f"{type(exc).__name__}: {exc}",
+            "藥袋": None, "期限": _unread_deadline(truth), "辨識結果": None, "錯誤": f"{type(exc).__name__}: {exc}",
             "做法": {"A": no_read, "B": by_qr, "C": dict(no_read)},
             "證據類別": EVIDENCE_FAILED, "白話解說矛盾": [],
         }
@@ -546,12 +560,28 @@ def _ratio(numerator: int, denominator: int) -> float | None:
     return numerator / denominator if denominator else None
 
 
+def _three_metrics(decided: list[tuple[str, bool]]) -> dict[str, Any]:
+    """三個指標的算法(定義見模組說明);每筆是 (決策, 讀值對不對)。
+
+    同一份文件只會是「正確且免更正完成」「錯誤自動接受」「轉人工」三者之一,分母為 0 時比例是 None。
+    """
+    n = len(decided)
+    right = sum(1 for _, ok in decided if ok)
+    accepted = [ok for action, ok in decided if action == ACCEPTED]
+    wrong = accepted.count(False)
+    completed = accepted.count(True)
+    return {
+        "樣本數": n, "關鍵欄位讀對": right, "關鍵欄位讀對率": _ratio(right, n),
+        "自動接受": len(accepted), "接受錯誤": wrong, "接受錯誤比例": _ratio(wrong, len(accepted)),
+        "正確且免更正完成": completed, "正確且免更正完成率": _ratio(completed, n),
+    }
+
+
 def method_summary(records: list[dict[str, Any]], method: str) -> dict[str, Any]:
-    """一種做法在一組樣本上的指標:自動接受比例、接受結果中的錯誤比例、轉人工比例(review + failed),
+    """一種做法在一組樣本上的指標:三個指標(_three_metrics)、自動接受比例、轉人工比例(review + failed),
     以及接受結果中各欄位錯誤數(欄位名稱 → 件數)。"""
     outcomes = [r["做法"][method] for r in records]
     accepted = [o for o in outcomes if o["決策"] == ACCEPTED]
-    wrong = sum(1 for o in accepted if not o["correct"])
     handed_off = sum(1 for o in outcomes if o["決策"] in HANDED_OFF)
     field_errors: dict[str, int] = {}
     for o in accepted:
@@ -560,8 +590,8 @@ def method_summary(records: list[dict[str, Any]], method: str) -> dict[str, Any]
                 field_errors[name] = field_errors.get(name, 0) + 1
     n = len(outcomes)
     return {
-        "樣本數": n, "自動接受": len(accepted), "接受錯誤": wrong, "轉人工": handed_off,
-        "自動接受比例": _ratio(len(accepted), n), "接受錯誤比例": _ratio(wrong, len(accepted)),
+        **_three_metrics([(o["決策"], o["correct"] is True) for o in outcomes]),
+        "轉人工": handed_off, "自動接受比例": _ratio(len(accepted), n),
         "轉人工比例": _ratio(handed_off, n), "欄位錯誤": field_errors,
     }
 
@@ -613,6 +643,19 @@ def deadline_summary(records: list[dict[str, Any]], method: str) -> dict[str, di
             entry["期限錯誤"] += is_wrong
         out[doc_type] = {"樣本數": len(rows), "自動接受": len(accepted), "有期限答案": scored, "期限錯誤": wrong,
                          "期限錯誤比例": _ratio(wrong, scored), "依證據類別": by_evidence}
+    return out
+
+
+def deadline_metrics(records: list[dict[str, Any]], method: str) -> dict[str, dict[str, Any]]:
+    """三個指標只看期限那一欄,帳單、公文各一列:帳單期限不能用整體平均掩蓋。
+
+    樣本是標準答案有期限的文件,辨識失敗的也算(讀不出來就是沒讀對);讀值不是那個類型的,期限算錯。
+    金額讀錯、期限讀對的帳單,這一列算對,整份文件的結果看 method_summary。
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for doc_type, field_name in DEADLINE_FIELDS.items():
+        rows = [r["做法"][method] for r in records if r["doc_type"] == doc_type and r.get("期限")]
+        out[doc_type] = _three_metrics([(o["決策"], o["fields"].get(field_name) is True) for o in rows])
     return out
 
 

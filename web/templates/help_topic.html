@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ topic.title }} - 使用手冊 - {{ BRAND_FULL }}{% endblock %}
+{% block content %}
+{# 使用手冊的一篇(一個大節,照 Claude 說明中心的文章頁):導覽路徑、標題、一句摘要、更新日期;
+   寬螢幕右邊是「在此頁面上」(捲動時跟著),手機放在內文上面;最下面是上一篇與下一篇。
+   內文是 docs/使用手冊.md 轉的(web/manual.py),「第 N 節」已經換成連結 #}
+<nav class="crumbs" aria-label="位置"><a href="/help">使用手冊</a><span aria-hidden="true">/</span><span>第 {{ topic.number }} 節</span></nav>
+<header class="page-head help-head">
+  <div class="page-head__text">
+    <h1>{{ topic.title }}</h1>
+    {% if topic.summary %}<p class="help-head__summary">{{ topic.summary }}</p>{% endif %}
+    {% if manual.updated %}<p class="page-head__meta">更新於 {{ manual.updated }}</p>{% endif %}
+  </div>
+</header>
+<div class="help-article">
+  {% if topic.sections %}
+  <nav class="help-toc" aria-labelledby="on-this-page">
+    {# 手機與平板先收起來(十幾個小節排在內文前面要捲很久);電腦一直打開,摘要只是標題(app.js 的 data-collapse-narrow)。
+       沒有 JS 時一直打開 #}
+    <details class="help-toc__fold" open data-collapse-narrow>
+      <summary><h2 id="on-this-page">在此頁面上</h2><span class="help-toc__count">{{ topic.sections|length }} 個小節</span>{{ icon("chevron-right", "help-toc__chev") }}</summary>
+      <ul>{% for anchor, title in topic.sections %}<li><a href="#{{ anchor }}">{{ title }}</a></li>{% endfor %}</ul>
+    </details>
+  </nav>
+  {% endif %}
+  <article class="manual help-article__body">{{ topic.html }}</article>
+</div>
+<nav class="help-pager" aria-label="上一篇與下一篇">
+  {% if prev %}<a class="help-pager__link" href="/help/{{ prev.number }}" rel="prev"><small>上一篇</small><b>{{ prev.title }}</b></a>{% endif %}
+  {% if next %}<a class="help-pager__link help-pager__link--next" href="/help/{{ next.number }}" rel="next"><small>下一篇</small><b>{{ next.title }}</b></a>{% endif %}
+</nav>
+<p class="more help-back"><a href="/help">回到使用手冊</a></p>
+{% endblock %}

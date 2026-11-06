@@ -3,8 +3,7 @@
 {# 沒有 JS 時每 3 秒重新整理一次,做完了伺服器直接轉到結果頁;有 JS 時 app.js 每秒問一次進度,不重新整理 #}
 {% block head %}<noscript><meta http-equiv="refresh" content="3"></noscript>{% endblock %}
 {% block content %}
-<header class="page-head"><div class="page-head__text"><h1>{{ v.title }}</h1>
-  <p class="lede">通常幾秒鐘就好；好了會自動打開結果，不用一直盯著。</p></div></header>
+<header class="page-head"><div class="page-head__text"><h1>{{ v.title }}</h1></div></header>
 
 <section class="panel" aria-labelledby="progress-title" data-job-status="/upload/progress/{{ v.token }}/status">
   <h2 class="visually-hidden" id="progress-title">處理進度</h2>
@@ -24,6 +23,5 @@
     {% endfor %}
   </ol>
   <p class="visually-hidden" role="status" data-job-say>{{ v.say }}</p>
-  <p class="progress-foot">核對與決定都由程式照固定規則做，不是 AI 自己打分數。</p>
 </section>
 {% endblock %}

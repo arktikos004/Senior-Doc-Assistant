@@ -17,7 +17,6 @@ from test_web_security import assert_security_headers
 from test_web_static import _problems
 from web.app import create_app
 
-IDENTITY_NOTE = "身分證明類（身分證、健保卡、戶口名簿）拍了會交給家人複核"
 
 
 @pytest.fixture
@@ -95,7 +94,7 @@ def test_empty_category_says_how_to_fill_it(client, filed):
     filed("帳單", "生活契約")
     html = client.get("/cabinet?cat=財產資產").text
     assert _sections(html) == [("財產資產", 0)] and _links(html) == []
-    assert "這一類還沒有文件。上傳時選「財產資產」，文件就會放在這裡。" in html
+    assert "這一類還沒有文件。" in html and "上傳時選" not in html      # 上傳不選大類了(使用者 11/4)
 
 
 def test_empty_cabinet_invites_first_upload(client):
@@ -104,38 +103,19 @@ def test_empty_cabinet_invites_first_upload(client):
     assert [count for _, count, _ in _cards(html)] == [0, 0, 0, 0]
 
 
-def test_identity_note_until_there_is_an_identity_document(client, filed):
-    """身分證明類交給家人確認:這一類沒有文件時說明;本機模式不寫「只在這台電腦處理」。"""
-    assert f"{IDENTITY_NOTE}。" in client.get("/cabinet").text
-    filed("帳單", "生活契約")
-    for url in ("/cabinet", "/cabinet?cat=生活契約", f"/cabinet?cat={quote('身分證明')}"):
-        html = client.get(url).text
-        assert f"{IDENTITY_NOTE}。" in html and "只在這台電腦處理" not in html
-    filed("其他", "身分證明", "範例戶政事務所")
-    assert "拍了會交給家人複核" not in client.get("/cabinet").text
-
-
-def test_cloud_mode_says_identity_documents_stay_local(tmp_path):
-    paths = PathsConfig(inbox=tmp_path / "inbox", archive=tmp_path / "archive", review=tmp_path / "review",
-                        failed=tmp_path / "failed", logs=tmp_path / "logs")
-    cfg = AppConfig(paths=paths, provider="workers_ai")
-    cfg.ensure_dirs()
-    html = TestClient(create_app(cfg, analyzer=MockAnalyzer(cfg))).get("/cabinet").text
-    assert f"{IDENTITY_NOTE}，而且只在這台電腦處理。" in html
-
-
 def test_cabinet_page_is_safe_and_only_has_links(client, filed):
-    """文件文字一律跳脫;沒有行內 JS;頁面只有連結(點一類只看那一類),沒有會改資料的表單。"""
+    """文件文字一律跳脫;沒有行內 JS;頁面只有連結(點一類只看那一類)與找文件的 GET 表單,沒有會改資料的表單。"""
     filed("藥袋", "醫療與保險", "<script>alert(1)</script>")
     r = client.get("/cabinet")
     assert r.status_code == 200
     assert_security_headers(r)
     assert r.headers["cache-control"] == "no-store"
     assert _problems(r.text) == [] and "<script>alert(1)" not in r.text and "&lt;script&gt;" in r.text
-    assert "<form" not in r.text.split('<main id="main"')[1]
+    forms = re.findall(r"<form\b[^>]*>", r.text.split('<main id="main"')[1])
+    assert forms == ['<form class="search" method="get" action="/cabinet" role="search">']
     for category in CATEGORIES:
         assert f'<a class="cat" href="/cabinet?cat={quote(category)}"' in r.text
-    assert "<b>看有</b><small>高齡家庭文書輔助</small>" in r.text and "文件櫃 - 看有 高齡家庭文書輔助</title>" in r.text
+    assert '<span class="visually-hidden" translate="no">看有</span>' in r.text and "文件櫃 - 看有 高齡家庭文書輔助</title>" in r.text
 
 
 # ---- 家人指定大類(更正頁)與結果頁的麵包屑 ------------------------------------------------
@@ -158,6 +138,12 @@ def _crumbs(html: str) -> str:
     return re.search(r'<nav class="crumbs" aria-label="位置">(.*?)</nav>', html, re.S).group(1)
 
 
+def _category_options(html: str) -> tuple[list[str], list[str]]:
+    """「這份文件屬於哪一類」的下拉:(全部的選項, 選中的)。"""
+    select = re.search(r'<select[^>]*name="category"[^>]*>(.*?)</select>', html, re.S).group(1)
+    return re.findall(r'<option value="([^"]+)"', select), re.findall(r'<option value="([^"]+)" selected', select)
+
+
 def _form_of(client, doc_id: int) -> dict:
     return browser_form(client.get(f"/doc/{doc_id}/correct").text, f"/doc/{doc_id}/correct")
 
@@ -176,12 +162,11 @@ def test_correction_page_offers_the_categories_with_the_current_one_chosen(clien
     doc_id = stored(_bill(), category="生活契約")
     page = client.get(f"/doc/{doc_id}/correct").text
     assert "這份文件屬於哪一類" in page
-    assert re.findall(r'name="category" value="([^"]+)"', page) == [*CATEGORIES, "未分類"]
-    assert re.findall(r'name="category" value="([^"]+)" checked', page) == ["生活契約"]
+    assert _category_options(page) == ([*CATEGORIES, "未分類"], ["生活契約"])
     form = re.search(rf'<form\b[^>]*action="/doc/{doc_id}/correct"[^>]*>(.*?)</form>', page, re.S).group(1)
     assert 'name="category"' in form and 'name="csrf_token"' in form   # 同一張表單,帶 CSRF token
     old = stored(_bill(), category=None)                                 # 舊資料:預設未分類
-    assert re.findall(r'name="category" value="([^"]+)" checked', client.get(f"/doc/{old}/correct").text) == ["未分類"]
+    assert _category_options(client.get(f"/doc/{old}/correct").text)[1] == ["未分類"]
 
 
 def test_letter_without_category_is_unsorted_until_the_family_files_it(cfg, store, form_client, png_bytes):
@@ -215,7 +200,7 @@ def test_category_choice_is_kept_but_not_saved_when_the_form_has_errors(client, 
     data = {**_form_of(client, doc_id), "amount": "", "category": "財產資產"}
     r = client.post(f"/doc/{doc_id}/correct", data=data)
     assert r.status_code == 400 and "這一欄必填" in r.text
-    assert re.findall(r'name="category" value="([^"]+)" checked', r.text) == ["財產資產"]
+    assert _category_options(r.text)[1] == ["財產資產"]
     assert store.get_document(doc_id)["category"] == "生活契約"             # 沒存檔就不改類別
 
 
@@ -226,7 +211,7 @@ def test_adding_a_medicine_keeps_the_chosen_category(client, store, stored):
     data = {**_form_of(client, doc_id), "category": "未分類", "add_item": "1"}
     page = client.post(f"/doc/{doc_id}/correct", data=data)
     assert page.status_code == 200 and "第 3 種藥" in page.text
-    assert re.findall(r'name="category" value="([^"]+)" checked', page.text) == ["未分類"]
+    assert _category_options(page.text)[1] == ["未分類"]
     assert store.get_document(doc_id)["category"] == "醫療與保險"
 
 
@@ -295,7 +280,7 @@ def test_unreadable_item_is_shown_by_its_name_everywhere(client, png_bytes, cate
     doc_id = int(r.headers["location"].rsplit("/", 1)[1])
     reason = f"「{name}」請家人對照原件確認。"
     page = client.get(f"/doc/{doc_id}").text
-    assert f"<h1>{name}</h1>" in page and f"<title>{name} - 看有 高齡家庭文書輔助</title>" in page
+    assert f">這是{name}</h1>" in page and f"<title>{name} - 看有 高齡家庭文書輔助</title>" in page
     assert _crumbs(page).endswith(f"<span>{name}</span>") and f"您上傳的{name}原件" in page
     assert reason in page and "等待複核" in page
     assert _titles(client.get(f"/cabinet?cat={quote(category)}").text) == [name]
@@ -313,8 +298,8 @@ def test_bill_kind_keeps_the_heading_but_lists_keep_the_name(client, store):
 
     power = _labelled(store, "水電瓦斯費", "生活契約", dict(BILL))
     tax = _labelled(store, "稅單", "財產資產", {**BILL, "fields": {"due_date": "2099-10-15", "bill_kind": "其他"}})
-    assert "<h1>電費帳單</h1>" in client.get(f"/doc/{power}").text
-    assert "<h1>稅單</h1>" in client.get(f"/doc/{tax}").text
+    assert ">這是電費帳單</h1>" in client.get(f"/doc/{power}").text
+    assert ">這是稅單</h1>" in client.get(f"/doc/{tax}").text
     assert _titles(client.get("/cabinet").text) == ["稅單", "水電瓦斯費"]     # 財產資產組在生活契約組前面
     assert _titles(client.get("/").text) == ["稅單", "水電瓦斯費"]
 
@@ -334,7 +319,7 @@ def test_names_outside_the_list_are_never_shown(client, store, label):
     doc_id = _labelled(store, label, "醫療與保險", {"doc_type": "收據", "date": "2026-10-01", "amount": 100.0},
                        action="review")
     page = client.get(f"/doc/{doc_id}").text
-    assert "<h1>收據</h1>" in page and label not in page and "alert(1)" not in page
+    assert ">這是收據</h1>" in page and label not in page and "alert(1)" not in page
     assert "請家人對照原件確認" not in page
     assert _titles(client.get("/review").text) == ["收據"]
 
@@ -348,3 +333,51 @@ def test_list_icon_follows_the_title():
     assert doc_icon({"doc_label": "醫療收據", "result": {"doc_type": "發票"}}) == "receipt"
     assert doc_icon({"doc_label": "亂填", "result": {"doc_type": "發票"}}) == "qr"
     assert doc_icon({"result": {"doc_type": "藥袋"}}) == doc_icon({"doc_type": "藥袋"}) == "pill"
+
+
+# ---- v5 車站時刻表(使用者 11/6:「欄位要對齊 統一大小 不然看起來很亂」) ---------------------------------
+
+def css_rule(selector: str, *, nested: bool = False) -> str:
+    """app.css 裡這個選擇器的規則內容;寫了好幾次時取最後一條(後面的蓋過前面的)。
+    nested=False 只找從行首寫起的規則,nested=True 只找寫在 @media 裡(縮排)的。"""
+    from web.render import STATIC_DIR
+
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    indent = "[ \t]+" if nested else ""
+    found = re.findall(rf"^{indent}{re.escape(selector)} \{{([^}}]*)\}}", css, re.M)
+    assert found, selector
+    return found[-1]
+
+
+def test_doc_table_lines_up_title_time_and_status(client, add_doc, review_doc):
+    """文件表格(首頁「最近看過的文件」與文件櫃共用)每一列都是標題、時間、狀態三欄,上下對齊:
+    標題是深墨加底線的連結;狀態一樣寬、字置中,要注意的是撐滿那一格的實心小牌(黃:等待複核,紅:讀不出來),
+    沒事的「已存檔」是淡字。手機上時間一欄固定寬,狀態接在後面,照樣對齊。"""
+    add_doc({"doc_type": "帳單", "vendor": "範例電力公司"})
+    review_doc()
+    add_doc(None, action="failed")
+    for url in ("/cabinet", "/"):
+        table = re.search(r'<div class="tbl tbl--docs">(.*?)</div>', client.get(url).text, re.S).group(1)
+        rows = re.findall(r"<li>(.*?)</li>", table, re.S)
+        assert len(rows) == 3, url
+        for row in rows:
+            assert re.findall(r'class="(tbl__title|tbl__when|tbl__status)"', row) == ["tbl__title", "tbl__when", "tbl__status"]
+        states = {re.sub(r"<[^>]+>", "", text): cls for cls, text in
+                  re.findall(r'<span class="tbl__status"><span class="pill pill--(\w+)">(.*?)</span></span>', table, re.S)}
+        assert states == {"已存檔": "auto", "等待複核": "wait", "讀不出來": "manual"}, url
+    title = css_rule(".tbl__title")
+    assert "color: var(--link)" in title and "text-decoration: underline" in title
+    assert "text-align: center" in css_rule(".tbl--docs .tbl__status")
+    assert "display: block" in css_rule(".tbl--docs .tbl__status .pill--wait, .tbl--docs .tbl__status .pill--manual")
+    assert "grid-template-columns: 7.5rem 6.5rem" in css_rule(".tbl--docs .tbl__meta", nested=True)
+
+
+def test_category_counts_use_narrow_digits_and_the_chosen_one_is_yellow(client, filed):
+    """四大類一類一格、一樣大;份數用窄體數字(--font-num)。選中的那一類和選中的選項一樣:月台黃底、深墨框與字。"""
+    filed("帳單", "生活契約")
+    assert _cards(client.get("/cabinet?cat=生活契約").text)[3] == ("生活契約", 1, True)
+    cat = css_rule(".cat")
+    assert "border: 1px solid var(--control)" in cat and "min-height: 6rem" in cat
+    assert "font-family: var(--font-num)" in css_rule(".cat .n")
+    chosen = css_rule('.cat[aria-current="true"]')
+    assert "background: var(--signal)" in chosen and "border-color: #14212B" in chosen and "color: #14212B" in chosen

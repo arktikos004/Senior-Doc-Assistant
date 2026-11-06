@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% from "_original.html" import original %}
+{% from "_note.html" import note %}
+{% from "_field.html" import ff, ff_described %}
+{% block title %}改文件類型 - {{ v.heading }} - {{ BRAND_FULL }}{% endblock %}
+{% block content %}
+<nav class="crumbs" aria-label="位置"><a href="/">首頁</a><span aria-hidden="true">/</span><a href="/doc/{{ v.id }}">{{ v.heading }}</a><span aria-hidden="true">/</span><span>改文件類型</span></nav>
+<header class="page-head">
+  <div class="page-head__text">
+    <h1>改文件類型</h1>
+    <div class="section__title">現在讀成「{{ v.current }}」{{ note("系統會照這個類型在這台電腦重讀一次，再重新核對。舊的讀值與提醒會換成新的，舊提醒不再生效；改成藥袋時，服藥時間表要家人確認才生效。") }}</div>
+  </div>
+</header>
+<div class="doc-grid doc-grid--form">
+  <div class="doc-main">
+    {# 送出後不能再送第二次(app.js 的 form[data-send-once]):重讀要等,等的時候常會再按一下 #}
+    <form class="review-form" method="post" action="/doc/{{ v.id }}/retype" novalidate data-send-once>
+      {{ csrf_input() }}
+      {# 只有一個欄位,不標必填;選項有 5 個,用下拉(共用的 ff 巨集,錯誤寫在框的正下方)。類型只從固定清單選,文件文字決定不了 #}
+      {% call ff("f-doc_type", "這份文件其實是", error=v.error, fixed=true) %}
+      <select class="text-input ff__input" id="f-doc_type" name="doc_type" required data-error="{{ v.choose_error }}"
+        aria-describedby="{{ ff_described('f-doc_type') }}"{% if v.error %} aria-invalid="true" autofocus{% endif %}>
+        <option value="" selected>請選擇</option>
+        {% for t in v.choices %}
+        <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
+      {% endcall %}
+      <div class="form-actions">
+        <button class="btn btn--primary btn--lg" type="submit"><span data-submit-label data-busy-label="送出中…">重讀這份文件</span></button>
+        <a class="btn btn--secondary btn--lg" href="/doc/{{ v.id }}">不改類型，回到結果頁</a>
+      </div>
+      <p class="status-line" role="status" aria-live="polite" data-send-status="正在送出，請不要關閉這個畫面。"></p>
+    </form>
+  </div>
+  {{ original(v.file_url, v.is_pdf, v.file_size, "您上傳的" ~ v.title ~ "原件") }}
+</div>
+{% endblock %}

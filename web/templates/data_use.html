@@ -40,7 +40,7 @@
 </section>
 
 {% if needs_ack %}
-<form class="section" method="post" action="/data-use">{{ csrf_input() }}
+<form class="section end-action" method="post" action="/data-use">{{ csrf_input() }}
   <input type="hidden" name="next" value="{{ next_url }}">
   <button class="btn btn--primary btn--lg" type="submit">{{ icon("check") }}我看過了，開始使用</button>
   <p class="field-hint">按了會記下您看過這一頁的時間，家人可以在設定頁看到。</p>

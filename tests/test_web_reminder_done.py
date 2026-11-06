@@ -1,4 +1,4 @@
-"""「繳好了/辦好了」:長輩或家人把生效中的期限提醒標成完成,移到首頁「已完成」(7 天內),可以改回。
+"""「已繳費/已辦理」:長輩或家人把生效中的期限提醒標成完成,移到首頁「已完成」(7 天內),可以改回。
 只是記下來讓家人知道:不付款、不查核;操作紀錄記下是誰、什麼時候。身分與文件都是合成的。"""
 from datetime import date, datetime, timedelta
 
@@ -42,7 +42,7 @@ def test_bills_say_paid_and_letters_say_done(client, store, add_doc):
     _reminder(store, add_doc)
     _reminder(store, add_doc, LETTER, "公文期限：補件")
     html = client.get("/").text
-    assert "繳好了" in html and "辦好了" in html
+    assert "已繳費" in html and "已辦理" in html
 
 
 def test_elder_marks_a_bill_paid_and_the_family_sees_who_and_when(cfg, store, add_doc):
@@ -56,7 +56,7 @@ def test_elder_marks_a_bill_paid_and_the_family_sees_who_and_when(cfg, store, ad
 
     home = _member(cfg, store, "family", "女兒").get("/").text
     done = home[home.index('id="done-title"'):]
-    assert "繳電費" in done and "媽媽" in done and "按了「繳好了」" in done and "還沒繳" in done
+    assert "繳電費" in done and "媽媽" in done and "標示已繳費" in done and "改回未繳" in done
     upcoming = home[home.index('id="remind-title"'):home.index('id="done-title"')]
     assert "繳電費" not in upcoming
     page = elder.get(f"/doc/{doc_id}").text
@@ -72,7 +72,7 @@ def test_undo_puts_it_back_on_the_list(cfg, store, add_doc):
     events = [e["event"] for e in store.list_audit_events(document_id=doc_id)]
     assert events == ["undo_complete", "complete_reminder"]
     home = elder.get("/").text
-    assert "繳好了" in home[home.index('id="remind-title"'):]
+    assert "已繳費" in home[home.index('id="remind-title"'):]
 
 
 def test_pressing_twice_is_harmless(cfg, store, add_doc):

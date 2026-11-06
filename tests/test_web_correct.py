@@ -70,11 +70,14 @@ def archived_doc(cfg, add_doc, png_bytes):
 
 _FORM = r'<form\b[^>]*action="{}"[^>]*>(.*?)</form>'
 _TAG = re.compile(r"<textarea\b([^>]*)>(.*?)</textarea>|<input\b([^>]*)>", re.S)
+_SELECT = re.compile(r"<select\b([^>]*)>(.*?)</select>", re.S)
+_OPTION = re.compile(r"<option\b([^>]*)>", re.S)
 _ATTR = re.compile(r'([a-z-]+)(?:="([^"]*)")?')
 
 
 def browser_form(page: str, action: str) -> dict:
-    """像瀏覽器一樣把頁面上那張表單收成送出的資料:文字欄、多行欄、勾選的選項(多選的收成清單)。"""
+    """像瀏覽器一樣把頁面上那張表單收成送出的資料:文字欄、多行欄、下拉(選中的那個,都沒選就是第一個)、
+    勾選的選項(多選的收成清單)。"""
     body = re.search(_FORM.format(re.escape(action)), page, re.S).group(1)
     data: dict = {}
     for area_attrs, text, input_attrs in _TAG.findall(body):
@@ -89,6 +92,11 @@ def browser_form(page: str, action: str) -> dict:
             data[name] = (data[name] if isinstance(data[name], list) else [data[name]]) + [value]
         else:
             data[name] = [value] if attrs.get("type") == "checkbox" else value
+    for select_attrs, options in _SELECT.findall(body):
+        attrs = dict(_ATTR.findall(select_attrs))
+        choices = [dict(_ATTR.findall(option)) for option in _OPTION.findall(options)]
+        chosen = next((c for c in choices if "selected" in c), choices[0])
+        data[attrs["name"]] = html_lib.unescape(chosen.get("value", ""))
     return data
 
 
@@ -104,7 +112,8 @@ def _remind_section(html: str) -> str:
 
 
 def _md(day: date) -> str:
-    return f"{day.month}月{day.day}日前"
+    """首頁清單上的期限(「11/20 前」)。"""
+    return f"{day.month}/{day.day} 前" if day.year == date.today().year else f"{day.year}/{day.month}/{day.day} 前"
 
 
 # ---- 驗收:帳單改期限 → 提醒跟著變,同一個文件 ID -----------------------------------
@@ -274,7 +283,7 @@ def test_missing_required_field_keeps_what_was_typed(client, store, archived_doc
     page = r.text
     assert "有 1 個地方要修改" in page and "這一欄必填，請對照原件填上。" in page
     assert 'value="改過的開單單位"' in page                          # 已填的不必重填
-    assert re.search(r'id="f-amount"[^>]*aria-invalid="true"[^>]*aria-describedby="f-amount-hint f-amount-error"',
+    assert re.search(r'id="f-amount"[^>]*aria-invalid="true"[^>]*aria-describedby="f-amount-help f-amount-error"',
                      page)
     assert re.search(r'id="f-amount"[^>]*autofocus', page)
     assert store.get_document(doc_id)["result"]["vendor"] == "範例電力公司"   # 沒有存檔
@@ -283,7 +292,7 @@ def test_missing_required_field_keeps_what_was_typed(client, store, archived_doc
 
 @pytest.mark.parametrize("field, value, message", [
     ("fields.due_date", "2026-13-45", "請填正確的日期，例如 2026-10-20。"),
-    ("amount", "一千兩百", "只填數字，例如 1286。"),
+    ("amount", "一千兩百", "請輸入數字，例如 1286。"),
     ("amount", "0", "金額要大於 0。"),
 ])
 def test_bad_values_are_explained_in_chinese(client, archived_doc, field, value, message):
@@ -297,7 +306,7 @@ def test_medicine_without_name_is_flagged(client, review_doc):
     r = _correct(client, doc_id, **{"items-1-name": "", "items-1-days": "七"})
     assert r.status_code == 400 and "有 2 個地方要修改" in r.text
     assert re.search(r'id="m1-name"[^>]*aria-invalid="true"', r.text)
-    assert "只填天數的數字，例如 7。" in r.text
+    assert "請輸入天數的數字，例如 7。" in r.text
 
 
 # ---- 更正頁的畫面 ---------------------------------------------------------------------
@@ -305,17 +314,18 @@ def test_medicine_without_name_is_flagged(client, review_doc):
 def test_bill_form_follows_the_mockup(client, archived_doc):
     doc_id = archived_doc(_bill())
     page = client.get(f"/doc/{doc_id}/correct").text
-    assert "<h1>更正讀值</h1>" in page and "存檔後會重新核對，並重新計算提醒。" in page
+    assert "<h1>更正讀值</h1>" in page
     assert '<a href="/doc/{}">電費帳單</a>'.format(doc_id) in page      # 麵包屑回結果頁
     for label in ("帳單種類", "繳費期限", "應繳金額（元）", "開單單位", "開單日期"):
         assert label in page
-    assert page.count('<span class="req">必填</span>') == 2
-    assert re.search(r'type="radio" name="fields.bill_kind" value="電費" checked', page)
+    assert page.count('<span class="ff__req" aria-hidden="true">*</span>') == 2 and ">必填<" not in page   # 紅色星號
+    assert re.search(r'<select[^>]*name="fields.bill_kind"', page) and '<option value="電費" selected>' in page
     assert f'value="{DUE.isoformat()}"' in page and 'value="1286"' in page and "1286.0" not in page
     assert re.search(r'id="f-fields-due_date"[^>]*type="date"', page)
     assert re.search(r'id="f-amount"[^>]*inputmode="decimal"', page)
     assert page.count('autocomplete="off"') == 4                      # 4 個輸入欄都關掉自動填入
-    assert 'class="page-head__jump" href="#original"' in page        # 手機版跳到原件
+    # 原件排在表單前面:電腦在左邊,手機與平板在表單上面,不必跳過去
+    assert page.index('class="compare__original"') < page.index(f'action="/doc/{doc_id}/correct"')
     assert "{{ csrf_input() }}" not in page and 'name="csrf_token"' in page
     assert "退回（品質不足）" not in page                              # 已存檔的文件不在這裡退回
 
@@ -324,11 +334,9 @@ def test_letter_and_bag_forms(client, review_doc):
     letter = client.get(f"/doc/{review_doc(_letter(), name='l.png')}/correct").text
     for label in ("發文機關", "發文日期", "主旨", "期限原文", "發文字號", "應辦事項"):
         assert label in letter
-    assert ">檢附身分證影本\n親自簽名</textarea>" in letter and "一行一項" in letter
-    assert "日期由系統計算" in letter
+    assert ">檢附身分證影本\n親自簽名</textarea>" in letter
 
     bag = client.get(f"/doc/{review_doc(_bag(), name='b.png')}/correct").text
-    assert "存檔後會重新核對，並重新整理服藥時間表。" in bag
     assert "第 1 種藥" in bag and "第 2 種藥" in bag and "什麼時候吃" in bag
     assert 'value="每次 1 錠，每日三次"' in bag                     # 用法:劑量與用法接成一行
     for slot in ("早", "中", "晚"):
@@ -339,16 +347,16 @@ def test_letter_and_bag_forms(client, review_doc):
 
 
 def test_correction_form_can_only_be_sent_once(client, review_doc):
-    """更正表單送出後不能再送第二次(app.js 的 form[data-send-once],SEC-01):存檔鈕換成「存檔中…」、下面寫說明;
-    「再加一種藥」只是多一欄,不寫存檔中。退回那張表單有自己的確認框,不在這裡。"""
+    """更正表單送出後不能再送第二次(app.js 的 form[data-send-once],SEC-01):儲存鈕換成「儲存中…」、下面寫說明;
+    「再加一種藥」只是多一欄,不寫儲存中。退回那張表單有自己的確認框,不在這裡。"""
     doc_id = review_doc(_bag())
     page = client.get(f"/doc/{doc_id}/correct").text
     form = re.search(rf'<form\b[^>]*action="/doc/{doc_id}/correct"[^>]*>(.*?)</form>', page, re.S)
     assert "data-send-once" in form.group(0).split(">")[0]
     body = form.group(1)
-    assert '<span data-submit-label data-busy-label="存檔中…">存檔並重新核對</span>' in body
+    assert '<span data-submit-label data-busy-label="儲存中…">儲存更正並重新核對</span>' in body
     assert ('<p class="status-line" role="status" aria-live="polite" '
-            'data-send-status="正在存檔並重新核對，請不要關閉這個畫面。"></p>') in body
+            'data-send-status="正在儲存更正並重新核對，請不要關閉這個畫面。"></p>') in body
     assert re.search(r'<button\b[^>]*name="add_item"[^>]*data-send-quiet', body)
     assert body.count("data-send-quiet") == 1 and page.count("data-send-once") == 1
     assert _problems(page) == []
@@ -364,7 +372,6 @@ def test_review_document_page_offers_reject(client, review_doc):
     assert 'data-confirm="這份文件會改成「讀不出來」，請長輩重新拍一張。"' in reject
     assert 'data-confirm-ok="確定退回"' in reject and "onsubmit" not in page
     assert 'data-confirm-field="confirm_reject"' in reject           # 確認後 app.js 補上伺服器要看的欄位
-    assert "還有問題的話，文件會留在「待複核」" in page
     assert '<p class="hint">AI 對這份文件的讀值沒有把握，請對照原件確認。</p>' in page   # 為什麼要複核,用白話
     assert _problems(page) == []                                      # 沒有行內 JS(嚴格 CSP)
 
@@ -383,14 +390,18 @@ def test_failed_or_unknown_documents_cannot_be_corrected(client, add_doc):
 
 def test_result_page_entry_points(client, archived_doc, review_doc):
     archived = client.get(f"/doc/{archived_doc(_bill())}").text
-    fields_head = archived.split('id="fields-title"')[1].split("</div>")[0]
-    assert "/correct" in fields_head and "更正讀值" in fields_head      # 「讀到的內容」標題旁
+    status = archived.split('id="status-title"')[1].split("</section>")[0]
+    assert "/correct" in status and "更正讀值" in status and "/retype" in status   # 「處理狀態」的文件那一列
+    fields_head = archived.split('id="fields-title"')[1].split("<dl")[0]
+    assert "/correct" in fields_head and "更正讀值" in fields_head      # 展開「讀到的內容」看到讀錯的,就在旁邊
     assert "page-head__reason" not in archived
 
     doc_id = review_doc(INVOICE, name="r.png")
     review = client.get(f"/doc/{doc_id}").text
     head = review.split('class="page-head__reason"')[1].split("</div>")[0]
-    assert f'<a class="btn btn--primary" href="/doc/{doc_id}/correct">' in head   # 原因旁的主要按鈕
+    # 家人打開待複核的文件,接下來要做的是更正:原因旁的「更正讀值」是這一頁的主要按鈕(使用者 11/4)
+    assert f'<a class="btn btn--primary" href="/doc/{doc_id}/correct">' in head
+    assert f'href="/doc/{doc_id}/retype"' in head
 
 
 def test_review_queue_reads_the_database(client, cfg, store, review_doc, add_doc):
@@ -401,6 +412,24 @@ def test_review_queue_reads_the_database(client, cfg, store, review_doc, add_doc
     assert "待複核（1）" in listing and f'href="/doc/{doc_id}/correct"' in listing
     assert "orphan.png" not in listing
     assert '1<span class="visually-hidden"> 份待複核' in listing        # 導覽列的數字也讀 SQLite
+
+
+def test_review_rows_end_with_one_status_tile_each(client, review_doc):
+    """v5(使用者 11/6:「欄位要對齊 統一大小」):每一列最後是一樣寬的狀態牌,寫驗證信心。
+    低於五成是紅牌(和證據不符或檢查沒通過)、五到八成是黃牌、沒有數字是外框牌;字照樣寫清楚。"""
+    review_doc({"doc_type": "發票", "verified_confidence": 0.1}, name="a.png")
+    review_doc({"doc_type": "發票", "verified_confidence": 0.6}, name="b.png")
+    review_doc({"doc_type": "收據"}, name="c.png")
+    rows = re.findall(r'<li><a class="tbl__row".*?</a></li>', client.get("/review").text, re.S)
+    tiles = [re.findall(r'<span class="tile tile--(\w+)">([^<]*)</span>', row) for row in rows]
+    assert sorted(tiles) == [[("auto", "沒有可核對的項目")], [("manual", "驗證信心 10%")], [("wait", "驗證信心 60%")]]
+    assert all(row.index('class="tbl__main"') < row.index('class="tile ') for row in rows)    # 牌在字的後面
+
+
+def test_review_rows_keep_the_tile_column_fixed():
+    css = (Path(__file__).resolve().parent.parent / "web" / "static" / "app.css").read_text(encoding="utf-8")
+    t3 = css.split("/* ---- T3 家人確認、待複核、更正 ---- */")[1]
+    assert re.search(r"\.tbl--review \.tbl__row \{[^}]*grid-template-columns: minmax\(0, 1fr\) var\(--tile-w\)", t3)
 
 
 def test_reject_by_document_id(client, cfg, store, review_doc, flash_text):
@@ -420,7 +449,7 @@ def test_reject_by_document_id(client, cfg, store, review_doc, flash_text):
     assert doc["action"] == "failed" and (cfg.paths.failed / "blur.png").exists()
     assert "這張讀不出來" in client.get(f"/doc/{doc_id}").text
     assert store.list_actions()[0]["id"] == waiting and store.list_actions()[0]["status"] == "rejected"
-    assert "目前沒有要確認的事項" in client.get("/confirm").text
+    assert "都確認完了" in client.get("/confirm").text
     again = client.post(f"/doc/{doc_id}/reject", data={})
     assert again.status_code == 409 and "這份文件不在待複核" in again.text
 
@@ -430,7 +459,7 @@ _WAIT = 1.0     # 等另一個請求的秒數;有鎖時另一個進不來,等到
 
 
 def test_double_submit_keeps_the_original_attached(cfg, app, form_client, store, review_doc, monkeypatch):
-    """連按兩下「存檔並重新核對」:兩個請求並行,不能都拿同一個舊的原件位置去搬。
+    """連按兩下「儲存更正並重新核對」:兩個請求並行,不能都拿同一個舊的原件位置去搬。
 
     在重新核對的地方放一道關卡,重現「兩個請求都已經讀完文件」:沒有鎖時兩個都會到,後寫的那個搬不到原件,
     卻把已經不存在的 review/ 路徑寫回資料庫(原件與文件脫鉤)。有鎖時第二個要等第一個做完才讀文件。
@@ -641,10 +670,11 @@ def test_offer_covers_qr_date_and_number_but_not_fields_off_the_form():
 
 
 def test_offer_values_are_escaped_and_never_sent_by_themselves(client, review_doc):
-    """機讀碼上的字照樣當資料:畫面上跳脫;按鈕是 type=button,不會自己送出表單。"""
+    """機讀碼上的字照樣當資料:畫面上跳脫;按鈕是 type=button,不會自己送出表單。
+    整頁只有「儲存更正並重新核對」是主要按鈕,「改成…」是次要按鈕(11/4)。"""
     result = dict(_invoice_with_qr_conflict(), verification={
         "QR 字軌號碼": {"status": "fail", "fields": ["invoice_number"],
                      "expected": {"invoice_number": '"><script>alert(1)</script>'}}})
     html = client.get(f"/doc/{review_doc(result)}/correct").text
     assert "<script>alert(1)" not in html and _problems(html) == []
-    assert re.search(r'<button class="btn btn--primary" type="button" data-fill-target="f-invoice_number"', html)
+    assert re.search(r'<button class="btn btn--secondary" type="button" data-fill-target="f-invoice_number"', html)

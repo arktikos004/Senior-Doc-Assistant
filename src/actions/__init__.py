@@ -15,7 +15,7 @@ src/pipeline.verify_decide_plan 在決策之後呼叫它,回傳的每筆行動�
 行動種類與分級(全部寫死在程式裡):
     | doc_type  | kind                | tier                                   | payload 契約               |
     | 帳單      | calendar            | 決策 archive → auto,否則 confirm      | src/actions/calendar.py    |
-    | 公文      | calendar            | 決策 archive → auto,否則 confirm      | src/actions/calendar.py    |
+    | 公文      | calendar            | 同帳單;讀不到發文日、從上傳日起算的一律 confirm | src/actions/calendar.py |
     | 藥袋      | medication_schedule | 一律 confirm                           | src/actions/medication.py  |
     | 發票/收據 | (不產生)                                                                         |
     | 其他      | (不產生)                                                                         |
@@ -31,7 +31,7 @@ from datetime import date
 from typing import Any, Callable
 
 from ..config import AppConfig
-from ..dates import MAX_DEADLINE_TEXT, is_plausible_deadline, parse_date, resolve_deadline
+from ..dates import MAX_DEADLINE_TEXT, deadline_uses_base, is_plausible_deadline, parse_date, resolve_deadline
 from ..models import Decision, ExtractionResult
 from .medication import build_schedule, clip
 
@@ -97,38 +97,49 @@ def _plan_bill(result: ExtractionResult, decision: Decision, received_on: date) 
 def _plan_official(result: ExtractionResult, decision: Decision, received_on: date) -> list[dict[str, Any]]:
     """公文:由 deadline_text 以程式算出 fields.deadline → 期限提醒;算不出就不產生。
 
-    這是 plan_actions 唯一會改 result 的地方:fields.deadline 一律由程式重算,
+    這是 plan_actions 唯一會改 result 的地方:fields.deadline 與 deadline_basis(怎麼起算的那句話)一律由程式重算,
     模型自己填的值不採信(算不出來就移除),Pipeline 之後寫入的紀錄才看得到程式算的期限。
+
+    起算基準只影響「收到本函後15日內」這種要靠基準日的原文,依序是家人填的收到日期(模型不能填,見 parsing._clean_fields)、
+    發文日期、上傳日。發文日起算只會偏早;上傳日起算可能偏晚,所以一律等家人確認,不論決策。
     """
-    fields = {k: v for k, v in _fields(result).items() if k != "deadline"}
+    fields = {k: v for k, v in _fields(result).items() if k not in ("deadline", "deadline_basis")}
     issued = parse_date(result.date or "")
-    base = issued or received_on
+    received = parse_date(str(fields.get("received_date") or ""))
+    uses_base = deadline_uses_base(fields.get("deadline_text"))
+    # 寫明日期的不看收到日:填了比期限晚的收到日,提醒也不會因為「期限早於基準日」而消失
+    base = (received if uses_base else None) or issued or received_on
     # 用原文計算:先截斷再算會讓 resolve_deadline 的長度防線永遠不觸發;clip 只用於顯示
     deadline = resolve_deadline(fields.get("deadline_text"), base)
+    basis = ""
     if deadline is not None:
         fields["deadline"] = deadline.isoformat()
+        if uses_base:
+            basis = (f"以家人填的收到日期 {base.isoformat()} 起算；期限以公文原文為準。" if received else
+                     f"以發文日期 {base.isoformat()} 起算；實際收到日可能較晚，期限以公文原文為準。" if issued else
+                     f"文件上沒有可讀的發文日期，以上傳日期 {base.isoformat()} 起算；期限以公文原文為準。")
+            fields["deadline_basis"] = basis
     result.fields = fields
     if deadline is None:
         return []
 
     subject = clip(fields.get("subject"), 30)
     title = f"{OFFICIAL_TITLE}：{subject}" if subject else OFFICIAL_TITLE
-    basis = (
-        f"以發文日期 {base.isoformat()} 起算；實際收到日可能較晚，期限以公文原文為準。"
-        if issued else
-        f"文件上沒有可讀的發文日期，以上傳日期 {base.isoformat()} 起算；期限以公文原文為準。"
-    )
     required = fields.get("required_actions")
     todo = "、".join(clip(x, 40) for x in required[:10] if clip(x)) if isinstance(required, list) else ""
     lines = [
         f"發文機關：{clip(result.vendor)}" if result.vendor else "",
         f"發文字號：{clip(fields.get('doc_number'))}" if fields.get("doc_number") else "",
         f"期限原文：「{clip(fields.get('deadline_text'), MAX_DEADLINE_TEXT)}」",
-        basis,
+        basis or "期限以公文原文為準。",
         f"應辦事項：{todo}" if todo else "",
         f"應繳金額：{_money(result.amount, result.currency)}" if result.amount else "",
     ]
-    return [_calendar(title, deadline, lines, decision)]
+    action = _calendar(title, deadline, lines, decision)
+    action["payload"]["basis"] = basis
+    if uses_base and not received and not issued:
+        action["tier"] = "confirm"
+    return [action]
 
 
 def _plan_medication(result: ExtractionResult, decision: Decision, received_on: date) -> list[dict[str, Any]]:

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_reminder_table.html" import reminder_groups, done_list %}
+{% block title %}要記得的事 - {{ BRAND_FULL }}{% endblock %}
+{% block content %}
+{% set can_remind = permissions is not defined or permissions.can_remind %}
+<nav class="crumbs" aria-label="位置"><a href="/">首頁</a><span aria-hidden="true">/</span><span>要記得的事</span></nav>
+<header class="page-head">
+  <div class="page-head__text">
+    <h1>要記得的事</h1>
+    {% if reminders_total %}<p class="page-head__meta">共 {{ reminders_total }} 筆</p>{% endif %}
+  </div>
+</header>
+{% if remind_groups %}
+{{ reminder_groups(remind_groups, can_remind, "all") }}
+{% else %}
+<p class="empty">還沒有要記得的事。拍下帳單或藥袋，期限和服藥時間會列在這裡。</p>
+{% endif %}
+{# 做完的與取消的提醒也查得到(參考 doxo 在別處付的也留紀錄):收起來,要看再打開 #}
+{% if completed %}
+<details class="section fold">
+  <summary class="fold__head"><h2>已完成</h2><span class="muted">{{ completed|length }} 筆</span>{{ icon("chevron-right", "fold__chev") }}</summary>
+  {{ done_list(completed, can_remind, "all") }}
+</details>
+{% endif %}
+{% if cancelled %}
+<details class="section fold">
+  <summary class="fold__head"><h2>已取消的提醒</h2><span class="muted">{{ cancelled|length }} 筆</span>{{ icon("chevron-right", "fold__chev") }}</summary>
+  <ul class="rlist">
+    {% for r in cancelled %}
+    <li class="ritem ritem--off">
+      <div class="ritem__main">
+        <p class="ritem__title">{{ r.title }}</p>
+        <p class="ritem__meta">{% if r.sub %}<span class="ritem__sub">{{ r.sub }}</span>{% endif %}<span class="ritem__sub">{{ r.when }}</span></p>
+      </div>
+      <div class="remind-acts"><a class="btn btn--secondary btn--done" href="{{ r.href }}">看文件<span class="visually-hidden">：{{ r.title }}</span></a></div>
+    </li>
+    {% endfor %}
+  </ul>
+</details>
+{% endif %}
+{% endblock %}

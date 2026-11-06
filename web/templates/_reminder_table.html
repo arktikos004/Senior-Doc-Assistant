@@ -1,0 +1,61 @@
+{# 「要記得的事」清單(首頁與 /reminders 共用):groups 是 render.group_rows 的結果,分組照 REMINDER_GROUPS。
+   v5 車站時刻表(11/6):各組排在同一塊深墨看板上(reminder_groups),組名在看板裡。每一列四格:
+   日期(翻牌加「前」,不是今年的另外寫年份;沒有日期的是空白的暗牌)|事項與金額,下一行開單單位|狀態牌|按鈕。
+   翻牌只給眼睛看,讀屏念旁邊藏起來的「11/2 前」(r.when)。同一種東西一樣大(使用者 11/6:「欄位要對齊 統一大小」):
+   狀態牌一樣寬(.tile),按鈕排在三個固定的格子:看文件或去確認|已繳費、已辦理或已讀|取消提醒;
+   這一列沒有的空著,其他按鈕不挪位置。整列不是連結,能按的都有按鈕的樣子(使用者 11/5,六點的第 1 點);排法見 app.css 的 T1 段落。
+   can_remind:這個人能不能按「已繳費」「取消提醒」「已讀」;back:按完回哪一頁(只認 web/app.py 列的值)。 #}
+{% from "_flap.html" import flap %}
+{% macro back_field(back) %}{% if back %}<input type="hidden" name="back" value="{{ back }}">{% endif %}{% endmacro %}
+{% macro reminder_table(rows, can_remind=true, back="") %}
+<ul class="rlist">
+  {% for r in rows %}
+  <li class="ritem">
+    <div class="ritem__date">
+      {%- if r.due_month %}
+      {%- if r.due_year %}<span class="ritem__year" aria-hidden="true">{{ r.due_year }}</span>{% endif %}
+      {{- flap(r.due_month, r.due_day) }}<span class="ritem__before" aria-hidden="true">前</span><span class="visually-hidden">{{ r.when }}</span>
+      {%- else %}{{ flap() }}{% endif -%}
+    </div>
+    <div class="ritem__main">
+      <p class="ritem__title">{{ r.headline }}</p>
+      {% if r.sub %}<p class="ritem__sub">{{ r.sub }}</p>{% endif %}
+    </div>
+    <div class="ritem__state">{% if r.note %}<span class="tile tile--{{ r.note_class }}">{{ r.note }}</span>{% endif %}</div>
+    <div class="remind-acts">
+      <a class="btn btn--secondary btn--done" href="{{ r.href }}">{{ r.link }}<span class="visually-hidden">：{{ r.title }}</span></a>
+      {% if r.done and can_remind %}<form class="remind-acts__mark" method="post" action="/reminder/{{ r.done.id }}/done">{{ csrf_input() }}<input type="hidden" name="decision" value="complete">{{ back_field(back) }}
+        <button class="btn btn--secondary btn--done" type="submit">{{ r.done.label }}<span class="visually-hidden">：{{ r.title }}</span></button></form>
+      {% if r.dismiss %}<form class="remind-acts__off" method="post" action="/reminder/{{ r.dismiss.id }}">{{ csrf_input() }}
+        <button class="link-btn" type="submit" name="decision" value="{{ r.dismiss.decision }}">{{ r.dismiss.label }}<span class="visually-hidden">：{{ r.title }}</span></button></form>{% endif %}
+      {% elif r.seen and can_remind %}<form class="remind-acts__mark" method="post" action="/rejected/{{ r.seen.id }}/seen">{{ csrf_input() }}{{ back_field(back) }}
+        <button class="btn btn--secondary btn--done" type="submit">已讀<span class="visually-hidden">：{{ r.title }}</span></button></form>{% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% endmacro %}
+
+{% macro reminder_groups(groups, can_remind=true, back="") %}
+<div class="board board--remind">
+  {% for g in groups %}
+  <div class="rgroup">
+    <h3 class="rgroup__title">{{ g.title }}</h3>
+    {{ reminder_table(g.rows, can_remind, back) }}
+  </div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{# 「已完成」:按了「已繳費/已辦理」的,寫誰、哪天按的,可以改回(首頁只放最近幾天,/reminders 放全部)。
+   三欄對齊(v5,11/6):事項|誰、哪天標示|改回 #}
+{% macro done_list(rows, can_remind=true, back="") %}
+<ul class="done-list">
+  {% for c in rows %}
+  <li><span class="done-what">{{ c.title }}{% if c.amount %} {{ c.amount }}{% endif %}</span>
+    <span class="done-who">{{ c.who }} {{ c.when }} 標示{{ c.button }}</span>
+    {% if can_remind %}<form method="post" action="/reminder/{{ c.id }}/done">{{ csrf_input() }}<input type="hidden" name="decision" value="undo">{{ back_field(back) }}
+      <button class="link-btn" type="submit">{{ c.undo }}<span class="visually-hidden">：{{ c.title }}</span></button></form>{% endif %}</li>
+  {% endfor %}
+</ul>
+{% endmacro %}

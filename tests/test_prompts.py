@@ -1,11 +1,15 @@
 """提示詞與 schema 測試:扁平 schema(無 $defs/$ref)、全欄位必填、類型專屬欄位契約、
-防注入句、保留發票規則、藥袋只轉錄、公文期限不讓模型算。"""
+防注入句、保留發票規則、藥袋只轉錄、公文期限不讓模型算、公文與通用版的範例日期不是真實日期、
+生效日與實施期間不抄成期限。"""
 import json
+import re
+from datetime import date
 
 import pytest
 
 from src.actions import plan_actions
 from src.config import AppConfig
+from src.dates import _stash_dates, parse_date, resolve_deadline
 from src.models import COMMON_FIELDS, DOC_TYPES, Decision
 from src.parsing import _clean_unreadable, to_result
 from src.prompts import INJECTION_GUARD, TYPE_FIELDS, get_prompt
@@ -179,6 +183,81 @@ def test_official_prompt_does_not_let_model_compute_dates(hint):
     assert "deadline" not in schema["properties"]["fields"]["properties"]
     assert "收到本函後15日內" in prompt
     assert "不要自己換算成日期" in prompt
+
+
+# ---- 公文與通用版的範例日期(65 份公開公文實測) ------------------------------------
+
+LETTER_HINTS = ["公文", None]    # 公文專用版與通用版;沒選類型的公文走通用版
+
+
+def _concrete_dates(prompt):
+    """提示詞裡寫出來的具體日期:系統自己認得的完整年月日,加上「8 月 3 日」這種只有月日的。"""
+    return _stash_dates(prompt)[1] + re.findall(r"\d+\s*月\s*\d+\s*日", prompt)
+
+
+def _deadline_text_rule(hint):
+    """提示詞裡 deadline_text 的那一段說明(到下一個欄位 required_actions 之前)。"""
+    prompt = get_prompt(hint)[0]
+    return prompt[prompt.index("deadline_text:"):prompt.index("required_actions:")]
+
+
+@pytest.mark.parametrize("hint", LETTER_HINTS)
+def test_letter_prompts_have_no_concrete_example_dates(hint):
+    """模型會把範例抄成文件的日期:實測有公文的發文日期被讀成範例上的 115年8月3日。"""
+    prompt = get_prompt(hint)[0]
+    assert _concrete_dates(prompt) == []
+    assert "2026-08-03" not in prompt and "115/08/03" not in prompt
+
+
+def test_official_prompt_shows_the_date_field_with_placeholders():
+    assert "「發文日期:中華民國○○○年○月○日」" in get_prompt("公文")[0]
+
+
+@pytest.mark.parametrize("hint", LETTER_HINTS)
+def test_deadline_text_example_date_is_a_placeholder(hint):
+    assert "「於○○○年○○月○○日前」" in _deadline_text_rule(hint)
+
+
+@pytest.mark.parametrize("hint", LETTER_HINTS)
+def test_roc_conversion_rule_survives_without_a_concrete_date(hint):
+    prompt = get_prompt(hint)[0]
+    assert "民國年 = 西元年 - 1911" in prompt and "民國 115 年 = 西元 2026 年" in prompt
+    assert "115/○○/○○ → 2026-○○-○○" in prompt
+
+
+def test_generic_prompt_keeps_the_period_rule_with_placeholder_examples():
+    prompt = get_prompt(None)[0]
+    assert "請改用含完整年月日的那一行" in prompt and "切勿把期別的月份當成日期" in prompt
+    assert "手寫「中華民國 ○○○ 年 ○ 月 ○ 日」取 ○○○○-○○-○○" in prompt
+
+
+@pytest.mark.parametrize("copied", ["中華民國○○○年○月○日", "於○○○年○○月○○日前", "115/○○/○○", "2026-○○-○○", "○○○○-○○-○○"])
+def test_copying_a_placeholder_can_never_become_a_date(copied):
+    """模型就算把○照抄進來,程式也算不出日期:不會變成假的發文日期或假提醒(原則 5)。"""
+    assert parse_date(copied) is None
+    assert resolve_deadline(copied, date(2026, 8, 3)) is None
+
+
+@pytest.mark.parametrize("hint", ["發票", "帳單", "藥袋"])
+def test_other_typed_prompts_keep_their_validated_examples(hint):
+    """這次只動公文與通用版:其他類型專屬版一字不變,dev 有選類型的讀值才能沿用。"""
+    assert "115/08/03 → 2026-08-03" in get_prompt(hint)[0]
+
+
+def test_invoice_prompt_keeps_its_validated_period_examples():
+    assert "手寫「中華民國 115 年 8 月 3 日」取 2026-08-03" in get_prompt("發票")[0]
+
+
+# ---- deadline_text 的排除說明(65 份公開公文實測) -----------------------------------
+
+@pytest.mark.parametrize("hint", LETTER_HINTS)
+def test_deadline_text_rule_excludes_effective_dates_and_periods(hint):
+    """實測把生效日或實施期間當期限 9 次:只抄真的期限,其他留空(靠模型;程式端另有 resolve_deadline 把關)。"""
+    assert "生效日、施行日、適用日、補助或實施期間、活動或會議日期不是期限,填空" in _deadline_text_rule(hint)
+
+
+def test_deadline_text_rule_is_identical_in_official_and_generic_prompts():
+    assert _deadline_text_rule("公文") == _deadline_text_rule(None)
 
 
 def test_bill_prompt_separates_due_date_from_billing_period():

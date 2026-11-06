@@ -1,122 +1,223 @@
 {% extends "base.html" %}
-{% from "_original.html" import original %}
+{% from "_note.html" import note %}
+{% from "_field.html" import ff, ff_described %}
 {% block title %}更正讀值 - {{ v.heading }} - {{ BRAND_FULL }}{% endblock %}
-{# 一個輸入欄:提示與錯誤說明都用 aria-describedby 接到輸入欄;日期叫出日曆、金額與天數叫出數字鍵盤;
-   不是登入表單,一律關掉自動填入。f 是 render.correct_view 給的欄位(name、id、label、kind…) #}
+{# 原件照片(左邊的原件與每個有問題的欄位下面的「看原件」共用):按「放大」(藏起來的勾選框,沒有 JS 也能用)
+   圖片放大,框裡可以上下左右捲動看各處;有 JS 時按圖片本身也能放大或縮回(app.js 的 [data-zoom])。
+   key 讓每一張的勾選框有自己的 id;open_link:左邊的原件另外給「另開新頁」 #}
+{% macro photo(key, lazy=true, open_link=false) %}
+<div class="zoom" data-zoom>
+  <input class="zoom__check" type="checkbox" id="zoom-{{ key }}" aria-label="放大原件">
+  <div class="zoom__bar">
+    <label class="btn btn--secondary zoom__btn" for="zoom-{{ key }}"><span class="zoom__in">放大</span><span class="zoom__out">縮回</span></label>
+    {% if open_link %}<a class="zoom__open" href="{{ v.file_url }}" target="_blank" rel="noopener">另開新頁看原件</a>{% endif %}
+  </div>
+  <div class="zoom__frame" data-zoom-frame>
+    <img src="{{ v.file_url }}" alt="您上傳的{{ v.title }}原件"{% if lazy %} loading="lazy"{% endif %} decoding="async"
+      {%- if v.file_size %} width="{{ v.file_size[0] }}" height="{{ v.file_size[1] }}"{% endif %}>
+  </div>
+</div>
+{% endmacro %}
+{# 手機與平板:有問題的欄位下面展開同一張原件(<details>,不換頁,已經填的字不會不見);電腦上原件就在左邊,不顯示。
+   key 同 photo,每個位置一個 #}
+{% macro peek(key) %}
+{% if v.file_url and v.is_pdf %}
+<p class="peek"><a class="peek__pdf" href="{{ v.file_url }}" target="_blank" rel="noopener">另開原檔對照</a></p>
+{% elif v.file_url %}
+<details class="peek">
+  <summary><span class="peek__show">看原件</span><span class="peek__hide">收起原件</span></summary>
+  {{ photo(key) }}
+</details>
+{% endif %}
+{% endmacro %}
+{# 一個有問題的欄位(一次一個,使用者 11/5):<summary> 一行寫欄位名稱加原因,原因是核對結果與讀不清的欄位,不是 AI 自評;
+   紅是不符、沒通過,琥珀是讀不清楚、沒有讀到。沒有 JS 時全部展開(open),按摘要也能收起來;有 JS 時 app.js 只留一個,
+   其他收成一行,按了才展開。收起來的欄位還在同一張表單裡,送出時照樣送。
+   data-fold-state:收起來時 app.js 在摘要旁寫「已修改，尚未儲存」或「要修改」 #}
+{% macro issue_fold(u, issue_id) %}
+<details class="issue-fold" id="{{ u.anchor }}" data-issue-fold data-focus="{{ u.focus_id }}" open>
+  <summary class="issue-fold__head">
+    <span class="issue-fold__line"><span class="issue-fold__name">{{ u.short }}</span>：<span id="{{ issue_id }}">
+      {%- for i in u.issues %}{% if not loop.first %}；{% endif %}<span class="issue issue--{{ i.tone }}">{{ i.text }}</span>{% endfor -%}
+    </span></span>
+    <span class="issue-fold__state" data-fold-state hidden></span>
+    {{ icon("chevron-right", "issue-fold__chev") }}
+  </summary>
+  <div class="issue-fold__body">
+    {{ caller() }}
+  </div>
+</details>
+{% endmacro %}
+{# 跳到下一個問題:沒有 JS 是頁內連結;app.js 的 data-next-issue 把焦點放進那一欄 #}
+{% macro next_link(u) %}
+<a class="next-issue" href="{{ u.next.href }}" data-next-issue="{{ u.next.focus }}">{{ u.next.text }}</a>
+{% endmacro %}
+{# 一個輸入欄(共用的 ff 巨集:浮動標籤,日期、下拉、多行文字固定在上緣;必填是紅色星號;框下的灰字只寫填寫要求;
+   錯誤寫在框的正下方)。有格式或必填的欄位離開時就檢查(app.js 的「離開欄位才檢查」看 required、pattern 與 data-error),
+   伺服器照樣再檢查。日期叫出日曆、金額與天數叫出數字鍵盤;不是登入表單,一律關掉自動填入。
+   f 是 render.correct_view 給的欄位(name、id、label、kind…) #}
 {% macro field(f) %}
-{% set described = [f.id ~ "-hint" if f.hint else "", f.id ~ "-error" if f.error else "", f.id ~ "-fix" if f.fix else ""]|select|join(" ") %}
-<div class="field-row">
-  <label class="field-label" for="{{ f.id }}">{{ f.label }}{% if f.required %}<span class="req">必填</span>{% endif %}</label>
-  {% if f.hint %}<span class="field-hint" id="{{ f.id }}-hint">{{ f.hint }}</span>{% endif %}
-  {% if f.error %}<span class="field-hint field-hint--error" id="{{ f.id }}-error">{{ icon("alert") }}<span>{{ f.error }}</span></span>{% endif %}
+{% set described = [f.id ~ "-issue" if f.issues else "", ff_described(f.id, f.help), f.id ~ "-fix" if f.fix else ""]|select|join(" ") %}
+  {% call ff(f.id, f.label, required=f.required, help=f.help, error=f.error, fixed=f.kind in ("date", "lines", "choice")) %}
   {% if f.kind == "lines" %}
-  <textarea class="text-input" id="{{ f.id }}" name="{{ f.name }}" rows="4" autocomplete="off"
-    {%- if f.required %} required{% endif %}{% if f.error %} aria-invalid="true"{% endif %}
+  <textarea class="text-input ff__input" id="{{ f.id }}" name="{{ f.name }}" rows="4" autocomplete="off"
+    {%- if f.required %} required{% endif %}{% if f.check %} data-error="{{ f.check }}"{% endif %}{% if f.error %} aria-invalid="true"{% endif %}
     {%- if described %} aria-describedby="{{ described }}"{% endif %}{% if v.focus == f.id %} autofocus{% endif %}>{{ f.value }}</textarea>
+  {% elif f.kind == "choice" %}
+  <select class="text-input ff__input" id="{{ f.id }}" name="{{ f.name }}"
+    {%- if described %} aria-describedby="{{ described }}"{% endif %}{% if v.focus == f.id %} autofocus{% endif %}>
+    {% if f.value not in f.options %}<option value="" selected>請選擇</option>{% endif %}
+    {% for o in f.options %}
+    <option value="{{ o }}"{% if o == f.value %} selected{% endif %}>{{ o }}</option>
+    {% endfor %}
+  </select>
   {% else %}
-  <input class="text-input" id="{{ f.id }}" name="{{ f.name }}" value="{{ f.value }}" autocomplete="off"
+  <input class="text-input ff__input" id="{{ f.id }}" name="{{ f.name }}" value="{{ f.value }}" autocomplete="off"
     type="{{ 'date' if f.kind == 'date' else 'text' }}"
+    {%- if f.kind != "date" %} placeholder=" "{% endif %}
     {%- if f.kind == "amount" %} inputmode="decimal"{% elif f.kind == "number" %} inputmode="numeric"{% endif %}
+    {%- if f.kind in ("invoice", "currency") %} autocapitalize="characters"{% endif %}
     {%- if not f.spellcheck %} spellcheck="false"{% endif %}
-    {%- if f.required %} required{% endif %}{% if f.error %} aria-invalid="true"{% endif %}
+    {%- if f.required %} required{% endif %}{% if f.pattern %} pattern="{{ f.pattern }}"{% endif %}{% if f.check %} data-error="{{ f.check }}"{% endif %}
+    {%- if f.error %} aria-invalid="true"{% endif %}
     {%- if described %} aria-describedby="{{ described }}"{% endif %}{% if v.focus == f.id %} autofocus{% endif %}>
   {% endif %}
-  {# 和 QR、帳單條碼不符:寫出機讀碼上的值;「改成…」要有 JS 才露出(app.js 的 data-fill-target),沒有 JS 就照著打 #}
+  {% endcall %}
+  {# 和 QR、帳單條碼不符:寫出機讀碼上的值;「改成…」要有 JS 才露出(app.js 的 data-fill-target),沒有 JS 就照著打。
+     整頁只有「儲存更正並重新核對」是主要按鈕(月台黃),這顆是次要按鈕 #}
   {% if f.fix %}
   <div class="evidence-fix" role="note">
     <p id="{{ f.id }}-fix">{{ f.fix.lead }} <span class="ev-num">{{ f.fix.shown }}</span>（現在填的是 {{ f.fix.current }}）。</p>
     <div class="evidence-fix__act" data-fill-wrap hidden>
-      <button class="btn btn--primary" type="button" data-fill-target="{{ f.id }}" data-fill-value="{{ f.fix.value }}"
+      <button class="btn btn--secondary" type="button" data-fill-target="{{ f.id }}" data-fill-value="{{ f.fix.value }}"
         data-fill-done="已改成 {{ f.fix.shown }}">{{ icon("check") }}<span data-fill-label>改成 {{ f.fix.shown }}</span></button>
-      <p class="field-hint">按了只會填進上面的欄位；要按下面的「存檔並重新核對」才會生效。</p>
     </div>
   </div>
   {% endif %}
-</div>
 {% endmacro %}
-{# 選項膠囊(同首頁的類型選項):帳單種類單選、服藥時段可多選 #}
-{% macro chips(name, options, checked, kind) %}
+{# 藥袋「什麼時候吃」可以多選,維持勾選的選項膠囊(同首頁的類型選項) #}
+{% macro chips(name, options, checked) %}
 <div class="chips">
   {% for o in options %}
-  <label class="chip"><input class="chip__input" type="{{ kind }}" name="{{ name }}" value="{{ o }}"{% if o in checked %} checked{% endif %}><span>{{ o }}</span></label>
+  <label class="chip"><input class="chip__input" type="checkbox" name="{{ name }}" value="{{ o }}"{% if o in checked %} checked{% endif %}><span>{{ o }}</span></label>
   {% endfor %}
 </div>
+{% endmacro %}
+{# 藥品的說明(標題旁的 ⓘ);有問題那一格前面沒有標題,label 讓圖示旁照樣寫「說明」 #}
+{% macro med_note(label="") %}{{ note("只照抄藥袋上印的字；系統不判斷劑量或用法。存檔後服藥時間表仍要家人確認。", label=label) }}{% endmacro %}
+{# 每一種藥與「再加一種藥」。藥品一整塊可能很長,有問題時每一種藥下面各有一個「看原件」 #}
+{% macro med_list(u) %}
+  {% for it in v.meds %}
+  <fieldset class="med-edit">
+    <legend>{{ it.legend }}</legend>
+    {{ field(it.name) }}
+    {{ field(it.usage) }}
+    <fieldset class="kinds"><legend>什麼時候吃</legend>{{ chips(it.timing_name, v.timing_choices, it.timing) }}</fieldset>
+    {{ field(it.days) }}
+    {% if u.issues %}{{ peek("m" ~ loop.index0) }}{% endif %}
+  </fieldset>
+  {% endfor %}
+  {% if v.can_add_item %}
+  <button class="btn btn--secondary" type="submit" name="add_item" value="1" data-send-quiet>{{ icon("plus") }}再加一種藥</button>
+  {% endif %}
+{% endmacro %}
+{# 表單上的一欄:有問題的收在 issue_fold 裡,看原件與「下一個問題」跟著它;沒問題的照舊。標題層級跟著上面有沒有分組 #}
+{% macro unit(u) %}
+{% if u.issues %}
+{% call issue_fold(u, (u.id ~ "-issue")) %}
+    {% if u.unit == "meds" %}
+    <div class="subhead">{{ med_note("說明") }}</div>
+    {{ med_list(u) }}
+    {% else %}
+    {{ field(u) }}
+    {{ peek(u.anchor) }}
+    {% endif %}
+    {{ next_link(u) }}
+{% endcall %}
+{% elif u.unit == "meds" %}
+{% set h = "h4" if v.problems else "h3" %}
+<div class="med-group" id="{{ u.anchor }}">
+  <div class="subhead"><{{ h }}>藥品</{{ h }}>{{ med_note() }}</div>
+  {{ med_list(u) }}
+</div>
+{% else %}
+<div class="field-row" id="{{ u.anchor }}">
+  {{ field(u) }}
+</div>
+{% endif %}
 {% endmacro %}
 {% block content %}
 <nav class="crumbs" aria-label="位置"><a href="/">首頁</a><span aria-hidden="true">/</span><a href="/doc/{{ v.id }}">{{ v.heading }}</a><span aria-hidden="true">/</span><span>更正讀值</span></nav>
 <header class="page-head">
   <div class="page-head__text">
     <h1>更正讀值</h1>
-    <p class="lede">{{ v.lede }}</p>
+    <p class="page-head__meta"><a href="/doc/{{ v.id }}/retype">類型不對？</a></p>
     {% if v.review_reason %}<p class="hint">{{ v.review_reason }}</p>{% endif %}
-    {# 手機與平板:表單很長、原件在最下面,和結果頁一樣可以跳過去看(電腦版原件就在右邊,不顯示) #}
-    {% if v.file_url %}<p class="page-head__meta page-head__meta--jump"><a class="page-head__jump" href="#original">看原件</a></p>{% endif %}
   </div>
 </header>
 
-<div class="doc-grid">
-  <div class="doc-main">
+{# 參考 Rossum 的人工核對畫面(11/4):電腦左邊原件(跟著捲動固定)、右邊欄位;手機與平板原件在表單上面 #}
+<div class="compare">
+  <aside class="compare__original" id="original" aria-labelledby="original-title">
+    <h2 id="original-title">原件</h2>
+    {% if v.file_url and v.is_pdf %}
+    <div class="pdf-note">
+      <p>PDF 檔無法在這裡預覽。</p>
+      <a class="btn btn--secondary" href="{{ v.file_url }}" target="_blank" rel="noopener">{{ icon("external") }}另開原檔</a>
+    </div>
+    {% elif v.file_url %}
+    {{ photo("main", lazy=false, open_link=true) }}
+    {% else %}
+    <p class="empty">原件已經移走或不存在（例如複核後已改名存檔）。</p>
+    {% endif %}
+  </aside>
+  <div class="compare__main">
     {# 送出後不能再送第二次(app.js 的 form[data-send-once]):存檔要重新核對,等的時候常會再按一下 #}
-    <form class="panel review-form" method="post" action="/doc/{{ v.id }}/correct" novalidate data-send-once>
+    <form class="panel review-form" method="post" action="/doc/{{ v.id }}/correct" novalidate data-send-once data-warn-unsaved>
       {{ csrf_input() }}
       {% if v.meds is not none %}
-      {# 在欄位裡按 Enter 等於按「存檔並重新核對」:表單的預設按鈕是第一個送出鈕,不能是下面的「再加一種藥」 #}
-      <button class="visually-hidden" type="submit" tabindex="-1" aria-hidden="true">存檔並重新核對</button>
+      {# 在欄位裡按 Enter 等於按「儲存更正並重新核對」:表單的預設按鈕是第一個送出鈕,不能是下面的「再加一種藥」 #}
+      <button class="visually-hidden" type="submit" tabindex="-1" aria-hidden="true">{{ v.save_label }}</button>
       {% endif %}
       <h2>{{ v.heading }}</h2>
       {% if v.error_count %}
       <p class="field-error" role="alert">{{ icon("alert") }}<span>有 {{ v.error_count }} 個地方要修改，請看下面紅字的說明。</span></p>
       {% endif %}
-      {% for f in v.fields %}
-      {% if f.kind == "choice" %}
-      <fieldset class="kinds"><legend>{{ f.label }}</legend>{{ chips(f.name, f.options, [f.value], "radio") }}</fieldset>
+      {# 有問題的欄位排前面(參考 Rossum 先看沒打勾的欄位),沒問題的排在後面 #}
+      {% if v.problems %}
+      <h3 class="issue-group">有問題的欄位（{{ v.problems|length }}）</h3>
+      {% for u in v.problems %}{{ unit(u) }}{% endfor %}
+      {% if v.others %}<h3 class="issue-group">其他欄位</h3>{% endif %}
       {% else %}
-      {{ field(f) }}
+      <p class="issue-none">這張表單上的欄位沒有標出問題，請對照原件確認。</p>
       {% endif %}
-      {% endfor %}
-      {% if v.meds is not none %}
-      <h3 class="subhead">藥品</h3>
-      {% for it in v.meds %}
-      <fieldset class="med-edit">
-        <legend>{{ it.legend }}</legend>
-        {{ field(it.name) }}
-        {{ field(it.usage) }}
-        <fieldset class="kinds"><legend>什麼時候吃</legend>{{ chips(it.timing_name, v.timing_choices, it.timing, "checkbox") }}</fieldset>
-        {{ field(it.days) }}
-      </fieldset>
-      {% endfor %}
-      {% if v.can_add_item %}
-      <button class="btn btn--secondary" type="submit" name="add_item" value="1" data-send-quiet>{{ icon("plus") }}再加一種藥</button>
-      {% endif %}
-      <p class="disclaimer disclaimer--compact" role="note">{{ icon("info") }}<span>只照抄藥袋上印的字；系統不判斷劑量或用法。存檔後服藥時間表仍要家人確認。</span></p>
-      {% endif %}
+      {% for u in v.others %}{{ unit(u) }}{% endfor %}
       {# 家人指定大類(例如沒選類別的公文):只決定放在文件櫃的哪一類,存檔時一併寫入 #}
-      <fieldset class="kinds">
-        <legend>這份文件屬於哪一類<span>決定放在文件櫃的哪一類</span></legend>
-        <div class="chips">
-          {% for c in v.category_choices %}
-          <label class="chip"><input class="chip__input" type="radio" name="category" value="{{ c.value }}"{% if c.value == v.category %} checked{% endif %}>{{ icon(c.icon) }}<span>{{ c.value }}</span></label>
-          {% endfor %}
-        </div>
-      </fieldset>
-      <p class="section__note">{{ v.after_note }}</p>
+      {% call ff("f-category", "這份文件屬於哪一類", fixed=true) %}
+      <select class="text-input ff__input" id="f-category" name="category" aria-describedby="{{ ff_described('f-category') }}">
+        {% for c in v.category_choices %}
+        <option value="{{ c }}"{% if c == v.category %} selected{% endif %}>{{ c }}</option>
+        {% endfor %}
+      </select>
+      {% endcall %}
+      {# 整頁只有這一個主要按鈕(月台黃);次要按鈕寫清楚按了會怎樣。v5:兩顆一樣寬、置中(app.css 的 T3 段落) #}
       <div class="form-actions">
-        <button class="btn btn--primary btn--lg" type="submit">{{ icon("check") }}<span data-submit-label data-busy-label="存檔中…">存檔並重新核對</span></button>
-        <a class="btn btn--secondary btn--lg" href="/doc/{{ v.id }}">不改了</a>
+        <button class="btn btn--primary btn--lg" type="submit" id="save">{{ icon("check") }}<span data-submit-label data-busy-label="儲存中…">{{ v.save_label }}</span></button>
+        <a class="btn btn--secondary btn--lg" href="/doc/{{ v.id }}">不儲存，回到結果頁</a>
       </div>
-      <p class="status-line" role="status" aria-live="polite" data-send-status="正在存檔並重新核對，請不要關閉這個畫面。"></p>
+      <p class="status-line" role="status" aria-live="polite" data-send-status="正在儲存更正並重新核對，請不要關閉這個畫面。"></p>
     </form>
     {% if v.can_reject %}
     {# 退回在系統內沒有復原,按下前先用確認框問一次(app.js 的 form[data-confirm];框在 base.html)。
-       按了「確定退回」app.js 才補上確認欄位(data-confirm-field);伺服器沒收到就不退回,改回一頁確認頁再問 #}
+       按了「確定退回」app.js 才補上確認欄位(data-confirm-field);伺服器沒收到就不退回,改回一頁確認頁再問。
+       v5:和上面那組按鈕隔開一段距離 #}
     <form class="reject-form" method="post" action="/doc/{{ v.id }}/reject"
           data-confirm-title="{{ v.reject_ask.title }}" data-confirm="{{ v.reject_ask.message }}"
           data-confirm-ok="{{ v.reject_ask.ok }}" data-confirm-field="{{ v.reject_ask.field }}">
       {{ csrf_input() }}
-      <button class="btn btn--danger btn--lg btn--block" type="submit">{{ icon("x") }}退回（品質不足）</button>
+      <button class="btn btn--danger btn--lg btn--block" type="submit">{{ icon("x") }}退回（品質不足），請長輩重新拍一張</button>
     </form>
     {% endif %}
   </div>
-  {{ original(v.file_url, v.is_pdf, v.file_size, "您上傳的" ~ v.title ~ "原件") }}
 </div>
 {% endblock %}

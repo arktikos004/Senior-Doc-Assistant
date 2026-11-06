@@ -118,7 +118,7 @@ def test_provider_rules(base, no_cloud_keys, monkeypatch):
 def test_nothing_stored_means_config_yaml_values(base, store):
     current = effective_config(base, store)
     assert current is not base                                  # 回傳新的物件,不改 config.yaml 的設定
-    assert (current.provider, current.auto_threshold, current.local_only_doc_types) == ("ollama", 0.80, ("藥袋",))
+    assert (current.provider, current.auto_threshold, current.local_only_doc_types) == ("ollama", 0.80, ("藥袋", "收據"))
     assert current.paths is base.paths
 
 
@@ -175,16 +175,16 @@ def test_unknown_stored_provider_is_ignored(base, store, bad):
     assert effective_config(base, store).provider == "ollama"
 
 
-def test_medication_bags_always_stay_local(base, store):
-    """藥袋一律只在本機:config.yaml 漏寫也補上;原本就有的保持原順序。"""
+def test_medication_bags_and_receipts_always_stay_local(base, store):
+    """藥袋與收據一律只在本機(收據:使用者 11/4):config.yaml 漏寫也補上,排在最前面;另外加的接在後面。"""
     base.local_only_doc_types = ()
-    assert effective_config(base, store).local_only_doc_types == ("藥袋",)
+    assert effective_config(base, store).local_only_doc_types == ("藥袋", "收據")
     base.local_only_doc_types = ("收據",)
     assert effective_config(base, store).local_only_doc_types == ("藥袋", "收據")
-    base.local_only_doc_types = ("收據", "藥袋")
-    assert effective_config(base, store).local_only_doc_types == ("收據", "藥袋")
+    base.local_only_doc_types = ("公文", "收據", "藥袋")
+    assert effective_config(base, store).local_only_doc_types == ("藥袋", "收據", "公文")
     store.set_setting("local_only_doc_types", "")               # 設定表裡出現的其他鍵一律不看
-    assert "藥袋" in effective_config(base, store).local_only_doc_types
+    assert {"藥袋", "收據"} <= set(effective_config(base, store).local_only_doc_types)
 
 
 # ---- 設定表單 ------------------------------------------------------------------------

@@ -1,0 +1,11 @@
+{# 翻牌數字(v5 車站時刻表的招牌,樣式在 app.css 的 .flap):月、日各兩塊牌,中間一條斜線。
+   month、day 是數字(整數或數字字串);沒有就畫空白的暗牌(.flap--blank),看板的節奏不斷。
+   牌只給眼睛看(aria-hidden):用的地方旁邊一定要留讀屏與朗讀念的原文(例如 visually-hidden 的「11/2 前」),
+   speech.js 也不唸 aria-hidden 的字。 #}
+{% macro flap(month="", day="") %}
+<span class="flap{% if not month %} flap--blank{% endif %}" aria-hidden="true">
+  {%- for c in ("%02d"|format(month|int) if month else "  ") %}<span class="flap__d">{{ c|trim }}</span>{% endfor -%}
+  <span class="flap__sep">/</span>
+  {%- for c in ("%02d"|format(day|int) if day else "  ") %}<span class="flap__d">{{ c|trim }}</span>{% endfor -%}
+</span>
+{%- endmacro %}

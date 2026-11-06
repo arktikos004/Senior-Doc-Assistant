@@ -1,6 +1,7 @@
 /* 朗讀:用瀏覽器內建的 Web Speech API,而且只用這台裝置上的本機語音(不把文字送到雲端語音服務)。
    數字一律逐位唸(1854 → 「一 八 五 四」),金額、電話、發票號碼才不會聽錯。
-   唸的內容是頁面上標了 data-speak-part 的文字(白話解說、待辦、藥袋聲明)。 */
+   唸的內容是頁面上標了 data-speak-part 的文字(第一屏的重點與核對那一句、待複核的原因、藥袋聲明與藥袋的白話解說),
+   略過 aria-hidden 的部分:期限的翻牌只給眼睛看,旁邊另有藏起來的原文(spokenText)。 */
 (function (root) {
   "use strict";
 
@@ -53,7 +54,20 @@
       local.find(function (v) { return lang(v) === "zh-cn" || lang(v) === "zh"; }) || null;
   }
 
-  root.ReadAloud = { spellDigits: spellDigits, sentences: sentences, pickLocalVoice: pickLocalVoice };
+  /** 一個元素裡要唸的字:和 textContent 一樣把字接起來,但跳過 aria-hidden="true" 的整段
+      (翻牌數字 11/18 只給眼睛看,不唸成「1 1 / 1 8」;讀屏念的原文就在旁邊)。
+      只用 nodeType、nodeValue、childNodes、getAttribute,node 也能用假的節點測。 */
+  function spokenText(node) {
+    if (!node) return "";
+    if (node.nodeType === 3) return node.nodeValue || "";   // 文字
+    if (node.nodeType !== 1) return "";                     // 註解等
+    if (node.getAttribute && node.getAttribute("aria-hidden") === "true") return "";
+    var out = "";
+    Array.prototype.forEach.call(node.childNodes || [], function (child) { out += spokenText(child); });
+    return out;
+  }
+
+  root.ReadAloud = { spellDigits: spellDigits, sentences: sentences, pickLocalVoice: pickLocalVoice, spokenText: spokenText };
 
   if (typeof document === "undefined") return;  // node 測試環境到此為止
 
@@ -82,7 +96,7 @@
   function speak() {
     var text = Array.prototype.map.call(
       document.querySelectorAll("[data-speak-part]"),
-      function (el) { return el.textContent.replace(/\s+/g, " ").trim(); }
+      function (el) { return spokenText(el).replace(/\s+/g, " ").trim(); }
     ).filter(Boolean).join("。\n");
     var parts = sentences(text);
     if (!parts.length) return;

@@ -58,6 +58,7 @@ from src.evaluation import (  # noqa: E402
     SPLITS,
     UNLABELED,
     breakdown,
+    deadline_metrics,
     deadline_summary,
     degraded_summary,
     evaluate_file,
@@ -147,7 +148,7 @@ def evaluate_model(
             print(f"  [略過] 找不到樣本 {sample_index:02d}")
             continue
         if cloud and truth.doc_type in run_cfg.local_only_doc_types:
-            # 系統本來就不會把藥袋送雲端,量雲端模型讀藥袋沒有意義;合成的也不送(原則 6)
+            # 系統本來就不會把藥袋與收據送雲端,量雲端模型讀這些沒有意義;合成的也不送(原則 6)
             print(f"  [略過] 樣本 {sample_index:02d} 是{truth.doc_type}:只在本機推論,不送雲端")
             continue
 
@@ -173,6 +174,7 @@ def evaluate_model(
         "類型提示": hint,
         "自動接受門檻": run_cfg.auto_threshold,
         "三種做法": {m: method_summary(records, m) for m in METHODS},
+        "期限指標": {m: deadline_metrics(records, m) for m in METHODS},
         "records": records,
     }
 
@@ -237,6 +239,27 @@ def _rate_cells(s: dict) -> str:
 
 
 _RATE_HEADER = "樣本數 | 自動接受比例 | 接受結果中的錯誤比例 | 轉人工比例 |"
+_METRIC_HEADER = "樣本數 | 關鍵欄位讀對率 | 錯誤自動接受率 | 正確且免更正完成率 |"
+
+
+def _metric_cells(s: dict) -> str:
+    """三個指標的四格(method_summary 或 deadline_metrics 的一列):樣本數、讀對率、錯誤自動接受率、完成率。"""
+    return (f"{s['樣本數']} | {_pct(s['關鍵欄位讀對'], s['樣本數'])} | {_pct(s['接受錯誤'], s['自動接受'])} "
+            f"| {_pct(s['正確且免更正完成'], s['樣本數'])}")
+
+
+def _metrics_table(records: list[dict]) -> list[str]:
+    """三個指標:整體與兩種期限(帳單、公文各自獨立)列三種做法,各類型只列現行流程 C(其他做法看「依類型」)。"""
+    lines = [f"| 範圍 | 做法 | {_METRIC_HEADER}", "|---|---|---|---|---|---|"]
+    lines += [f"| 整體 | {METHOD_LABELS[m]} | {_metric_cells(method_summary(records, m))} |" for m in METHODS]
+    deadlines = {m: deadline_metrics(records, m) for m in METHODS}
+    for doc_type in DEADLINE_FIELDS:
+        if deadlines["C"][doc_type]["樣本數"]:
+            lines += [f"| {doc_type}期限 | {METHOD_LABELS[m]} | {_metric_cells(deadlines[m][doc_type])} |"
+                      for m in METHODS]
+    for name, by_method in breakdown(records, "doc_type", methods=("C",)).items():
+        lines.append(f"| {name} | {METHOD_LABELS['C']} | {_metric_cells(by_method['C'])} |")
+    return lines
 
 
 def _method_table(records: list[dict]) -> list[str]:
@@ -353,7 +376,8 @@ def _summary_conflict_lines(records: list[dict]) -> list[str]:
 
 
 def _three_way_section(records: list[dict], model: str, threshold: float | None = None) -> str:
-    """「三種做法對照(同一測試集)」章節:總表、欄位錯誤、依類型、依證據類別、期限、藥袋、降質、split、版型、解說矛盾。"""
+    """「三種做法對照(同一測試集)」章節:三個指標(帳單期限獨立一列)、總表、欄位錯誤、依類型、依證據類別、
+    期限、藥袋、降質、split、版型、解說矛盾。"""
     sources = {r.get("來源") for r in records}
     threshold_text = (f"自動接受門檻 {threshold:.2f}(`config.yaml` 的 `confidence.auto_threshold`)。"
                       if threshold is not None else "")
@@ -371,6 +395,19 @@ def _three_way_section(records: list[dict], model: str, threshold: float | None 
         "只比正確率不夠:全部轉人工也能讓錯誤歸零,卻失去服務價值。所以每種做法同時列出自動接受比例、"
         "接受結果中的錯誤比例與轉人工比例(review + failed);括號內是件數,分母為 0 時顯示「—」"
         "(沒有接受任何文件不代表錯誤率是 0)。" + threshold_text,
+        "",
+        "### 三個指標",
+        "",
+        "三個指標要一起看;帳單期限獨立一列,不能用整體平均掩蓋。",
+        "",
+        "- **關鍵欄位讀對率** = 關鍵欄位全對 ÷ 樣本數,不管決策;辨識失敗算錯,B 只有解得開 QR 的才有讀值。",
+        "- **錯誤自動接受率** = 自動接受卻有關鍵欄位錯 ÷ 自動接受(同下面總表的「接受結果中的錯誤比例」)。",
+        "- **正確且免更正完成率** = 自動接受(不用人看)而且關鍵欄位全對 ÷ 樣本數;轉人工與辨識失敗都算沒完成。",
+        "- 「帳單期限」「公文期限」只看期限那一欄(帳單 `fields.due_date`、公文 `fields.deadline`),"
+        "樣本數是標準答案有期限的件數;整份文件的結果看「帳單」「公文」那兩列。",
+        "- 藥袋的「自動接受」只代表文件歸檔,服藥時間表不論決策一律等家人確認(只是不用更正)。",
+        "",
+        *_metrics_table(records),
         "",
         "### 總表",
         "",
@@ -525,6 +562,13 @@ def _print_three_way(result: dict) -> None:
         s = method_summary(records, m)
         print(f"  {METHOD_LABELS[m]}:自動接受 {_pct(s['自動接受'], s['樣本數'])}、"
               f"接受結果中的錯誤 {_pct(s['接受錯誤'], s['自動接受'])}、轉人工 {_pct(s['轉人工'], s['樣本數'])}")
+        print(f"    關鍵欄位讀對 {_pct(s['關鍵欄位讀對'], s['樣本數'])}、錯誤自動接受 {_pct(s['接受錯誤'], s['自動接受'])}、"
+              f"正確且免更正完成 {_pct(s['正確且免更正完成'], s['樣本數'])}")
+    bills = deadline_metrics(records, "C")["帳單"]
+    if bills["樣本數"]:
+        print(f"帳單期限(做法 C):讀對 {_pct(bills['關鍵欄位讀對'], bills['樣本數'])}、"
+              f"錯誤自動接受 {_pct(bills['接受錯誤'], bills['自動接受'])}、"
+              f"正確且免更正完成 {_pct(bills['正確且免更正完成'], bills['樣本數'])}")
 
 
 def main(argv: list[str] | None = None) -> int:

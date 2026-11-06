@@ -129,7 +129,6 @@ def test_same_photo_uploaded_twice_points_to_the_other_copy(client, store):
     later = client.get(f"/doc/{second}").text
     assert NOTE in later and "上傳的那一份，上傳的檔案一模一樣。" in later
     assert f'href="/doc/{first}"' in later and "看之前那一份" in later
-    assert "系統不會自動刪除" in later
     earlier = client.get(f"/doc/{first}").text
     assert "又上傳了一份" in earlier and f'href="/doc/{second}"' in earlier and "看之後那一份" in earlier
     assert store.count_documents() == 2                                         # 不會自動刪

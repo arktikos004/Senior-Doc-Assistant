@@ -17,6 +17,7 @@ from src import review
 from src.providers import MockAnalyzer
 from src.settings import PROVIDER, THRESHOLD
 from src.store import Store
+from test_web_cabinet import css_rule
 from test_web_correct import browser_form
 from web.app import CSRF_FIELD, create_app
 
@@ -64,12 +65,15 @@ _MENU_NAV = re.compile(r'<nav class="menu__panel"[^>]*>(.*?)</nav>', re.S)
 
 
 @pytest.mark.parametrize("url", ["/", "/confirm", "/review", "/doc/999"])
-def test_menu_has_cabinet_under_home_and_settings_last(client, url):
+def test_menu_has_cabinet_under_home_and_the_manual_last(client, url):
     html = client.get(url).text
     for nav in (_SIDE_NAV, _MENU_NAV):                         # 電腦的左側選單與手機的「選單」
         links = re.findall(r'href="([^"]+)"', nav.search(html).group(1))
-        assert links == ["/", "/cabinet", "/confirm", "/review", "/settings"], url
-    assert html.count("<span>文件櫃</span>") == html.count("<span>設定</span>") == 2
+        assert links == ["/", "/cabinet", "/confirm", "/review", "/settings", "/help"], url
+    assert html.count("<span>文件</span>") == html.count("<span>設定</span>") == 2
+    # 分頁名稱一律兩個字(使用者 11/4:「盡量讓字數統一」)
+    labels = re.findall(r'</svg><span(?: class="tab")?>([^<]+)<', _SIDE_NAV.search(html).group(1))   # 紅色小標在名稱後面
+    assert labels == ["首頁", "文件", "確認", "複核", "設定", "手冊"]
 
 
 def test_html_carries_the_font_size_hook(client):
@@ -100,10 +104,10 @@ def test_switching_mode_rebuilds_the_analyzer(cfg, store, form_client, monkeypat
     assert built == []                                         # 開頁面不建立,第一次上傳才建立
     upload(client, png_bytes(), "a.png")
     upload(client, png_bytes(), "b.png")
-    assert built == [("ollama", ("藥袋",))]
+    assert built == [("ollama", ("藥袋", "收據"))]
     store.set_setting(PROVIDER, "workers_ai")
     upload(client, png_bytes(), "c.png")
-    assert built == [("ollama", ("藥袋",)), ("workers_ai", ("藥袋",))]
+    assert built == [("ollama", ("藥袋", "收據")), ("workers_ai", ("藥袋", "收據"))]
 
 
 def test_concurrent_uploads_build_the_analyzer_once(cfg, form_client, monkeypatch, png_bytes):
@@ -147,13 +151,13 @@ def test_injected_analyzer_is_always_used(cfg, store, form_client, monkeypatch, 
 
 
 def test_privacy_notes_follow_the_current_mode(local_client, store, cloud_keys):
-    """安心說明與上傳區的藥袋提示說的是目前的辨識模式,不是 config.yaml 寫的(原則 7)。"""
-    html = local_client.get("/").text
-    assert "文件都在這台電腦上辨識，不會送到雲端。" in html and "兩類只在這台電腦處理" not in html
+    """使用手冊的安心說明與上傳區的藥袋提示說的是目前的辨識模式,不是 config.yaml 寫的(原則 7)。"""
+    assert "文件都在這台電腦上辨識，不會送到雲端。" in local_client.get("/help").text
+    assert "只在這台電腦上辨識" not in local_client.get("/").text
     store.set_setting(PROVIDER, "workers_ai")
-    html = local_client.get("/").text
-    assert "其他文件會交給雲端模型讀取" in html and "醫療與保險、身分證明兩類只在這台電腦處理" in html
-    assert "不會送到雲端。照片" not in html
+    manual = local_client.get("/help").text
+    assert "帳單、公文會交給雲端模型讀取" in manual and "不會送到雲端。照片" not in manual
+    assert "藥袋、發票／收據，以及選「不確定」的文件只在這台電腦上辨識；帳單、公文會交給雲端模型讀取。" in local_client.get("/").text
 
 
 def test_healthz_reports_the_current_mode(local_client, store, cloud_keys):
@@ -185,7 +189,7 @@ def test_status_in_local_mode(local_client):
     text = _text(local_client.get("/settings").text)
     assert "辨識模式 本機（這台電腦） 模型連得上" in text
     assert "使用的模型 Gemma 4 12B（本機）" in text
-    assert "只在本機處理 藥袋、醫療與保險、身分證明，以及沒選類型的文件" in text
+    assert "只在本機處理 藥袋、發票／收據，以及選「不確定」的文件" in text
     assert "自動存檔門檻 驗證信心 80% 以上才自動存檔，其餘交給家人複核" in text
     assert f"版本 {web_app.APP_VERSION}" in text
 
@@ -229,7 +233,7 @@ def test_device_preferences_are_disabled_defaults_without_js(client):
     assert [(name, value) for name, value, _ in found] == [
         ("font", "standard"), ("font", "large"), ("font", "xlarge"), ("rate", "slow"), ("rate", "standard")]
     assert [(name, value) for name, value, checked in found if checked] == [("font", "standard"), ("rate", "standard")]
-    assert "<noscript>" in html and "改了馬上生效，不影響家裡其他人的手機。" in html
+    assert "<noscript>" in html
 
 
 def test_font_and_rate_values_match_css_js_and_speech():
@@ -254,9 +258,9 @@ _PROVIDER_INPUT = re.compile(r'<input class="chip__input" type="radio" name="pro
 
 def test_threshold_choices_mark_the_default(client):
     html = client.get("/settings").text
-    options = re.findall(r'<option value="([\d.]+)"( selected)?>([^<]+)</option>', html)
-    assert options == [("0.80", " selected", "80%（預設）"), ("0.85", "", "85%"), ("0.90", "", "90%"), ("0.95", "", "95%")]
-    assert "只能調得更嚴，不能低於 80%" in html
+    options = re.findall(r'<input class="chip__input" type="radio" name="auto_threshold" value="([\d.]+)"( checked)?><span>([^<]+)</span>', html)
+    assert options == [("0.80", " checked", "80%（預設）"), ("0.85", "", "85%"), ("0.90", "", "90%"), ("0.95", "", "95%")]
+    assert 'name="auto_threshold"' in html and "<select" not in html                # 選項少,單選平鋪(表單規範第 10 點)
 
 
 def test_demo_mode_only_shows_the_mode(client):
@@ -282,7 +286,7 @@ def test_switching_to_cloud_asks_first(local_client, cloud_keys):
     button = re.search(r"<button[^>]*data-save-confirm[^>]*>", html).group(0)
     assert " hidden disabled" in button
     assert 'data-confirm-title="確定要開啟雲端備援嗎？"' in button and 'data-confirm-ok="確定開啟"' in button
-    assert 'data-confirm="開啟後，藥袋、醫療與保險、身分證明，以及沒選類型的文件仍只在這台電腦處理；' in button
+    assert 'data-confirm="開啟後，藥袋、發票／收據，以及選「不確定」的文件仍只在這台電腦處理；帳單、公文會交給雲端模型讀取。"' in button
     assert 'data-confirm-field="confirm_cloud"' in button      # 按了「確定開啟」,app.js 才補上伺服器要看的確認欄位
     assert "data-confirm" not in re.search(r"<button[^>]*data-save>", html).group(0)
 
@@ -294,7 +298,7 @@ def test_already_in_cloud_mode_needs_no_confirmation(local_client, store, cloud_
 
 
 def test_lock_line_says_medication_bags_stay_local(client):
-    assert "藥袋、醫療與保險、身分證明一律只在這台電腦處理，這一項不能關。" in client.get("/settings").text
+    assert "藥袋、發票／收據，以及選「不確定」的文件一律只在這台電腦處理，這一項不能關。" in client.get("/settings").text
 
 
 # ---- 設定頁:存檔 --------------------------------------------------------------------------
@@ -312,15 +316,19 @@ def test_saving_a_stricter_threshold_takes_effect_and_is_logged(client, store, f
     assert flash_text(html) == "已儲存設定"
     assert "驗證信心 85% 以上才自動存檔" in _text(html)
     assert re.search(r'<li>\d+月\d+日 \d\d:\d\d 自動存檔門檻改成 85%<span class="log__who">（這台電腦）</span></li>', html)
-    assert '<option value="0.85" selected>85%</option>' in html
+    assert 'name="auto_threshold" value="0.85" checked><span>85%</span>' in html
 
 
 @pytest.mark.parametrize("bad", ["0.79", "0.5", "0", "1", "abc"])
 def test_threshold_below_080_is_refused(client, store, bad):
     r = save(client, auto_threshold=bad)
     assert r.status_code == 400
-    assert "自動存檔門檻" in r.text and 'role="alert"' in r.text and 'aria-invalid="true"' in r.text
-    assert '<option value="0.80" selected>' in r.text           # 選單回到目前的值
+    # 說明寫在選項正下方;選項回到目前的值
+    fieldset = r.text[r.text.index('<fieldset class="kinds" aria-describedby="threshold-error">'):]
+    fieldset = fieldset[:fieldset.index("</fieldset>")]
+    assert '<p class="ff__error" id="threshold-error" role="alert">' in fieldset and "自動存檔門檻" in fieldset
+    assert 'name="auto_threshold" value="0.80" checked>' in fieldset
+    assert '<p class="field-error"' not in r.text               # 上面不再寫一次
     assert store.get_settings() == {} and store.list_setting_changes() == []
 
 
@@ -336,7 +344,7 @@ def test_cloud_mode_needs_keys(local_client, store, no_cloud_keys):
     assert r.status_code == 400 and "這台電腦還沒有設定雲端模型的帳號與金鑰，不能開啟雲端備援。" in r.text
     assert store.get_settings() == {}                          # 一欄有錯,整份不存(門檻也沒存)
     inputs = dict(_PROVIDER_INPUT.findall(r.text))
-    assert '<option value="0.90" selected>' in r.text           # 剛剛的選擇留著,改好再送
+    assert 'name="auto_threshold" value="0.90" checked>' in r.text   # 剛剛的選擇留著,改好再送
     assert "checked" in inputs["ollama"]
     assert "確定要開啟雲端備援嗎？</h1>" not in r.text             # 不能開的不必問要不要開
 
@@ -347,7 +355,7 @@ def test_switching_to_cloud_with_keys(local_client, store, cloud_keys):
     assert r.status_code == 303 and store.get_settings() == {PROVIDER: "workers_ai"}
     html = local_client.get("/settings").text
     assert "辨識模式改成「可以用雲端備援」" in html
-    assert "其他文件會交給雲端模型讀取" in html                     # 安心說明跟著改
+    assert "帳單、公文會交給雲端模型讀取" in html                     # 安心說明跟著改
     r = save(local_client, provider="ollama", auto_threshold="0.80")    # 切回本機不必確認
     assert r.status_code == 303 and store.get_settings() == {PROVIDER: "ollama"}
     assert "辨識模式改成「只用這台電腦」" in local_client.get("/settings").text
@@ -359,7 +367,7 @@ def test_switching_to_cloud_without_confirmation_asks_on_a_page(local_client, st
     r = save(local_client, provider="workers_ai", auto_threshold="0.90")
     assert r.status_code == 400 and store.get_settings() == {} and store.list_setting_changes() == []
     assert "<h1>確定要開啟雲端備援嗎？</h1>" in r.text
-    assert "開啟後，藥袋、醫療與保險、身分證明，以及沒選類型的文件仍只在這台電腦處理；其他文件會交給雲端模型讀取。" in r.text
+    assert "開啟後，藥袋、發票／收據，以及選「不確定」的文件仍只在這台電腦處理；帳單、公文會交給雲端模型讀取。" in r.text
     assert '<a class="btn btn--secondary btn--lg" href="/settings">先不要</a>' in r.text
     assert "確定開啟</button>" in r.text and "取消" not in _text(r.text)
     assert r.text.index(">先不要</a>") < r.text.index("確定開啟</button>")      # 不做的那一顆在前面
@@ -654,6 +662,35 @@ def test_settings_forms_carry_the_token(client):
     html = client.get("/settings").text
     forms = re.findall(r'<form\b[^>]*\bmethod="post"[^>]*>(.*?)</form>', html, re.S)
     assert len(forms) == 2 and all('name="csrf_token"' in body for body in forms)
+
+
+def test_options_and_form_buttons_are_the_same_size(client):
+    """v5(使用者 11/6:「欄位要對齊 統一大小」):設定與家庭成員的選項同一種一樣寬、字置中(「大」和「80%（預設）」一樣大);
+    區段標題和其他頁的段落標題一樣大;表單底部的按鈕一樣寬、置中;「刪除全部資料」和「匯出全部紀錄」隔開一段距離。"""
+    html = client.get("/settings").text
+    assert '<section class="panel set-card danger-zone"' in html
+    assert "font-size: 1.5rem; font-weight: 800" in css_rule(".set-card h2")
+    chip = css_rule(".set-card .chip")
+    assert "width: 8.5rem" in chip and "justify-content: center" in chip
+    buttons = css_rule(".settings .form-actions .btn, .ask-form .form-actions .btn, .lot-form > .btn, .error-next .btn")
+    assert "min-width: 12rem" in buttons
+    assert "gap: 3rem" in css_rule(".danger-zone .form-actions")
+    assert "min-width: 10.5rem" in css_rule(".family-form > .btn, .member-remove .btn")
+
+
+def test_confirmation_page_buttons_are_the_same_width(client):
+    """沒有 JS 時的確認頁(ask.html):「先不要」和「確定…」一樣寬(和其他表單底部的按鈕同一條規則)。"""
+    r = client.post("/settings/delete")
+    assert r.status_code == 400 and '<form class="ask-form" method="post" action="/settings/delete">' in r.text
+
+
+def test_member_card_keeps_the_email_under_the_name(client, store):
+    """家庭成員:名字和電子郵件排在一起;「加入家庭成員」和上面的成員隔開一段,和其他段落一樣。"""
+    store.set_member("family@example.test", "family", "女兒", actor="local")
+    html = client.get("/settings/members").text
+    card = html[html.index("<article"):html.index("</article>")]
+    assert '<div class="member-card__head"><h3>女兒</h3><p class="member-email">family@example.test</p></div>' in card
+    assert '<section class="section panel set-card" aria-labelledby="add-member-title">' in html
 
 
 def test_settings_page_has_no_inline_code(client):

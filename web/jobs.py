@@ -3,7 +3,8 @@
 - 模型一次只讀一張:這台電腦只有一張 GPU,兩張同時送會互搶顯示記憶體,兩張都變慢、甚至逾時。
   後來的照上傳順序排隊,進度頁寫前面還有幾張。
 - 每一步是程式真的做完才記下(Pipeline 的 on_stage),畫面不會先亮。
-- 進度只放在記憶體,只給上傳的那個人看:服務重開就沒了(上傳的檔案還在,進度頁請家人到文件櫃找)。
+- 進度只放在記憶體,只給上傳的那個人看:服務重開就沒了。文件不會跟著不見:收件時就先建好「處理中」的那一筆
+  (src.pipeline.receive_document),開機時改成「還沒讀」,在文件櫃找得到、可以重新辨識;進度頁請家人到文件櫃找。
 - 背景執行緒是 daemon,沒事做就結束;一個 app 一份 JobBoard。
 """
 from __future__ import annotations
@@ -44,6 +45,8 @@ class Job:
     doc_id: int | None = None
     failed: bool = False
     finished: float | None = None
+    failed_doc: int | None = None  # 失敗時文件沒有動(改類型):錯誤頁連回這份,不叫人重新上傳
+    for_doc: int | None = None     # 處理的是哪一份文件(收件時建好的、重新辨識的):開機恢復不動還在做的這份
 
 
 class JobBoard:
@@ -58,13 +61,14 @@ class JobBoard:
         self._seq = 0
 
     def submit(self, work: Work, *, owner: str, provider: str, is_pdf: bool, label: str,
-               photo: bytes | None, received: float) -> Job:
+               photo: bytes | None, received: float, failed_doc: int | None = None,
+               for_doc: int | None = None) -> Job:
         """排進佇列;received 是「收到照片」那一步花的秒數(檢查格式、去掉拍攝資訊)。"""
         with self._cond:
             self._sweep()
             self._seq += 1
             job = Job(secrets.token_urlsafe(24), self._seq, owner, provider, is_pdf, label, photo,
-                      seconds={STAGE_RECEIVED: received})
+                      seconds={STAGE_RECEIVED: received}, failed_doc=failed_doc, for_doc=for_doc)
             self._jobs[job.token] = job
             self._queue.append((job, work))
             if self._worker is None:
@@ -83,6 +87,11 @@ class JobBoard:
         """最多等 seconds 秒;做完(成功或失敗)回 True。"""
         with self._cond:
             return self._cond.wait_for(lambda: job.finished is not None, timeout=seconds)
+
+    def busy_docs(self) -> set[int]:
+        """還在排隊或正在做的工作處理的是哪幾份文件(開機恢復跳過它們:它們沒有中斷)。"""
+        with self._cond:
+            return {j.for_doc for j in self._jobs.values() if j.finished is None and j.for_doc is not None}
 
     def snapshot(self, job: Job) -> dict[str, object]:
         """進度頁要的資料(複本,不會邊讀邊變):做完的步驟秒數、目前這一步做了幾秒、前面還有幾張。"""

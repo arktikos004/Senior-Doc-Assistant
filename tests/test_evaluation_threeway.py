@@ -38,6 +38,7 @@ from src.evaluation import (
     GroundTruth,
     LABELS_JSONL,
     breakdown,
+    deadline_metrics,
     deadline_summary,
     degraded_summary,
     evaluate_file,
@@ -296,6 +297,43 @@ def test_overall_method_summary(records):
     assert c["接受錯誤比例"] == pytest.approx(4 / 7) and c["轉人工比例"] == 0.3
 
 
+def test_three_metrics_in_method_summary(records):
+    # 手算自檔頭的 10 筆表:模型讀對的是 1、4、5、7 四筆;自動接受又全對的只有 1、5、7(4 讀對但轉人工)
+    a, b, c = (method_summary(records, m) for m in ("A", "B", "C"))
+    assert (a["關鍵欄位讀對"], a["關鍵欄位讀對率"]) == (4, 0.4)
+    assert (a["正確且免更正完成"], a["正確且免更正完成率"]) == (3, 0.3)
+    assert (b["關鍵欄位讀對"], b["關鍵欄位讀對率"]) == (2, 0.2)     # B 只有解得開 QR 的兩筆有讀值
+    assert (b["正確且免更正完成"], b["正確且免更正完成率"]) == (2, 0.2)
+    assert (c["關鍵欄位讀對"], c["關鍵欄位讀對率"]) == (4, 0.4)
+    assert (c["正確且免更正完成"], c["正確且免更正完成率"]) == (3, 0.3)
+
+
+@pytest.mark.parametrize("index, read_right, completed", [
+    (0, 1, 1),     # inv_ok:自動接受且全對,才算完成
+    (3, 1, 0),     # bill_glare:讀對但轉人工,要有人看,不算完成
+    (5, 0, 0),     # bill_wrong_due:自動接受卻讀錯,不算完成
+    (1, 0, 0),     # inv_misread:讀錯、被 QR 攔下轉人工
+    (9, 0, 0),     # broken:辨識失敗也留在分母
+])
+def test_completion_needs_both_auto_accepted_and_all_key_fields_right(records, index, read_right, completed):
+    summary = method_summary([records[index]], "C")
+    assert summary["樣本數"] == 1
+    assert (summary["關鍵欄位讀對"], summary["正確且免更正完成"]) == (read_right, completed)
+    assert summary["正確且免更正完成率"] == float(completed)
+
+
+def test_completion_rate_without_samples_is_unknown():
+    assert method_summary([], "C")["正確且免更正完成率"] is None     # 沒有樣本不代表完成率是 0
+
+
+def test_completion_rate_by_doc_type(records):
+    table = breakdown(records, "doc_type")
+    assert table["帳單"]["C"]["正確且免更正完成率"] == pytest.approx(1 / 3)
+    assert table["藥袋"]["C"]["正確且免更正完成率"] == 0.0
+    assert table["收據"]["C"]["正確且免更正完成率"] == 0.0            # 只有一筆,辨識失敗
+    assert table["帳單"]["B"]["正確且免更正完成率"] == 0.0            # 只解 QR 不處理帳單
+
+
 def test_field_errors_among_accepted(records):
     assert method_summary(records, "A")["欄位錯誤"] == {
         "amount": 2, "fields.due_date": 1, "date": 1, "fields.deadline": 1, "fields.items": 1}
@@ -360,6 +398,83 @@ def test_deadline_errors_bills_and_letters_separately(records):
     assert b["帳單"]["自動接受"] == 0 and b["帳單"]["期限錯誤比例"] is None
     assert c["帳單"]["依證據類別"] == {EVIDENCE_RULES: {"自動接受": 2, "期限錯誤": 1}}
     assert (c["公文"]["自動接受"], c["公文"]["期限錯誤"]) == (2, 1)
+
+
+def test_deadline_rows_report_three_metrics_on_the_deadline_alone(records):
+    a, b, c = (deadline_metrics(records, m) for m in ("A", "B", "C"))
+    # 帳單 3 張:bill_glare 期限對但轉人工、bill_ok 對且接受、bill_wrong_due 期限錯卻接受
+    bills = c["帳單"]
+    assert (bills["樣本數"], bills["關鍵欄位讀對"], bills["自動接受"], bills["接受錯誤"], bills["正確且免更正完成"]) == (
+        3, 2, 2, 1, 1)
+    assert bills["關鍵欄位讀對率"] == pytest.approx(2 / 3) and bills["接受錯誤比例"] == 0.5
+    assert bills["正確且免更正完成率"] == pytest.approx(1 / 3)
+    assert a["帳單"] == bills                 # 自評 0.5 的 bill_glare 在 A 也轉人工,其餘相同
+    # 只解 QR 不讀帳單:沒有接受就不知道錯誤率(不是 0),完成率是 0
+    assert (b["帳單"]["樣本數"], b["帳單"]["關鍵欄位讀對"], b["帳單"]["自動接受"]) == (3, 0, 0)
+    assert b["帳單"]["接受錯誤比例"] is None and b["帳單"]["正確且免更正完成率"] == 0.0
+    # 公文 2 份都接受:發文日讀錯的那份,程式算出的期限跟著錯
+    letters = c["公文"]
+    assert (letters["樣本數"], letters["關鍵欄位讀對"], letters["接受錯誤"], letters["正確且免更正完成"]) == (2, 1, 1, 1)
+
+
+def _accepted(doc_type, deadline=None, **fields):
+    """手寫一筆自動接受的紀錄(做法 C),只帶指標要用的鍵。"""
+    return {"doc_type": doc_type, "期限": deadline,
+            "做法": {"C": {"決策": "archive", "理由": "", "correct": all(fields.values()), "fields": fields}}}
+
+
+def test_bill_deadline_is_not_hidden_by_the_overall_average():
+    # 9 張發票都對、1 張帳單期限錯卻自動接受:整體看起來只錯 1 成,帳單期限那一列是 100%
+    rows = [_accepted("發票", amount=True) for _ in range(9)]
+    rows.append(_accepted("帳單", {"標準答案": "2026-10-15", "讀值": "2026-10-16"}, **{"fields.due_date": False}))
+    assert method_summary(rows, "C")["接受錯誤比例"] == 0.1
+    assert deadline_metrics(rows, "C")["帳單"]["接受錯誤比例"] == 1.0
+
+
+def test_bill_deadline_row_looks_only_at_the_deadline():
+    # 金額錯、期限對:整份不算完成,期限那一列算對
+    rows = [_accepted("帳單", {"標準答案": "2026-10-15", "讀值": "2026-10-15"},
+                      amount=False, **{"fields.due_date": True})]
+    assert method_summary(rows, "C")["正確且免更正完成"] == 0
+    row = deadline_metrics(rows, "C")["帳單"]
+    assert (row["關鍵欄位讀對"], row["接受錯誤"], row["正確且免更正完成"]) == (1, 0, 1)
+
+
+def _bill_truth(**values):
+    return GroundTruth(filename="b.png", doc_type="帳單", **values)
+
+
+def test_bill_deadline_failed_read_stays_in_the_denominator(tmp_path):
+    # 辨識失敗的帳單沒有讀值,但期限答案還在:分母要算它,不能因為讀不出來就從這一列消失
+    path = tmp_path / "b.png"
+    Image.new("RGB", (400, 300), "white").save(path)
+    row = evaluate_file(ByName({}), path, _bill_truth(fields={"due_date": "2026-10-15"}), cfg=AppConfig())
+    assert row["錯誤"] and row["期限"] == {"標準答案": "2026-10-15", "讀值": None}
+    bills = deadline_metrics([row], "C")["帳單"]
+    assert (bills["樣本數"], bills["關鍵欄位讀對"], bills["自動接受"]) == (1, 0, 0)
+    assert bills["正確且免更正完成率"] == 0.0 and bills["接受錯誤比例"] is None
+
+
+def test_bill_deadline_without_an_answer_is_left_out(tmp_path):
+    # 標準答案沒有期限的帳單(舊 CSV):沒得比,不進這一列;辨識失敗時也一樣
+    path = tmp_path / "b.png"
+    Image.new("RGB", (400, 300), "white").save(path)
+    read = {"b.png": _bill("2026-09-20", 920.0, "2026-10-12", 0.9, "")}
+    rows = [evaluate_file(ByName(read), path, _bill_truth(), cfg=AppConfig()),
+            evaluate_file(ByName({}), path, _bill_truth(), cfg=AppConfig())]
+    bills = deadline_metrics(rows, "C")["帳單"]
+    assert bills["樣本數"] == 0 and bills["關鍵欄位讀對率"] is None and bills["正確且免更正完成率"] is None
+
+
+def test_bill_read_as_another_type_counts_as_a_wrong_deadline(tmp_path):
+    # 帳單讀成收據還自動接受:不會有繳費提醒,期限等於漏了,算錯誤自動接受
+    path = tmp_path / "b.png"
+    Image.new("RGB", (400, 300), "white").save(path)
+    read = {"b.png": ExtractionResult(doc_type="收據", date="2026-09-20", amount=920.0, confidence=0.9)}
+    row = evaluate_file(ByName(read), path, _bill_truth(fields={"due_date": "2026-10-12"}), cfg=AppConfig())
+    assert row["做法"]["C"]["決策"] == "archive"
+    bills = deadline_metrics([row], "C")["帳單"]
+    assert (bills["關鍵欄位讀對"], bills["自動接受"], bills["接受錯誤"], bills["正確且免更正完成"]) == (0, 1, 1, 0)
 
 
 def test_degraded_abstain_vs_wrongly_accepted(records):
@@ -479,6 +594,53 @@ def test_report_keeps_old_sections_and_adds_three_way(report_text):
         assert heading in report_text, heading
     assert report_text.index("## 三種做法對照") < report_text.index("## 信心門檻校準")
     assert "effective_score" in report_text and "自動接受門檻 0.80" in report_text
+
+
+def _metrics_section(text: str) -> str:
+    return text[text.index("### 三個指標"):text.index("### 總表")]
+
+
+def test_report_three_metrics_come_first_with_definitions(report_text):
+    assert report_text.index("### 三個指標") < report_text.index("### 總表")
+    section = _metrics_section(report_text)
+    assert "| 範圍 | 做法 | 樣本數 | 關鍵欄位讀對率 | 錯誤自動接受率 | 正確且免更正完成率 |" in section
+    assert "| 整體 | A 只依自評 | 10 | 40.0%(4/10) | 62.5%(5/8) | 30.0%(3/10) |" in section
+    assert "| 整體 | B 只解 QR | 10 | 20.0%(2/10) | 0.0%(0/2) | 20.0%(2/10) |" in section
+    assert "| 整體 | C 模型加分層核對 | 10 | 40.0%(4/10) | 57.1%(4/7) | 30.0%(3/10) |" in section
+    assert "自動接受(不用人看)而且關鍵欄位全對" in section   # 定義要寫在報告上
+    assert "服藥時間表" in section                            # 藥袋的自動接受只代表文件歸檔
+
+
+def test_report_bill_deadline_has_its_own_rows(report_text):
+    section = _metrics_section(report_text)
+    assert "| 帳單期限 | A 只依自評 | 3 | 66.7%(2/3) | 50.0%(1/2) | 33.3%(1/3) |" in section
+    assert "| 帳單期限 | B 只解 QR | 3 | 0.0%(0/3) | — | 0.0%(0/3) |" in section    # 沒有接受 → 錯誤率「—」
+    assert "| 帳單期限 | C 模型加分層核對 | 3 | 66.7%(2/3) | 50.0%(1/2) | 33.3%(1/3) |" in section
+    assert "| 公文期限 | C 模型加分層核對 | 2 | 50.0%(1/2) | 50.0%(1/2) | 50.0%(1/2) |" in section
+
+
+def test_report_three_metrics_by_doc_type_for_the_layered_method(report_text):
+    section = _metrics_section(report_text)
+    assert "| 發票 | C 模型加分層核對 | 3 | 33.3%(1/3) | 50.0%(1/2) | 33.3%(1/3) |" in section
+    assert "| 收據 | C 模型加分層核對 | 1 | 0.0%(0/1) | — | 0.0%(0/1) |" in section     # 辨識失敗
+    assert "| 藥袋 | C 模型加分層核對 | 1 | 0.0%(0/1) | 100.0%(1/1) | 0.0%(0/1) |" in section
+    assert "| 公文 | C 模型加分層核對 | 2 | 50.0%(1/2) | 50.0%(1/2) | 50.0%(1/2) |" in section
+
+
+def test_report_without_bills_or_letters_has_no_deadline_rows(records, tmp_path):
+    invoices = [r for r in records if r["doc_type"] == "發票"]
+    text = evaluate_tool._write_report([_result(invoices)], 0.90, tmp_path, out=tmp_path / "r.md").read_text(
+        encoding="utf-8")
+    section = _metrics_section(text)
+    assert "| 整體 | C 模型加分層核對 | 3 |" in section
+    assert "帳單期限 |" not in section and "公文期限 |" not in section
+
+
+def test_console_prints_three_metrics_and_bill_deadline(records, capsys):
+    evaluate_tool._print_three_way(_result(records))
+    out = capsys.readouterr().out
+    assert "關鍵欄位讀對 40.0%(4/10)、錯誤自動接受 57.1%(4/7)、正確且免更正完成 30.0%(3/10)" in out
+    assert "帳單期限(做法 C):讀對 66.7%(2/3)、錯誤自動接受 50.0%(1/2)、正確且免更正完成 33.3%(1/3)" in out
 
 
 def test_report_overall_table_numbers(report_text):
@@ -608,6 +770,17 @@ def test_cli_split_and_hint_label(no_side_effects):
     assert "split:test;類型提示:標準答案的類型" in (tmp / "r.md").read_text(encoding="utf-8")
 
 
+def test_cli_raw_results_carry_the_three_metrics(no_side_effects):
+    tmp = no_side_effects
+    assert evaluate_tool.main(["--mock", "--samples", str(build_dataset(tmp / "jsonl")),
+                               "--report", str(tmp / "r.md")]) == 0
+    (result,) = _raw_results(tmp)
+    overall = result["三種做法"]["C"]
+    assert overall["樣本數"] == 10 and {"關鍵欄位讀對率", "接受錯誤比例", "正確且免更正完成率"} <= set(overall)
+    assert result["期限指標"]["C"]["帳單"]["樣本數"] == 3   # 3 張帳單的標準答案都有繳費期限
+    assert "### 三個指標" in (tmp / "r.md").read_text(encoding="utf-8")
+
+
 def test_cli_without_labels_returns_1(no_side_effects):
     empty = no_side_effects / "empty"
     empty.mkdir()
@@ -623,7 +796,7 @@ def test_cli_split_with_no_samples_stops(no_side_effects):
 
 
 def test_cloud_evaluation_never_sends_medication_bags(tmp_path, monkeypatch):
-    # 量雲端模型時藥袋一律略過:系統本來就不會把藥袋送雲端(原則 6),合成的也不送
+    # 量雲端模型時藥袋與收據一律略過:系統本來就不會把它們送雲端(原則 6),合成的也不送
     import src.providers.workers_ai as workers_ai
 
     fake = ByName()
@@ -631,4 +804,4 @@ def test_cloud_evaluation_never_sends_medication_bags(tmp_path, monkeypatch):
     result = evaluate_tool.evaluate_model(AppConfig(), "雲端模型", mock=False, provider="workers_ai",
                                           samples_dir=build_dataset(tmp_path / "s"))
     assert "med_bag.png" not in [name for name, _ in fake.calls]
-    assert result["樣本數"] == 9 and "藥袋" not in {r["doc_type"] for r in result["records"]}
+    assert result["樣本數"] == 8 and not {"藥袋", "收據"} & {r["doc_type"] for r in result["records"]}

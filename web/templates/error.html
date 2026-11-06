@@ -8,5 +8,6 @@
     <p class="lede">錯誤代碼 {{ status }}。{{ hint }}</p>
   </div>
 </header>
-<p><a class="btn btn--primary btn--lg" href="{{ next_url }}">{{ icon(next_icon) }}{{ next_label }}</a></p>
+{# 下一步是這一頁唯一的主要按鈕(月台黃加深墨框),和其他頁表單底部的按鈕一樣寬 #}
+<p class="error-next"><a class="btn btn--primary btn--lg" href="{{ next_url }}">{{ icon(next_icon) }}{{ next_label }}</a></p>
 {% endblock %}

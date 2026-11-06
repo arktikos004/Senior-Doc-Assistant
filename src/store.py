@@ -4,7 +4,11 @@ SQLite 是文件、行動與更正狀態的單一事實來源(原則 8);records.
 衍生流水帳(人看得懂、可 grep),新功能一律讀這裡、不讀 jsonl。家人更正或退回時更新原本那筆文件
 (update_document),不新增一筆;這份文件的舊行動換成新的(replace_actions)。corrections 表在
 家人更正讀值時寫入(F7),記下更正前後的讀值與是否通過核對(verified)。每次呼叫開一條新連線,
-FastAPI 的執行緒池與 CLI 都能安全共用同一個檔案。
+FastAPI 的執行緒池與 CLI 都能安全共用同一個檔案。好幾個寫入要一起成功或一起撤回(文件與它的行動、
+更正紀錄、操作紀錄)時包在 transaction() 裡:區塊內的方法共用同一條連線,做完才 commit。
+
+文件的 action 除了處理結果(archive / review / failed),還有收件後還沒讀完的 processing(src/pipeline.py):
+上傳檔存好就先建這一筆,讀完更新同一筆;服務中途重開時,開機恢復把它改成「模型沒回應」的失敗。
 
 家庭角色:members 表把 Access 登入的 email 對照到長輩/家人;audit_events 表記下每次確認、
 退回、取消/恢復提醒、更正讀值與退回文件是誰、什麼時候做的(讀值更正後,看得到原本是誰確認過)。
@@ -15,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -27,7 +32,7 @@ CREATE TABLE IF NOT EXISTS documents (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at   TEXT NOT NULL,
     source_file  TEXT NOT NULL,
-    action       TEXT NOT NULL,              -- archive / review / failed
+    action       TEXT NOT NULL,              -- archive / review / failed;processing = 收件後還沒讀完
     reason       TEXT,
     target_path  TEXT,
     doc_type     TEXT,
@@ -102,7 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_document ON audit_events(document_id);
 ACTION_TIERS = ("auto", "confirm", "manual")
 CONSENT_PREFIX = "consent:"    # 設定裡的鍵:consent:<email> = 看過資料使用說明的時間(刪除全部資料時保留)
 DOCUMENT_DELETED = "document_deleted"   # 設定變更紀錄的鍵:刪除單份文件(old_value 是文件編號)
-ACTION_STATUSES = ("pending", "done", "rejected", "completed")   # completed:長輩或家人按了「繳好了/辦好了」
+ACTION_STATUSES = ("pending", "done", "rejected", "completed")   # completed:長輩或家人按了「已繳費/已辦理」
 MEMBER_CHANGE_PREFIX = "member:"   # 家庭成員的變更記在 setting_changes,key 是 member:<email>
 MEMBER_REMOVED = "removed"         # 移除成員時 setting_changes 的 new_value
 
@@ -119,19 +124,48 @@ class Store:
     def __init__(self, path: Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._tx = threading.local()   # transaction() 裡這條執行緒共用的連線(連線不跨執行緒)
         with self._conn() as conn:
             conn.executescript(SCHEMA)
             _migrate(conn)
 
-    @contextmanager
-    def _conn(self) -> Iterator[sqlite3.Connection]:
+    def _open(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
+        shared = getattr(self._tx, "conn", None)
+        if shared is not None:
+            yield shared   # 在 transaction() 裡:用同一條連線,commit 或撤回由 transaction() 決定
+            return
+        conn = self._open()
         try:
             with conn:  # 成功自動 commit、例外自動 rollback
                 yield conn
         finally:
+            conn.close()
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """好幾個寫入包成一個交易:with store.transaction(): 裡呼叫的方法都用同一條連線,全部做完才 commit;
+        任何一步丟例外(服務被關掉也一樣)就全部撤回,不會文件有了、提醒少了。
+
+        只在呼叫的這條執行緒有效,別的執行緒照常各開各的連線;巢狀的 transaction() 併進最外層。
+        delete_document 與 purge_all 做完要 VACUUM(不能在交易裡做),不要放進來。
+        """
+        if getattr(self._tx, "conn", None) is not None:
+            yield
+            return
+        conn = self._open()
+        self._tx.conn = conn
+        try:
+            with conn:
+                yield
+        finally:
+            self._tx.conn = None
             conn.close()
 
     def writable(self) -> bool:
@@ -170,24 +204,28 @@ class Store:
 
     def update_document(self, doc_id: int, record: dict[str, Any], *,
                         event: str | None = None, actor: str | None = None,
-                        role: str | None = None) -> None:
+                        role: str | None = None, expect: str | None = None,
+                        was: str | None = None) -> None:
         """家人更正或退回後,用新的處理紀錄更新同一筆文件(原則 8:人工的決定不新增一筆)。
 
         record 的格式同 add_document;上傳時間(created_at)、原始檔名、來源、類型提示與家人選的文件名稱
         是上傳時的事實,不變。找不到這份文件丟 LookupError。
+        expect:只在文件現在是這個狀態時才更新(例如處理中的讀完才寫回:讀的時候被刪掉、或已經被改成別的狀態就不寫),
+        不是的話和找不到一樣丟 LookupError。was:操作紀錄的「從」;沒給就用資料庫裡現在的狀態
+        (重新辨識時文件已經先改成處理中,紀錄要寫原本的讀不出來)。
         """
         columns = _record_columns(record)
+        sql = f"UPDATE documents SET {', '.join(f'{name} = ?' for name in columns)} WHERE id = ?"
+        args: tuple[Any, ...] = (*columns.values(), doc_id)
+        if expect is not None:
+            sql, args = sql + " AND action = ?", (*args, expect)
         with self._conn() as conn:
             before = conn.execute("SELECT action FROM documents WHERE id = ?", (doc_id,)).fetchone()
-            cur = conn.execute(
-                f"UPDATE documents SET {', '.join(f'{name} = ?' for name in columns)} WHERE id = ?",
-                (*columns.values(), doc_id),
-            )
-            if cur.rowcount == 0:
-                raise LookupError(f"找不到文件 {doc_id}")
+            if conn.execute(sql, args).rowcount == 0:
+                raise LookupError(f"找不到文件 {doc_id}" if expect is None else f"文件 {doc_id} 不是 {expect}")
             if event is not None:
                 _insert_audit(conn, event, document_id=doc_id, actor=actor, role=role,
-                              detail={"from": before["action"], "to": columns["action"]})
+                              detail={"from": was or before["action"], "to": columns["action"]})
 
     def set_document_category(self, doc_id: int, category: str, *,
                               actor: str | None = None, role: str | None = None) -> None:
@@ -256,6 +294,12 @@ class Store:
         with self._conn() as conn:
             conn.execute("UPDATE documents SET file_sha256 = ? WHERE id = ? AND file_sha256 IS NULL",
                          (sha256, doc_id))
+
+    def set_target_path(self, doc_id: int, path: str, *, was: str | None) -> bool:
+        """改記原件的位置(開機恢復認回原件、又搬不回原位時用),回傳有沒有改;資料庫記的已經不是 was 就不改。"""
+        with self._conn() as conn:
+            return conn.execute("UPDATE documents SET target_path = ? WHERE id = ? AND target_path IS ?",
+                                (path, doc_id, was)).rowcount > 0
 
     def import_records(self, records: Iterable[dict[str, Any]]) -> int:
         """把舊的 records.jsonl 匯入;同一時間+同檔名視為已匯入,可重複執行。"""
@@ -433,16 +477,29 @@ class Store:
             return _insert_audit(conn, event, document_id=document_id, action_id=action_id,
                                  actor=actor, role=role, detail=detail)
 
-    def list_audit_events(self, document_id: int | None = None, limit: int = 50) -> list[dict[str, Any]]:
-        """操作紀錄,新的在前;給 document_id 就只看這份文件的(含它的行動)。"""
-        sql, args = "SELECT * FROM audit_events", []
+    def list_audit_events(self, document_id: int | None = None, limit: int = 50,
+                          event: str | tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+        """操作紀錄,新的在前;給 document_id 就只看這份文件的(含它的行動),給 event 就只看這一種(或這幾種)操作。"""
+        sql, args = "SELECT * FROM audit_events WHERE 1=1", []
         if document_id is not None:
-            sql += " WHERE document_id = ?"
+            sql += " AND document_id = ?"
             args.append(document_id)
+        if event is not None:
+            names = (event,) if isinstance(event, str) else tuple(event)
+            if not names:
+                return []
+            sql += f" AND event IN ({', '.join('?' * len(names))})"
+            args.extend(names)
         sql += " ORDER BY id DESC LIMIT ?"
         args.append(limit)
         with self._conn() as conn:
             return [_audit(r) for r in conn.execute(sql, args).fetchall()]
+
+    def get_audit_event(self, event_id: int) -> dict[str, Any] | None:
+        """用編號取一筆操作紀錄;沒有回 None。"""
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM audit_events WHERE id = ?", (event_id,)).fetchone()
+        return _audit(row) if row else None
 
     # ---- members(家庭成員與角色;誰能做什麼由 web 層決定) ---------------------
 

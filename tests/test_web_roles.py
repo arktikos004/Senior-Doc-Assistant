@@ -97,8 +97,9 @@ def test_elder_rejects_previously_confirmed_with_explicit_current_state(as_role,
     assert [(e["event"], e["actor"], e["role"]) for e in events] == [
         ("reject", "elder@example.test", "elder"), ("confirm", "family@example.test", "family")]
     assert events[0]["detail"] == {"from": "done", "to": "rejected"}
-    html = elder.get(f"/doc/{doc}").text
+    html = family.get(f"/doc/{doc}").text
     assert "操作紀錄" in html and "family@example.test" in html and "elder@example.test" in html
+    assert "操作紀錄" in elder.get(f"/doc/{doc}").text               # 長輩看得到全部(平常收著)
 
 
 def test_elder_reminder_changes_are_logged_once(as_role, store, add_doc):

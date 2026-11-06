@@ -75,6 +75,16 @@ def test_encrypted_pdf_asks_for_the_password_before_reading(cfg, client, store, 
     assert len(_pending(cfg)) == 2 and all(pdf_needs_password(p) for p in (cfg.paths.uploads_path / "pending").glob("*.pdf"))
 
 
+def test_password_box_and_buttons_sit_in_the_middle(client):
+    """v5:密碼框是獨立的輸入框,和底部一樣寬的兩顆按鈕一起置中(.pw-form;對獎頁的短欄位照舊)。"""
+    from web.render import STATIC_DIR
+    html = client.get(_locked(client)).text
+    assert re.search(r'<form class="pw-form" method="post" action="/upload/password/[A-Za-z0-9_-]{32}">', html)
+    css = (STATIC_DIR / "app.css").read_text(encoding="utf-8")
+    t3 = css.split("/* ---- T3 家人確認、待複核、更正 ---- */")[1]
+    assert re.search(r"\.pw-form \.field-row--short \{[^}]*margin-inline: auto", t3)
+
+
 def test_plain_pdf_is_read_right_away(cfg, client, analyzer):
     r = _upload(client, plain_pdf())
     assert r.status_code == 303 and re.fullmatch(r"/doc/\d+", r.headers["location"])

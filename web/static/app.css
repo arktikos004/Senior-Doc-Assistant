@@ -1,69 +1,81 @@
-/* 看有 樣式 v4「領航藍工作台」。
-   版面像國際 SaaS 後台:電腦版左邊固定選單(品牌、導覽、安心說明),右邊白底工作區,
-   內容靠標題與細線分組,不用灰底卡片;手機與平板改成頂部品牌列 +「選單」按鈕,安心說明移到頁尾。
-   品牌色:領航藍 #1B4F9C、夜航藍 #0F2F5C、晨霧藍 #E8EFF9、琥珀(期限)#B45309。淺色、深色都照系統設定。
-   對比全部實測:文字 ≥ 4.5:1、框線與焦點 ≥ 3:1。長者友善靠「重點大」而不是「全部大」:基準字級 16px
-   (10/1 使用者決定,WCAG 沒有最小字級),期限、金額、服藥時段放大;主要按鈕 48px、其他觸控區 ≥ 44px;
-   狀態一律「圖示 + 文字 + 顏色」。只用系統字型與內嵌 SVG,離線可用;沒有 style= 屬性(W2-B 嚴格 CSP)。 */
+/* 看有 樣式:v5「車站時刻表」(使用者 11/5 選定,11/6 驗收三頁樣稿;樣稿與說明在 tmp/mockups/v5/timetable/)。
+   家裡每件有期限的事都排成大家看了一輩子的車站時刻表:什麼時候、什麼事、還有多久,遠遠就讀得到。
+   世界只借四件事:配色(深墨、月台黃、瓷白)、粗黑體、密度,和一個招牌:翻牌數字(一位一塊深色小牌,中間一道接縫)。
+   版面、導覽與控制項都是標準網頁元件;畫面上沒有車次、月台這些字。
+   版面:全寬的深墨頂列(品牌、誰在用、六個分頁;手機與平板放不下時收進「選單」),下面是最寬 74rem 置中的工作區。
+   顏色的工作:月台黃實心(深墨字、深墨框)是主要動作、目前的分頁與黃牌;深墨框是次要按鈕;連結是深墨字加底線;
+   紅只代表逾期、不符與刪除;綠只留給核對通過。狀態一律寫成字:實心牌是要處理,外框牌是還沒到;沒事的不說話。
+   對齊與大小(使用者 11/6:「欄位要對齊 統一大小 不然看起來很亂」):同一種東西一樣大(翻牌、狀態牌、列上的按鈕),
+   每一列的按鈕排在固定的格子裡;一列的按鈕比較少時空著那一格,其他按鈕不挪位置。
+   畫面上只留標題與內容,說明集中在使用手冊(/help);真的重要的事,標題旁放 ⓘ(說明),按了才展開(.note)。
+   對比全部實測:文字 ≥ 4.5:1、框線與焦點 ≥ 3:1。基準字級 16px,只有時刻與金額放大;主要按鈕 58px、其他觸控區 ≥ 44px。
+   只用系統字型與內嵌 SVG,離線可用;沒有 style= 屬性(W2-B 嚴格 CSP)。 */
 
 :root {
   color-scheme: light dark;
   /* 底與字 */
-  --bg: #FFFFFF;
-  --bg-subtle: #F6F8FB;       /* 側欄、上傳區、表頭 */
-  --ink: #0E1B2E;             /* 白 17.3:1 */
-  --ink-2: #46566C;           /* 次要字;白 7.5:1 */
-  --ink-3: #5F6E84;           /* 說明字;白 5.2:1、淺底 4.9:1 */
-  --line: #E3E8EF;            /* 細分隔線(裝飾) */
-  --control: #7B889B;         /* 表單框線、未選取;白 3.6:1 */
+  --bg: #F3F5F2;              /* 瓷白 */
+  --bg-subtle: #E6EAE6;       /* 停用的按鈕、唯讀的輸入框、滑過的次要按鈕 */
+  --ink: #14212B;             /* 深墨;瓷白 14.9:1 */
+  --ink-2: #33424E;           /* 次要字;9.4:1 */
+  --ink-3: #51606C;           /* 說明字;5.9:1 */
+  --line: #C9D0D1;            /* 細分隔線(裝飾) */
+  --control: #6F7E89;         /* 表單框線、未選取;3.8:1 */
   /* 品牌 */
-  --primary: #1B4F9C;         /* 領航藍:實心按鈕;白字 7.9:1 */
-  --primary-hover: #163F7D;
-  --brand-ink: #0F2F5C;       /* 夜航藍:字標 */
-  --link: #1B4F9C;            /* 連結;白 7.9:1 */
-  --mist: #E8EFF9;            /* 晨霧藍:選取、提示底;藍字 6.9:1 */
+  --primary: #F6C400;         /* 月台黃:主要按鈕的底;字與框一律深墨(10:1) */
+  --primary-hover: #E8B800;
+  --on-primary: #14212B;
+  --brand-ink: #FFFFFF;       /* 頂列上的字 */
+  --link: #14212B;            /* 連結:深墨字加底線 */
   /* 狀態 */
-  --amber: #B45309;           /* 期限、等待;白 5.0:1 */
-  --amber-bg: #FDF3E7;        /* 琥珀字 4.6:1 */
-  --green: #15803D;
-  --green-bg: #E9F6EE;        /* 綠字 4.5:1 */
-  --red: #B91C1C;
-  --red-bg: #FDEDED;          /* 紅字 5.7:1 */
-  --gray-bg: #EEF1F5;
-  --focus: #1B4F9C;
-  --shadow-sm: 0 1px 2px rgba(14, 27, 46, .06), 0 0 0 1px rgba(14, 27, 46, .02);
+  --amber: #875800;           /* 等待的字;5.6:1 */
+  --green: #1E7F4F;           /* 4.6:1 */
+  --red: #C8321E;             /* 4.9:1;白字 5.3:1 */
+  --gray-bg: #E6EAE6;
+  --focus: #14212B;
+  /* 看板(頂列、要記得的事、結果頁的重點、服藥時間表):淺色、深色模式都是深墨 */
+  --board: #14212B;
+  --board-edge: transparent;  /* 深色模式才有的細框 */
+  --board-ink: #FFFFFF;       /* 16.4:1 */
+  --board-ink-2: #C9D3DA;     /* 10.8:1 */
+  --board-ink-3: #A9B6C0;     /* 7.9:1 */
+  --board-line: rgba(255, 255, 255, .16);
+  --board-control: #8A98A3;   /* 看板上的按鈕框;5.5:1 */
+  --flap: #0A1218;            /* 翻牌的牌面;白字 18.9:1 */
+  --flap-seam: #2B3A46;
+  --signal: #F6C400;          /* 月台黃:黃線、目前的分頁、黃牌 */
+  --red-solid: #C8321E;       /* 紅牌與紅色小標的底 */
 
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang TC",
           "Noto Sans TC", "Noto Sans CJK TC", "Microsoft JhengHei", sans-serif;
   /* 4 基數間距,沿用 18px 換算(18px 基準時是 4 8 12 16 24 32 48 64);基準改成 16px 後沒有重算,實際約小一成 */
   --s1: .222rem; --s2: .444rem; --s3: .667rem; --s4: .889rem; --s6: 1.333rem; --s8: 1.778rem; --s12: 2.667rem; --s16: 3.556rem;
-  --radius: 12px;
-  --radius-lg: 16px;
+  --radius: 8px;
+  /* 數字:系統裡現成的窄體(Apple 的 DIN Alternate、Windows 的 Bahnschrift、Android 的 Roboto Condensed),沒有就用內文字 */
+  --font-num: "DIN Alternate", Bahnschrift, "Roboto Condensed", sans-serif-condensed, var(--font);
+  --bar-h: 4.875rem;          /* 頂列 72px + 黃線 6px:黏在上面的東西要讓出這個高度 */
+  --tile-w: 10rem;            /* 狀態牌一律這麼寬(放得下「等家人確認 12 天」);手機 8.25rem */
+  --slot-w: 6.25rem;          /* 列上的按鈕格子一律這麼寬(放得下「取消提醒」) */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0B1220;
-    --bg-subtle: #101A2C;
-    --ink: #E6ECF5;            /* 15.8:1 */
-    --ink-2: #A9B6C8;          /* 9.1:1 */
-    --ink-3: #95A3B8;          /* 7.3:1 */
-    --line: #1F2A3D;
-    --control: #6B7A90;        /* 4.3:1 */
-    --primary: #2F67C4;        /* 白字 5.4:1 */
-    --primary-hover: #3B74D1;
-    --brand-ink: #C9D8F2;
-    --link: #8DB4F5;           /* 8.9:1 */
-    --mist: #16264A;
-    --amber: #F0A34B;
-    --amber-bg: #2E2110;
-    --green: #4ADE80;
-    --green-bg: #0F2A1B;
-    --red: #F87171;
-    --red-bg: #2E1414;
-    --gray-bg: #1A2436;
-    --focus: #8DB4F5;
-    --shadow-sm: 0 0 0 1px rgba(255, 255, 255, .04);
+    --bg: #0B141B;
+    --bg-subtle: #16232D;
+    --ink: #EAF0F3;            /* 16.2:1 */
+    --ink-2: #C9D3DA;
+    --ink-3: #A9B6C0;          /* 9.0:1 */
+    --line: #2B3A46;
+    --control: #8A98A3;        /* 6.3:1 */
+    --primary: #F6C400;
+    --primary-hover: #FFD426;
+    --link: #EAF0F3;
+    --amber: #F6C400;
+    --green: #5CCB94;          /* 9.2:1 */
+    --red: #FF8E7E;            /* 8.3:1 */
+    --gray-bg: #16232D;
+    --focus: #F6C400;
+    --board-edge: #2B3A46;     /* 頁面底也深了,看板靠細框分開 */
   }
 }
 
@@ -71,18 +83,20 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }
-html { font-size: 100%; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: rgba(27, 79, 156, .15); }   /* 16px 基準,可隨使用者縮放 */
+html { font-size: 100%; -webkit-text-size-adjust: 100%; -webkit-tap-highlight-color: rgba(246, 196, 0, .3); }   /* 16px 基準,可隨使用者縮放 */
 a, button, input, label, summary { touch-action: manipulation; }   /* 點兩下不放大,按了馬上有反應 */
 body {
   margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font);
   font-size: 1rem; line-height: 1.6; -webkit-font-smoothing: antialiased;
 }
 h1, h2, h3, p, dl, dd, figure { margin: 0; }
+h1, h2, h3 { text-wrap: balance; }   /* 標題不會剩一兩個字自己一行(web-design-guidelines,11/5) */
 p { text-wrap: pretty; }
-a { color: var(--link); text-underline-offset: .18em; }
+a { color: var(--link); text-underline-offset: .2em; text-decoration-thickness: 1px; }
+a:hover { text-decoration-thickness: 2px; }
 img { max-width: 100%; display: block; }
-::selection { background: rgba(27, 79, 156, .22); }
-input, button { caret-color: var(--primary); }
+::selection { background: var(--signal); color: #14212B; }
+input, button { caret-color: var(--ink); }
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 6px; }
 main:focus { outline: none; }
 
@@ -90,48 +104,70 @@ main:focus { outline: none; }
   width: 1.2em; height: 1.2em; flex: none; vertical-align: -.2em;
   fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
 }
+/* 裝飾圖示都不顯示,字已經說清楚了;留下的只有核對結果的勾叉、展開箭頭與進度的步驟 */
+.btn .icon, .pill .icon, .chip .icon, .side__link .icon, .menu__link .icon, .identity svg,
+.msg .icon, .alert .icon, .disclaimer .icon, .facts__note .icon, .upload__note .icon, .field-error .icon,
+.chosen__name .icon, .slots__note .icon, .empty-line .icon, .confirm__link .icon, .dup-note h2 .icon, .lot-hit .icon, .lot-done .icon,
+.type-icon, .cal, .tbl__chev, .drop__icon, .dialog__icon, .pdf-note__icon, .wordmark small { display: none; }
 .visually-hidden {
   position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 .skip-link { position: absolute; left: -9999px; top: 0; }
-.skip-link:focus { left: 8px; top: 8px; z-index: 50; padding: 10px 14px; border-radius: 10px; background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
+.skip-link:focus { left: 8px; top: 8px; z-index: 50; padding: 10px 14px; border-radius: 8px; background: var(--bg); color: var(--ink); }
 .muted { color: var(--ink-3); }
 .hint { margin-top: var(--s2); color: var(--ink-3); font-size: .9rem; }
 
-/* ---- 外框:左側選單 + 工作區 ---------------------------------------------- */
+/* ---- 外框:全寬的頂列(品牌、誰在用、分頁)+ 置中的工作區 ------------------ */
 
-.shell { display: grid; grid-template-columns: 16.5rem minmax(0, 1fr); min-height: 100vh; }
+/* 捲軸一直留著:短的頁和長的頁一樣寬,換頁時版面不會左右跳,深墨頂列也碰得到右邊
+   (scrollbar-gutter: stable 會在頂列右邊留一條瓷白的空白,所以不用)。頂列黏在上面:跳到錨點時目標不能被它蓋住 */
+html { overflow-y: scroll; scrollbar-color: var(--control) var(--bg); scroll-padding-top: calc(var(--bar-h) + 1rem); }
+
+.shell { min-height: 100vh; }
+/* 頂列:深墨,下緣一條 6px 月台黃線;字標的左邊、最後一個分頁的右邊和下面的內容對齊(內容最寬 74rem,置中) */
 .side {
-  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: var(--s8);
-  padding: var(--s6) var(--s4); background: var(--bg-subtle); border-right: 1px solid var(--line); overflow-y: auto;
+  position: sticky; top: 0; z-index: 20; display: flex; align-items: stretch; gap: 1.25rem;
+  min-height: var(--bar-h); padding: 0 max(var(--s12), calc((100% - 74rem) / 2 + var(--s12)));
+  background: var(--board); border-bottom: 6px solid var(--signal); color: var(--board-ink);
+  --focus: var(--signal);
 }
-.wordmark { display: inline-flex; align-items: center; gap: var(--s3); min-height: 2.75rem; padding: 0 var(--s2); color: var(--brand-ink); text-decoration: none; }
-.wordmark__logo { width: 2.1rem; height: 2.1rem; flex: none; }
-.wordmark span { display: grid; line-height: 1.2; }
-.wordmark b { font-size: 1.1rem; font-weight: 700; letter-spacing: .01em; }
-.wordmark small { color: var(--ink-3); font-size: .8rem; font-weight: 600; letter-spacing: .08em; }
-.side__nav { display: grid; gap: var(--s1); }
+/* 字標:「看」「有」兩塊黃色翻牌(字給眼睛看,讀屏念旁邊藏起來的品牌名) */
+.wordmark { display: inline-flex; align-items: center; min-height: 2.75rem; color: var(--brand-ink); text-decoration: none; }
+.brandflap { display: inline-flex; gap: 3px; }
+.brandflap__d {
+  display: grid; place-items: center; width: 2.5rem; height: 2.875rem; border-radius: 5px;
+  background: linear-gradient(to bottom, var(--signal) calc(50% - 1px), #C79F00 calc(50% - 1px) calc(50% + 1px), var(--signal) calc(50% + 1px));
+  color: #14212B; font-size: 1.75rem; font-weight: 800; line-height: 1;
+}
+/* 誰在用(家人或長輩、哪一台):頂列上字標的旁邊(roles.css 的 .identity 是舊位置的樣式,這裡蓋過去) */
+.side .identity {
+  display: flex; flex-direction: column; flex-wrap: nowrap; justify-content: center; align-items: flex-start; gap: 0; margin: 0 auto 0 0;
+  color: var(--board-ink-2); font-size: .9375rem; line-height: 1.35; white-space: nowrap;
+}
+.side .identity > span:first-child { color: var(--board-ink); font-weight: 700; }
+.side__nav { display: flex; gap: .25rem; margin-left: auto; }
+/* 分頁一樣寬、撐滿頂列的高度;目前的分頁是接在黃線上的黃色塊(換頁時其他分頁不會挪) */
 .side__link {
-  display: flex; align-items: center; gap: var(--s3); min-height: 3rem; padding: 0 var(--s3);
-  border-radius: 10px; color: var(--ink-2); font-weight: 600; text-decoration: none; white-space: nowrap;
-  transition: background-color .15s ease, color .15s ease;
+  position: relative; display: flex; align-items: center; justify-content: center; width: 5.5rem;
+  color: var(--board-ink-2); font-size: 1.125rem; font-weight: 700; text-decoration: none; white-space: nowrap;
+  transition: color .15s ease, background-color .15s ease;
 }
-.side__link:hover { background: rgba(27, 79, 156, .07); color: var(--ink); }
-.side__link[aria-current="page"] { background: var(--mist); color: var(--link); }
-.count {
-  margin-left: auto; min-width: 1.6rem; padding: 0 .45rem; border-radius: 999px;
-  background: var(--primary); color: #FFFFFF; font-size: .85rem; font-weight: 700; line-height: 1.6rem; text-align: center;
-  font-variant-numeric: tabular-nums;
+.side__link:hover { color: var(--board-ink); background: rgba(255, 255, 255, .08); }
+.side__link:focus-visible { outline-offset: -4px; border-radius: 2px; }
+.side__link[aria-current="page"] { background: var(--signal); color: #14212B; }
+/* 待處理的數字:分頁名稱右上角的紅色小標(使用者 11/5;紅底是要注意)。絕對定位、不佔位置:
+   有沒有數字、一位數或兩位數,分頁的字都在同一個地方。外圈一圈深墨,放在黃色分頁上也分得開 */
+.tab { position: relative; }
+/* 大小參考 Material 3 的大徽章:16px 高、11px 字(使用者看過後:「紅點數字 在小一點」),選單按鈕的小標一樣大 */
+.nav-badge {
+  position: absolute; bottom: 55%; left: calc(100% + .1rem); min-width: 1rem; height: 1rem; padding: 0 .25rem;
+  border-radius: 999px; background: var(--red-solid); color: #FFFFFF; box-shadow: 0 0 0 2px var(--board);
+  font-size: .6875rem; font-weight: 700; line-height: 1rem; text-align: center; text-decoration: none; font-variant-numeric: tabular-nums;
 }
-.trust { display: grid; gap: var(--s3); color: var(--ink-2); font-size: .9rem; }
-.trust p { display: flex; align-items: flex-start; gap: var(--s2); }
-.trust .icon { margin-top: .15em; color: var(--link); }
-.side__trust { margin-top: auto; padding: var(--s4) var(--s2) 0; border-top: 1px solid var(--line); }
-.foot-trust { display: none; }
 .menu { display: none; }   /* 手機與平板才用「選單」(見下方) */
 
-.main { width: 100%; max-width: 74rem; padding: var(--s12) var(--s12) var(--s16); }
+.main { display: block; width: 100%; max-width: 74rem; margin-inline: auto; padding: 1.5rem var(--s12) 3.5rem; }
 
 /* ---- 頁面標題 ------------------------------------------------------------ */
 
@@ -141,7 +177,7 @@ main:focus { outline: none; }
 .crumbs a:hover { color: var(--link); text-decoration: underline; }
 .page-head {
   display: flex; align-items: flex-end; justify-content: space-between; gap: var(--s6);
-  padding-bottom: var(--s6); margin-bottom: var(--s8); border-bottom: 1px solid var(--line);
+  margin-bottom: var(--s12);
 }
 .page-head__text { min-width: 0; }
 .page-head h1 { font-size: 2rem; font-weight: 700; line-height: 1.25; letter-spacing: -.01em; overflow-wrap: anywhere; text-wrap: balance; }
@@ -156,184 +192,213 @@ main:focus { outline: none; }
 .speak__status:empty { display: none; }
 
 .msg {
-  display: flex; align-items: center; gap: var(--s2); margin-bottom: var(--s6); padding: var(--s3) var(--s4);
-  border-radius: var(--radius); background: var(--green-bg); color: var(--green); font-weight: 600;
+  margin-bottom: var(--s6); color: var(--ink); font-weight: 700;
 }
-.empty { padding: var(--s6); border: 1px dashed var(--control); border-radius: var(--radius); color: var(--ink-2); }
+.empty { color: var(--ink-2); }
+.more { margin-top: var(--s2); }
 .more a { display: inline-flex; align-items: center; min-height: 3rem; font-weight: 600; }
 
 /* ---- 共用元件 ------------------------------------------------------------ */
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--s2);
-  min-height: 3rem; padding: 0 1.2rem; margin: 0; border-radius: 10px; border: 1px solid transparent;
-  font: inherit; font-weight: 600; line-height: 1.2; text-align: center; text-decoration: none; cursor: pointer; white-space: nowrap;
-  transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+  min-height: 3rem; padding: 0 1.2rem; margin: 0; border-radius: var(--radius); border: 2px solid transparent;
+  font: inherit; font-weight: 700; line-height: 1.2; text-align: center; text-decoration: none; cursor: pointer; white-space: nowrap;
+  transition: background-color .15s ease, border-color .15s ease, color .15s ease, transform .1s ease-out;
 }
-.btn--primary { background: var(--primary); color: #FFFFFF; box-shadow: var(--shadow-sm); }
+/* 按下去縮一點點,手指知道有按到(Make Interfaces Feel Better:一律 0.96;11/5) */
+.btn:active:not([disabled]) { transform: scale(.96); }
+/* 主要:月台黃加深墨框與深墨字(黃底和瓷白只差 1.5:1,框才是邊界);次要:深墨框;刪除:紅框紅字 */
+.btn--primary { background: var(--primary); border-color: var(--on-primary); color: var(--on-primary); }
 .btn--primary:hover { background: var(--primary-hover); }
-.btn--secondary { background: var(--bg); color: var(--ink); border-color: var(--line); box-shadow: var(--shadow-sm); }
-.btn--secondary:hover { border-color: var(--control); }
-.btn--danger { background: var(--bg); color: var(--red); border-color: var(--line); }
-.btn--danger:hover { border-color: var(--red); }
-.btn--lg { min-height: 3.4rem; padding: 0 1.5rem; font-size: 1.05rem; }
+.btn--secondary { background: transparent; color: var(--ink); border-color: var(--ink); }
+.btn--secondary:hover { background: var(--bg-subtle); }
+.btn--danger { background: transparent; color: var(--red); border-color: var(--red); }
+.btn--danger:hover { background: rgba(200, 50, 30, .08); }
+.btn--lg { min-height: 3.625rem; padding: 0 1.75rem; font-size: 1.25rem; font-weight: 800; }
+@media (prefers-color-scheme: dark) { .btn--primary { border-color: var(--primary); } .btn--danger:hover { background: rgba(255, 142, 126, .1); } }
 .btn--block { display: flex; width: 100%; }
-.btn[disabled] { background: var(--bg-subtle); color: var(--ink-3); border-color: var(--line); box-shadow: none; cursor: progress; }
+.btn[disabled] { background: var(--bg-subtle); color: var(--ink-3); border-color: var(--line); cursor: progress; }
 
-/* 狀態小膠囊:圖示 + 文字 + 底色(類別名稱沿用行動與文件的狀態) */
-.pill {
-  display: inline-flex; align-items: center; gap: .3rem; padding: .1rem .65rem; border-radius: 999px;
-  font-size: .9rem; font-weight: 600; line-height: 1.6; white-space: nowrap;
+/* 狀態(類別名稱沿用行動與文件的狀態):沒事的用淡字;要注意的是實心小牌,黃是等待、紅是不符或逾期,字照樣寫清楚 */
+.pill { font-size: .9375rem; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.pill--auto, .pill--off, .pill--info { color: var(--ink-3); font-weight: 500; }
+.pill--wait, .pill--manual { display: inline-block; padding: .125rem .5rem; border-radius: 5px; }
+.pill--wait { background: var(--signal); color: #14212B; }
+.pill--manual { background: var(--red-solid); color: #FFFFFF; }
+
+.section { margin-top: 2.5rem; }
+.section__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2) var(--s4); margin-bottom: .625rem; }
+.section__head h2 { font-size: 1.5rem; font-weight: 800; }
+.fold__head h2 { font-size: 1.1875rem; font-weight: 700; }
+.section__head .muted { font-size: 1.0625rem; font-variant-numeric: tabular-nums; }
+/* 標題旁的「說明」:ⓘ 圖示(使用者 11/5;v5 是深墨,看板上是淺色),觸控區 44px;打開時圖示變實心,看得出正在顯示。
+   內容是浮在圖示下面的小框(使用者 11/5:「用彈出視窗呈現 加一點過度動畫」),不把下面的內容往下推:打開淡入,
+   收起時 app.js 先加 data-closing 讓它淡出,跑完才關。一次只開一個,點外面、Esc、焦點離開都會收起(app.js);
+   沒有 JS 時照樣按圖示開關。小框超出畫面左右時 app.js 把它挪回來(--note-shift),尖角照樣指著圖示 */
+.section__title { flex: 1 1 auto; min-width: 0; }
+.section__title h2, .subhead h3 { display: inline; margin-right: var(--s3); font: inherit; }
+.section__title h2 { font-size: 1.5rem; font-weight: 800; }
+.note { --note-halo: rgba(20, 33, 43, .1);
+        position: relative; top: -.25em; display: inline-block; margin-left: -.35rem; vertical-align: middle; }   /* 中文字的中心比 middle 高一點:往上挪,和標題對齊 */
+.note:not(:has(.note__label)) { margin-left: -.55rem; }   /* 只有圖示:圖示縮小後和標題的距離維持差不多 */
+.note > summary { display: flex; align-items: center; justify-content: center; gap: var(--s1);
+                  min-width: 2.75rem; min-height: 2.75rem; padding: 0 .35rem; border-radius: 999px;
+                  color: var(--link); font-size: .95rem; font-weight: 500; cursor: pointer; list-style: none; }
+.note > summary::-webkit-details-marker { display: none; }
+.note__icon { width: 1.125rem; height: 1.125rem; stroke-width: 2; border-radius: 50%;
+              transition: transform .2s cubic-bezier(.2, .8, .2, 1), background-color .2s ease, box-shadow .2s ease,
+                          fill .15s ease, color .15s ease; }
+/* 滑鼠移上去(沒按):圖示放大一點、後面浮出淡淡的圓底(深墨 10%),平順減速不回彈(unslop)。只給有滑鼠的裝置,
+   手機點過後不會一直停在這個樣子 */
+@media (hover: hover) {
+  .note > summary:hover .note__icon { transform: scale(1.1); background-color: var(--note-halo); box-shadow: 0 0 0 .3rem var(--note-halo); }
 }
-.pill .icon { width: 1em; height: 1em; stroke-width: 2.4; }
-.pill--auto { background: var(--green-bg); color: var(--green); }
-.pill--wait { background: var(--amber-bg); color: var(--amber); }
-.pill--manual { background: var(--red-bg); color: var(--red); }
-.pill--off { background: var(--gray-bg); color: var(--ink-2); }
-.pill--info { background: var(--mist); color: var(--link); }
-
-.type-icon { display: grid; place-items: center; width: 3.1rem; height: 3.1rem; flex: none; border-radius: 10px; background: var(--mist); color: var(--link); }
-.type-icon .icon { width: 1.35rem; height: 1.35rem; }
-.type-icon--alert { background: var(--red-bg); color: var(--red); }
-.cal {
-  display: inline-grid; place-items: center; width: 3.1rem; height: 3.1rem; flex: none; border-radius: 10px;
-  border: 1px solid var(--line); background: var(--bg); line-height: 1.05; text-align: center; font-variant-numeric: tabular-nums;
+.note > summary:active .note__icon { transform: scale(.92); }
+.note[open] > summary .note__icon { fill: var(--link); color: var(--bg); background-color: var(--note-halo); box-shadow: 0 0 0 .3rem var(--note-halo); }
+.note__label { text-decoration: underline; text-underline-offset: .18em; }
+.note__body {
+  position: absolute; z-index: 30; top: calc(100% + .1rem); left: calc(50% - 1.5rem);
+  width: max-content; max-width: min(22rem, calc(100vw - 2rem)); padding: var(--s3) var(--s4);
+  border: 1px solid var(--board); border-radius: var(--radius); background: var(--board); color: var(--board-ink);   /* 深墨小框,和看板同一種 */
+  box-shadow: 0 12px 28px rgba(20, 33, 43, .24), 0 2px 6px rgba(20, 33, 43, .12);
+  font-size: .95rem; font-weight: 400; line-height: 1.6; text-align: left; white-space: normal;
+  translate: var(--note-shift, 0px) 0; transform-origin: calc(1.5rem - var(--note-shift, 0px)) 0;
 }
-.cal b { display: block; color: var(--amber); font-size: .72rem; font-weight: 700; }
-.cal span { display: block; font-size: 1.25rem; font-weight: 700; }
-
-.panel { border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
-
-.section { margin-top: var(--s12); }
-.section__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s2) var(--s4); margin-bottom: var(--s4); }
-.section__head h2, .fold__head h2 { font-size: 1.2rem; font-weight: 700; }
+/* 尖角指著圖示;小框往左挪多少,尖角就往右補多少 */
+.note__body::before {
+  content: ""; position: absolute; top: calc(-.35rem - 1px); left: calc(1.5rem - var(--note-shift, 0px) - .35rem);
+  width: .7rem; height: .7rem; border: inherit; border-width: 1px 0 0 1px; border-radius: 2px 0 0 0; background: inherit;
+  transform: rotate(45deg);
+}
+.note[open] > .note__body { animation: note-pop-in .18s cubic-bezier(.2, .8, .2, 1); }
+.note[data-closing] > .note__body { animation: note-pop-out .14s ease-in forwards; }
+@keyframes note-pop-in { from { opacity: 0; transform: translateY(-.3rem) scale(.96); } }
+@keyframes note-pop-out { to { opacity: 0; transform: translateY(-.3rem) scale(.96); } }
+.note__body a { color: var(--board-ink); }
+@media (prefers-color-scheme: dark) {
+  .note { --note-halo: rgba(234, 240, 243, .14); }
+  .note__body { border-color: var(--board-edge); box-shadow: 0 12px 28px rgba(0, 0, 0, .45); }
+}
+.kinds legend .note, .field-row .note { margin-left: var(--s3); }
 .section__note { margin-top: var(--s3); color: var(--ink-3); font-size: .9rem; }
 .prose { max-width: 40rem; font-size: 1.1rem; line-height: 1.8; }
 .subhead { margin: var(--s6) 0 var(--s3); font-size: 1.05rem; font-weight: 700; }
 
 /* ---- 首頁:上傳 ---------------------------------------------------------- */
 
-.upload { padding: var(--s6); }
-.drop {
-  display: flex; align-items: center; gap: var(--s6); padding: var(--s6);
-  border: 1.5px dashed var(--control); border-radius: var(--radius); background: var(--bg-subtle);
-}
-.drop__icon { display: grid; place-items: center; width: 3.6rem; height: 3.6rem; flex: none; border-radius: 50%; background: var(--mist); color: var(--link); }
-.drop__icon .icon { width: 1.8rem; height: 1.8rem; }
+.drop { display: flex; align-items: center; gap: var(--s6); }
 .drop__text { flex: 1; min-width: 0; }
-.drop__text h2 { font-size: 1.25rem; font-weight: 700; }
-.drop__btns { display: flex; gap: var(--s3); flex: none; }
+.drop__text h2 { font-size: 1.5rem; font-weight: 800; line-height: 1.3; }
+.drop__btns { display: flex; gap: .75rem; flex: none; }
 .capture__input:focus-visible + .source, .pick__input:focus-visible + .source { outline: 3px solid var(--focus); outline-offset: 2px; }
 .capture__input[aria-invalid="true"] + .source { box-shadow: 0 0 0 2px var(--red); }
-.chosen { margin-top: var(--s4); padding: var(--s3) var(--s4); border-radius: var(--radius); background: var(--green-bg); }
-.chosen__name { display: flex; align-items: center; gap: var(--s2); color: var(--green); font-weight: 600; overflow-wrap: anywhere; }
-.chosen__name .icon { stroke-width: 2.6; }
+.chosen { margin-top: var(--s4); }
+.chosen__name { font-weight: 600; overflow-wrap: anywhere; }
 .chosen__preview { max-height: 9rem; width: auto; margin-top: var(--s3); border-radius: 8px; }
-.field-error {
-  display: flex; align-items: flex-start; gap: var(--s2); margin-top: var(--s4); padding: var(--s3) var(--s4);
-  border-radius: var(--radius); background: var(--red-bg); color: var(--red); font-weight: 600;
-}
-.field-error .icon { margin-top: .2em; }
-.upload__row { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--s4); margin-top: var(--s6); }
+/* 照片的細外框:白底的帳單照片放在白色頁面上,邊緣才看得出來(Make Interfaces Feel Better:純黑或純白 10%) */
+.chosen__preview { outline: 1px solid rgba(0, 0, 0, .1); outline-offset: -1px; }
+@media (prefers-color-scheme: dark) { .chosen__preview { outline-color: rgba(255, 255, 255, .1); } }
+.field-error { margin-top: var(--s4); color: var(--red); font-weight: 700; }
+.upload__row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s4); margin-top: var(--s4); }
 .kinds { border: 0; margin: 0; padding: 0; min-width: 0; }
 .kinds legend { margin-bottom: var(--s3); padding: 0; font-weight: 600; }
 .kinds legend span { margin-left: var(--s2); color: var(--ink-3); font-weight: 500; }
-.chips { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.chips { display: flex; flex-wrap: wrap; gap: .5rem; }   /* 相鄰的觸控目標至少隔 8px(UI/UX Pro Max,11/5) */
 .chip {
-  position: relative; display: inline-flex; align-items: center; gap: var(--s2); min-height: 2.9rem; padding: 0 1rem;
-  border: 1px solid var(--line); border-radius: 999px; background: var(--bg); color: var(--ink-2);
-  font-weight: 600; cursor: pointer; transition: border-color .15s ease, background-color .15s ease, color .15s ease;
+  position: relative; display: inline-flex; align-items: center; min-height: 2.75rem; padding: 0 1rem;
+  border: 1px solid var(--control); border-radius: var(--radius); color: var(--ink);
+  font-weight: 600; cursor: pointer; transition: border-color .15s ease, color .15s ease;
 }
-.chip:hover { border-color: var(--control); }
-.chip .icon { color: var(--ink-3); }
+.chip:hover { border-color: var(--ink); }
 .chip__input { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
-.chip__input:checked ~ span { color: var(--link); }
-.chip__input:checked ~ .icon { color: var(--link); }
-.chip:has(.chip__input:checked) { border-color: var(--primary); background: var(--mist); }
+/* 選中的選項:月台黃底、深墨框與字(和主要按鈕同一種);框加粗一點,不只靠顏色 */
+.chip__input:checked ~ span { color: #14212B; }
+.chip:has(.chip__input:checked) { background: var(--primary); border-color: var(--on-primary); box-shadow: inset 0 0 0 1px var(--on-primary); }
 .chip__input:focus-visible ~ span { text-decoration: underline; text-underline-offset: .25em; }
 .chip:has(.chip__input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 2px; }
 .submit { margin-left: auto; }
-/* 先選大類(第一列,自己佔一行),再選這一類裡的哪一種(第二列,和「開始辨識」同一行;身分證明換成說明) */
-.upload__row > .kinds:first-child { flex: 1 1 100%; }
-.upload__row > .kinds + .kinds { margin-top: var(--s4); }
-/* 還沒選檔:「開始辨識」先顯示成淡色(仍可按,按了會提示先拍照) */
-[data-ready="false"] .submit__btn { background: var(--bg-subtle); color: var(--ink-3); border-color: var(--line); box-shadow: none; }
 .upload__note { display: flex; align-items: flex-start; gap: var(--s2); margin-top: var(--s4); color: var(--ink-2); font-size: .9rem; }
-.upload__note .icon { margin-top: .15em; color: var(--link); }
 .status-line { margin-top: var(--s3); font-weight: 600; }
 .status-line:empty { display: none; }
 .wait { margin-top: var(--s1); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .progress { height: .5rem; margin-top: var(--s4); overflow: hidden; border-radius: 999px; background: var(--gray-bg); }
-.progress__bar { display: block; width: 40%; height: 100%; border-radius: 999px; background: var(--primary); animation: progress-slide 1.4s ease-in-out infinite; }
+.progress__bar { display: block; width: 40%; height: 100%; border-radius: 999px; background: var(--ink); animation: progress-slide 1.4s ease-in-out infinite; }
 @keyframes progress-slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
 
-/* ---- 表格式清單(要記得的事、最近文件、待複核) ---------------------------- */
+/* ---- 表格式清單(最近文件、文件櫃、待複核) -------------------------------- */
 
 .tbl { border-top: 1px solid var(--line); }
 .tbl__list { list-style: none; margin: 0; padding: 0; }
 .tbl__row {
-  display: grid; grid-template-columns: 3.1rem minmax(0, 1fr) 8rem 12rem 1rem; gap: var(--s4);
-  align-items: center; min-height: 4.2rem; padding: var(--s3) var(--s2);
-  border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; transition: background-color .15s ease;
+  display: grid; grid-template-columns: minmax(0, 1fr) 9.5rem 6.5rem; gap: var(--s4);
+  align-items: center; min-height: 3.5rem; padding: var(--s3) 0;
+  border-bottom: 1px solid var(--line); color: inherit; text-decoration: none;
 }
-a.tbl__row:hover { background: var(--bg-subtle); }
-.tbl__row--head { min-height: 0; padding-block: var(--s2); color: var(--ink-3); font-size: .9rem; font-weight: 600; }
-.tbl--review .tbl__row { grid-template-columns: 3.1rem minmax(0, 1fr) 9rem 1rem; }
+a.tbl__row:hover .tbl__title { text-decoration-thickness: 2px; }
+.tbl--review .tbl__row { grid-template-columns: minmax(0, 1fr) 9rem; }
 .tbl__main { display: grid; min-width: 0; }
-.tbl__meta { display: contents; }   /* 電腦:金額/時間與狀態各佔一欄;手機另外排(見下方) */
-.tbl__title { font-weight: 600; overflow-wrap: anywhere; }
-.tbl__sub { color: var(--ink-3); font-size: .9rem; overflow-wrap: anywhere; }
+.tbl__meta { display: contents; }   /* 電腦:時間與狀態各佔一欄;手機另外排(見下方) */
+/* 標題是深墨加底線的連結(整列都能按);滑過時底線變粗,同一般連結 */
+.tbl__title { color: var(--link); font-size: 1.0625rem; font-weight: 700; overflow-wrap: anywhere;
+              text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .2em; }
+.tbl__sub { color: var(--ink-3); font-size: .9375rem; overflow-wrap: anywhere; }
 .tbl__sub--clamp { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
-.tbl__num { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.tbl__when { color: var(--ink-3); font-size: .9rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.tbl__chev { color: var(--control); }
-/* 欄名:桌機看標題列(aria-hidden),這份只給螢幕閱讀器;手機沒有標題列,改成直接顯示 */
-.tbl__cell-label { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.tbl__when { color: var(--ink-3); font-size: .9375rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tbl__cell-label { color: var(--ink-3); }
 .conf { font-weight: 700; color: var(--ink); }
 .conf.low { color: var(--red); }
 .conf.mid { color: var(--amber); }
 
+/* ---- 要記得的事(首頁與 /reminders) ---------------------------------------- */
+
+/* 用容器查詢:字級放大時 rem 跟著變大,版面會自己換成窄的排法,不必為每種字級各寫一次。
+   v5(11/6)起各組排在深墨看板上(見最後「T1 首頁與要記得的事」);這裡是看板外也用得到的底:
+   /reminders 收起來的「已取消的提醒」,事項與開單單位在左,「看文件」窄的時候在字下面、寬的時候在右邊 */
+.rlist { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); container-type: inline-size; }
+.ritem { display: grid; gap: var(--s3) var(--s4); padding: var(--s4) 0; border-bottom: 1px solid var(--line); }
+.ritem__main { display: grid; gap: .15rem; min-width: 0; }
+.ritem__title { font-size: 1.1rem; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.ritem__meta { display: flex; flex-wrap: wrap; gap: 0 var(--s3); }
+.ritem__sub { color: var(--ink-3); font-size: .95rem; overflow-wrap: anywhere; }
+.remind-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); }
+.btn--done { min-height: 2.75rem; padding: 0 var(--s4); white-space: nowrap; }
+.remind-acts .link-btn { padding: 0; color: var(--ink-2); font-size: .95rem; }
+@container (min-width: 40rem) {
+  .ritem { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+  .remind-acts { justify-content: flex-end; }
+}
+
 /* ---- 結果頁 -------------------------------------------------------------- */
 
-.doc-grid { display: grid; grid-template-columns: minmax(0, 1fr) 21rem; gap: var(--s12); align-items: start; }
+.doc-grid { display: grid; grid-template-columns: minmax(0, 1fr) 21rem; gap: 2.25rem; align-items: start; }
 .doc-main { min-width: 0; }
-/* 重點格子:用格線間隙畫出細線(容器底色 = 線色) */
+/* 重點格子:上下兩條細線;整行的格子下面再一條 */
 .facts {
-  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; overflow: hidden;
-  background: var(--line); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--s8);
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
 }
-.fact { display: grid; align-content: start; gap: var(--s1); padding: var(--s6); background: var(--bg); min-width: 0; }
-.fact--wide { grid-column: 1 / -1; }
+.fact { display: grid; align-content: start; gap: var(--s1); padding: var(--s4) 0; min-width: 0; }
+.fact--wide { grid-column: 1 / -1; border-bottom: 1px solid var(--line); }
+.fact--wide:last-child { border-bottom: 0; }
 .fact__label { color: var(--ink-3); font-size: .9rem; font-weight: 600; }
 .fact__value { font-size: 1.6rem; font-weight: 700; line-height: 1.3; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.fact__value--due { color: var(--amber); }
 .fact__value--text { font-size: 1.2rem; }
 .fact__text { font-size: 1.05rem; line-height: 1.7; }
 .todo-checks { list-style: none; margin: var(--s1) 0 0; padding: 0; display: grid; gap: var(--s2); }
 .todo-checks li { display: flex; align-items: flex-start; gap: var(--s2); font-size: 1.1rem; font-weight: 600; }
-.todo-checks .icon { margin-top: .2em; color: var(--control); }
-.facts--med { display: block; padding: var(--s2) var(--s6); background: var(--bg); }
-.alert {
-  display: flex; align-items: flex-start; gap: var(--s2); margin-bottom: var(--s4); padding: var(--s3) var(--s4);
-  border-radius: var(--radius); background: var(--red-bg); color: var(--red); font-weight: 600;
-}
-.alert .icon { margin-top: .2em; }
+.todo-checks .icon { margin-top: .2em; color: var(--board-control); }   /* 要做的事在重點看板上 */
+.facts--med { display: block; padding: 0; border: 0; }
+.alert { margin-bottom: var(--s4); color: var(--red); font-weight: 700; }
 /* 狀態列 + 取消/恢復提醒:寬的時候按鈕靠右,窄的時候換到文字下面 */
 .facts__status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s3) var(--s4); margin-top: var(--s4); }
-.facts__note { display: flex; align-items: flex-start; gap: var(--s2); flex: 1 1 16rem; color: var(--ink-2); }
-.facts__note .icon { margin-top: .15em; stroke-width: 2.4; }
-.facts__note--auto .icon { color: var(--green); }
-.facts__note--wait .icon { color: var(--amber); }
-.facts__note--manual .icon, .facts__note--off .icon { color: var(--ink-3); }
-.disclaimer {
-  display: flex; align-items: flex-start; gap: var(--s3); margin-top: var(--s8); padding: var(--s4);
-  border-radius: var(--radius); background: var(--mist); color: var(--ink); font-weight: 600;
-}
-.disclaimer .icon { margin-top: .15em; color: var(--link); width: 1.3rem; height: 1.3rem; }
-.disclaimer--compact { margin-top: var(--s4); padding: var(--s3); font-size: .95rem; }
+.facts__note { flex: 1 1 16rem; color: var(--ink-2); }
+.facts__status .btn { min-height: 2.75rem; }
+.disclaimer { margin-top: var(--s8); color: var(--ink-2); }
+.disclaimer--compact { margin-top: var(--s4); font-size: .95rem; }
 
 .checks { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
-.check { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto; gap: var(--s3); align-items: start; padding: var(--s4) var(--s2); border-bottom: 1px solid var(--line); }
+.check { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) auto; gap: var(--s3); align-items: start; padding: var(--s4) 0; border-bottom: 1px solid var(--line); }
 .check__icon .icon { margin-top: .2em; stroke-width: 2.6; }
 .check__main { display: grid; min-width: 0; }
 .check__main b { font-weight: 600; }
@@ -342,24 +407,23 @@ a.tbl__row:hover { background: var(--bg-subtle); }
 .check--pass .check__icon, .check--pass .check__status { color: var(--green); }
 .check--fail .check__icon, .check--fail .check__status { color: var(--red); }
 .check--skip .check__icon, .check--skip .check__status { color: var(--ink-3); }
-.empty-line { display: flex; align-items: flex-start; gap: var(--s2); color: var(--ink-2); }
-.empty-line .icon { margin-top: .2em; }
+.empty-line { color: var(--ink-2); }
 
 .fold { padding-top: var(--s2); border-top: 1px solid var(--line); }
-.fold__head { display: flex; align-items: center; gap: var(--s3); min-height: 3.2rem; cursor: pointer; list-style: none; }
+.fold__head { display: flex; align-items: center; gap: var(--s3); min-height: 2.75rem; cursor: pointer; list-style: none; }
 .fold__head::-webkit-details-marker { display: none; }
 .fold__head h2 { flex: none; }
 .fold__chev { margin-left: auto; color: var(--ink-3); transition: transform .2s ease-out; }
 .fold[open] .fold__chev { transform: rotate(90deg); }
 .todo-list { list-style: none; margin: var(--s3) 0 0; padding: 0; border-top: 1px solid var(--line); }
-.todo-item { display: flex; align-items: flex-start; gap: var(--s4); padding: var(--s4) var(--s2); border-bottom: 1px solid var(--line); }
+.todo-item { display: flex; align-items: flex-start; gap: var(--s4); padding: var(--s4) 0; border-bottom: 1px solid var(--line); }
 .todo-item__main { flex: 1; min-width: 0; }
 .todo-item__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s3); margin-bottom: var(--s1); }
 .todo-item__title { font-weight: 700; overflow-wrap: anywhere; }
 .todo-item__line { color: var(--ink-2); font-size: .95rem; overflow-wrap: anywhere; }
 
 .kv { display: grid; grid-template-columns: 9rem minmax(0, 1fr); border-top: 1px solid var(--line); }
-.kv dt, .kv dd { padding: var(--s3) var(--s2); border-bottom: 1px solid var(--line); }
+.kv dt, .kv dd { padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
 .kv dt { color: var(--ink-3); }
 .kv dd { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .missing { display: inline-flex; align-items: center; gap: var(--s1); font-weight: 600; }
@@ -370,51 +434,53 @@ a.tbl__row:hover { background: var(--bg-subtle); }
 .field-check--pass { color: var(--green); }
 .field-check--fail { color: var(--red); }
 .med-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
-.med-list li { padding: var(--s3) var(--s2); border-bottom: 1px solid var(--line); color: var(--ink-2); }
+.med-list li { padding: var(--s3) 0; border-bottom: 1px solid var(--line); color: var(--ink-2); }
 .med__name { color: var(--ink); font-weight: 700; }
 
-.doc-side { position: sticky; top: var(--s8); display: grid; gap: var(--s4); }
-.doc-side h2 { font-size: 1.05rem; font-weight: 700; }
-.original { padding: var(--s2); border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-subtle); }
-.original img { width: 100%; height: auto; max-height: 78vh; object-fit: contain; border-radius: 8px; }
+.doc-side { position: sticky; top: calc(var(--bar-h) + 1.5rem); display: grid; gap: var(--s4); }   /* 讓出頂列 */
+.doc-side h2 { font-size: 1.1875rem; font-weight: 800; }
+/* 白底的原件放在瓷白頁面上:一圈很淡的深墨細框,邊緣才看得出來 */
+.original img { width: 100%; height: auto; max-height: 78vh; object-fit: contain;
+                outline: 1px solid rgba(20, 33, 43, .16); outline-offset: -1px; border-radius: 4px; }
 .pdf-note { display: grid; justify-items: center; gap: var(--s3); padding: var(--s8) var(--s4); text-align: center; color: var(--ink-2); }
-.pdf-note__icon { width: 3rem; height: 3rem; color: var(--ink-3); }
-.retry { display: grid; gap: var(--s4); justify-items: start; padding: var(--s6); }
+.retry { display: grid; gap: var(--s4); justify-items: start; }
 .retry h2 { font-size: 1.25rem; font-weight: 700; }
 
 /* ---- 服藥時間表 ---------------------------------------------------------- */
 
-.slots { margin: 0; }
-.slots__row { display: grid; grid-template-columns: 5.6rem minmax(0, 1fr); gap: var(--s4); align-items: baseline; padding: var(--s3) 0; }
-.slots__row + .slots__row { border-top: 1px solid var(--line); }
-.slot { padding: .05rem .5rem; border-radius: 999px; background: var(--mist); color: var(--link); font-weight: 700; text-align: center; }
-.slot--prn { background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--control); color: var(--ink-2); }
-.slots dd { font-size: 1.1rem; font-weight: 600; overflow-wrap: anywhere; }
-.slots__note { display: flex; align-items: flex-start; gap: var(--s1); margin-top: var(--s1); color: var(--ink-3); font-size: .9rem; font-weight: 500; }
-.slots__note .icon { margin-top: .2em; }
-.med-info { display: grid; gap: var(--s1); padding: var(--s3) 0; color: var(--ink-2); font-size: .95rem; }
+/* 本來就是一張時刻表(v5):整張是看板(.board),時段寫在一樣寬的牌上(早、中、晚、需要時、未標時段,80px),
+   牌面和翻牌數字同色,但不畫接縫:中文字的筆畫空隙會透出接縫,「需要時」看起來像被劃掉(收尾審查 11/6);
+   藥名只照藥袋上的字。院所、日期、電話是兩欄的 <dl>:欄名一欄、內容一欄,內容對齊 */
+.slots { margin: 0; padding: .25rem 1.5rem; }
+.slots__row { display: grid; grid-template-columns: 5rem minmax(0, 1fr); gap: 1rem; align-items: center; min-height: 4.5rem; padding: .625rem 0; }
+.slots__row + .slots__row { border-top: 1px solid var(--board-line); }
+.slot {
+  display: grid; place-items: center; width: 100%; min-height: 3.125rem; padding: 0 .25rem; border-radius: 4px;
+  background: var(--flap); color: #FFFFFF; font-size: 1.625rem; font-weight: 800; line-height: 1; text-align: center;
+}
+.slot--prn { font-size: 1.125rem; }   /* 三、四個字放得進同一塊牌;字色和早、中、晚一樣白 */
+.slots dd { color: var(--board-ink); font-size: 1.375rem; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
+.slots__note { display: block; margin-top: var(--s1); color: var(--board-ink-3); font-size: 1rem; font-weight: 500; }
+.med-info { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .125rem 1rem; padding: 0 0 .75rem; color: var(--ink-2); font-size: 1rem; }
 
 /* ---- 家人確認 ------------------------------------------------------------ */
 
-.confirm-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s8); }
-.confirm { overflow: hidden; }
-.confirm__head { display: flex; align-items: center; gap: var(--s4); padding: var(--s4) var(--s6); border-bottom: 1px solid var(--line); background: var(--bg-subtle); }
+/* v5(11/6):標題和內容之間不畫線,「看原件與全文」是深墨字加底線的連結;期限類的看板與「確認」「退回」在 T3 段落 */
+.confirm-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s16); }
+.confirm__head { display: flex; align-items: center; gap: var(--s4); padding-bottom: .875rem; }
 .confirm__title { flex: 1; min-width: 0; }
-.confirm__title h2 { font-size: 1.2rem; font-weight: 700; }
-.confirm__link { display: inline-flex; align-items: center; gap: var(--s1); min-height: 3rem; font-weight: 600; text-decoration: none; white-space: nowrap; }
-.confirm__body { padding: var(--s4) var(--s6); }
-.confirm__body--photo { display: grid; grid-template-columns: minmax(0, 1fr) 15rem; gap: var(--s8); align-items: start; }
-.confirm__photo { display: block; padding: var(--s2); border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-subtle); }
-.confirm__photo img { width: 100%; height: auto; max-height: 22rem; object-fit: contain; border-radius: 8px; }
-.confirm__event { display: flex; align-items: center; gap: var(--s4); padding: var(--s3) 0; }
+.confirm__title h2 { font-size: 1.5rem; font-weight: 800; }
+.confirm__link { display: inline-flex; align-items: center; min-height: 2.75rem; font-weight: 700; white-space: nowrap; }
+.confirm__body { padding: 0 0 1.5rem; }
+.confirm__body--photo { display: grid; grid-template-columns: minmax(0, 1fr) 17rem; gap: 1.75rem; align-items: start; }
+.confirm__photo { display: block; }
+.confirm__photo img { width: 100%; height: auto; max-height: 22rem; object-fit: contain; }
 .confirm__what { font-size: 1.2rem; font-weight: 700; overflow-wrap: anywhere; }
-.confirm__date { color: var(--amber); font-weight: 700; font-variant-numeric: tabular-nums; }
-.confirm__actions { display: flex; flex-wrap: wrap; gap: var(--s3); padding: var(--s4) var(--s6) var(--s6); border-top: 1px solid var(--line); }
-.confirm__actions .btn { min-width: 9rem; }
+.confirm__date { font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* ---- 更正讀值與待複核(F7) ------------------------------------------------ */
 
-.review-form { display: grid; gap: var(--s4); padding: var(--s6); }
+.review-form { display: grid; gap: var(--s4); }
 .review-form h2 { font-size: 1.2rem; font-weight: 700; }
 .field-row { display: grid; gap: var(--s1); }
 /* 加密 PDF 的密碼欄:密碼不長,電腦上不必拉滿整張卡片;「顯示密碼」照文字寬度(手機上本來就比 28rem 窄) */
@@ -427,14 +493,14 @@ a.tbl__row:hover { background: var(--bg-subtle); }
 .field-hint--error .icon { margin-top: .2em; }
 .text-input {
   width: 100%; min-height: 3rem; padding: 0 var(--s4); font: inherit; color: var(--ink);
-  background: var(--bg); border: 1px solid var(--control); border-radius: 10px;
+  background: var(--bg); border: 1px solid var(--control); border-radius: var(--radius);
 }
 textarea.text-input { min-height: 7rem; padding: var(--s3) var(--s4); line-height: 1.6; resize: vertical; }
-.text-input:focus-visible { border-color: var(--primary); }
+.text-input:focus-visible { border-color: var(--ink); }
 .text-input[aria-invalid="true"] { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
 /* 一種藥一個框;框內的「什麼時候吃」沿用首頁的選項膠囊(.kinds),標題用子層選擇器避免套到它 */
-.med-edit { display: grid; gap: var(--s3); min-width: 0; margin: 0; padding: var(--s4); border: 1px solid var(--line); border-radius: var(--radius); }
-.med-edit > legend { padding: 0 var(--s1); font-weight: 700; }
+.med-edit { display: grid; gap: var(--s3); min-width: 0; margin: 0; padding: var(--s4) 0 0; border: 0; border-top: 1px solid var(--line); }
+.med-edit > legend { padding: 0; font-weight: 700; }
 .form-actions { display: flex; flex-wrap: wrap; gap: var(--s3); margin-top: var(--s2); }
 .reject-form { margin-top: var(--s4); }
 /* 結果頁:「讀到的內容」標題旁的「更正讀值」;待複核時原因旁的主要按鈕 */
@@ -450,14 +516,18 @@ textarea.text-input { min-height: 7rem; padding: var(--s3) var(--s4); line-heigh
 .dialog:not([open]) { display: none; }
 .dialog {
   width: min(28rem, calc(100% - 2rem)); max-width: none; max-height: calc(100% - 2rem);
-  padding: var(--s6); border: 1px solid var(--line); border-radius: var(--radius-lg);
-  background: var(--bg); color: var(--ink); box-shadow: 0 20px 40px rgba(14, 27, 46, .25);
+  padding: var(--s6); border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg); color: var(--ink); box-shadow: 0 20px 40px rgba(20, 33, 43, .25);
+  overscroll-behavior: contain;   /* 框裡捲到底不帶動後面的頁面 */
 }
 .dialog[open] { display: grid; gap: var(--s3); justify-items: start; animation: dialog-in .18s ease-out; }
-/* 遮罩:半透明的深藍(= --ink);::backdrop 在舊版瀏覽器讀不到 :root 的變數,顏色直接寫 */
-.dialog::backdrop { background: rgba(14, 27, 46, .45); animation: backdrop-in .18s ease-out; }
-.dialog__icon { display: grid; place-items: center; width: 3rem; height: 3rem; border-radius: 50%; background: var(--red-bg); color: var(--red); }
-.dialog__icon .icon { width: 1.5rem; height: 1.5rem; }
+/* 遮罩:半透明的深墨(= --ink #14212B);::backdrop 在舊版瀏覽器讀不到 :root 的變數,顏色直接寫。
+   深色模式的頁面本來就深,深墨蓋上去反而變亮:改用黑色壓暗,框用看板的深墨底與細框和頁面分開(同「說明」小框) */
+.dialog::backdrop { background: rgba(20, 33, 43, .5); animation: backdrop-in .18s ease-out; }
+@media (prefers-color-scheme: dark) {
+  .dialog { background: var(--board); border-color: var(--board-edge); box-shadow: 0 20px 40px rgba(0, 0, 0, .5); }
+  .dialog::backdrop { background: rgba(0, 0, 0, .6); }
+}
 .dialog__title { font-size: 1.3rem; font-weight: 700; line-height: 1.4; }
 .dialog__msg { color: var(--ink-2); font-size: 1.05rem; line-height: 1.7; }
 /* 兩顆按鈕一樣寬、至少 10rem:放得下就並排(「先不要」在左),手機放不下就上下排(「先不要」在上) */
@@ -468,56 +538,59 @@ textarea.text-input { min-height: 7rem; padding: var(--s3) var(--s4); line-heigh
 
 /* ---- 文件櫃(四大類) ------------------------------------------------------ */
 
-/* 四張大類卡片(一般連結);選中的那一類同側欄目前頁面的晨霧藍,另加領航藍框線 */
-.cats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s4); }
+/* 四個大類(一般連結,沒有 JS 也能用):一類一格、一樣大,份數用窄體數字。選中的那一類和選中的選項(.chip)一樣,
+   月台黃底、深墨框與字;框加粗一點,不只靠顏色 */
+.cats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .75rem; }
 .cat {
-  display: grid; gap: var(--s1); padding: var(--s4); border: 1px solid var(--line); border-radius: var(--radius-lg);
-  background: var(--bg); color: inherit; text-decoration: none; box-shadow: var(--shadow-sm);
-  transition: border-color .15s ease, background-color .15s ease;
+  display: grid; align-content: start; gap: .25rem; min-height: 6rem; padding: .75rem 1rem .875rem;
+  border: 1px solid var(--control); border-radius: var(--radius); color: var(--ink); text-decoration: none;
+  transition: border-color .15s ease;
 }
-.cat:hover { border-color: var(--control); }
-.cat[aria-current="true"] { border-color: var(--primary); background: var(--mist); }
-.cat b { font-size: 1.1rem; }
-.cat small { color: var(--ink-3); font-size: .85rem; }
-.cat[aria-current="true"] small { color: var(--ink-2); }   /* 說明字在晨霧藍底上 ink-3 只有 4.48:1,改 ink-2(6.5:1) */
-.cat .n { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-.cat .type-icon { width: 2.6rem; height: 2.6rem; }
+.cat b { font-size: 1.125rem; font-weight: 800; }
+.cat:hover { border-color: var(--ink); }
+.cat[aria-current="true"] { background: var(--signal); border-color: #14212B; box-shadow: inset 0 0 0 1px #14212B; color: #14212B; }
+.cat small { color: var(--ink-3); font-family: var(--font); font-size: 1rem; font-weight: 600; }
+.cat[aria-current="true"] small { color: #14212B; }
+.cat .n { font-family: var(--font-num); font-size: 2.25rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 
 /* ---- 平板以下:左側選單改成頂部品牌列 +「選單」按鈕 ------------------------ */
 
 @media (max-width: 63.99rem) {
-  /* 頂部品牌列是 sticky:跳到 #original 或用鍵盤移動焦點時,目標不能被它蓋住 */
+  /* 頂列矮一點(64px + 5px 黃線);跳到 #original 或用鍵盤移動焦點時,目標不能被它蓋住 */
   html { scroll-padding-top: 5.5rem; }
-  .shell { display: block; }
-  .side {
-    position: sticky; top: 0; z-index: 10; height: auto; flex-direction: row; align-items: center;
-    justify-content: space-between; gap: var(--s3); padding: var(--s3) var(--s4);
-    border-right: 0; border-bottom: 1px solid var(--line); overflow: visible;
-  }
+  /* 字標、誰在用、選單鈕直置中;分頁(放得下時)撐滿整條頂列,目前的黃色分頁接在黃線上 */
+  .side { gap: .75rem; min-height: 4rem; padding: 0 var(--s4); border-bottom-width: 5px; }
+  .wordmark, .side .identity, .menu { align-self: center; }
+  .side .identity { font-size: .8125rem; }
+  .brandflap__d { width: 2.125rem; height: 2.5rem; font-size: 1.5rem; }
   .side__nav, .side__trust { display: none; }
-  .menu { display: block; }
+  .menu { display: block; margin-left: auto; }
+  /* 選單只放漢堡圖示(使用者 11/4),觸控區 48px;待處理總數是右上角的小圓點(紅底:要注意) */
   .menu__btn {
-    display: inline-flex; align-items: center; gap: var(--s2); min-height: 3rem; padding: 0 var(--s4);
-    border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink);
-    font-weight: 600; cursor: pointer; list-style: none; box-shadow: var(--shadow-sm);
+    position: relative; display: inline-flex; align-items: center; justify-content: center;
+    width: 3rem; height: 3rem; padding: 0; border-radius: var(--radius); color: var(--board-ink);
+    cursor: pointer; list-style: none;
   }
+  .menu__btn .icon { width: 1.75rem; height: 1.75rem; stroke-width: 2; }
   .menu__btn::-webkit-details-marker { display: none; }
-  .menu__btn .count { margin-left: 0; min-width: 1.4rem; font-size: .78rem; line-height: 1.4rem; }
-  .menu[open] .menu__btn { border-color: var(--primary); background: var(--mist); color: var(--link); }
-  /* 打開時從品牌列下緣往下展開,蓋在內容上面(.side 是 sticky,就是定位的基準) */
+  .menu__badge {
+    position: absolute; top: .05rem; right: 0; min-width: 1rem; height: 1rem; padding: 0 .25rem;
+    border-radius: 999px; background: var(--red-solid); color: #FFFFFF; box-shadow: 0 0 0 2px var(--board);
+    font-size: .6875rem; font-weight: 700; line-height: 1rem; text-align: center; font-variant-numeric: tabular-nums;
+  }
+  .menu[open] .menu__btn { color: var(--signal); }
+  /* 打開時從頂列的黃線下面往下展開,蓋在內容上面(.side 是 sticky,就是定位的基準);深墨底,目前的分頁是黃色塊 */
   .menu__panel {
-    position: absolute; left: 0; right: 0; top: 100%; display: grid; gap: var(--s1);
-    padding: var(--s2) var(--s4) var(--s4); background: var(--bg-subtle); border-bottom: 1px solid var(--line);
-    box-shadow: 0 10px 20px rgba(14, 27, 46, .10);
+    position: absolute; left: 0; right: 0; top: calc(100% + 5px); display: grid; gap: var(--s1);
+    padding: var(--s2) var(--s4) var(--s4); background: var(--board); border-bottom: 5px solid var(--signal);
+    box-shadow: 0 12px 24px rgba(20, 33, 43, .3); overscroll-behavior: contain;
   }
   .menu__link {
-    display: flex; align-items: center; gap: var(--s3); min-height: 3.2rem; padding: 0 var(--s3);
-    border-radius: 10px; color: var(--ink); font-size: 1.05rem; font-weight: 600; text-decoration: none;
+    display: flex; align-items: center; gap: var(--s3); min-height: 3rem; padding: 0 var(--s3);
+    color: var(--board-ink-2); font-size: 1.05rem; font-weight: 700; text-decoration: none;
   }
-  .menu__link:hover { background: rgba(27, 79, 156, .07); }
-  .menu__link[aria-current="page"] { background: var(--mist); color: var(--link); }
-  .foot-trust { display: grid; margin-top: var(--s12); padding-top: var(--s6); border-top: 1px solid var(--line); }
-  .main { padding: var(--s6) var(--s4) var(--s12); }
+  .menu__link[aria-current="page"] { background: var(--signal); color: #14212B; border-radius: 4px; }
+  .main { padding: 1rem var(--s4) var(--s12); }
   .page-head { flex-direction: column; align-items: stretch; gap: var(--s4); }
   .page-head h1 { font-size: 1.75rem; }
   .page-head__jump { display: inline-block; padding-block: .6rem; margin-block: -.6rem; }
@@ -526,41 +599,51 @@ textarea.text-input { min-height: 7rem; padding: var(--s3) var(--s4); line-heigh
   .doc-grid { grid-template-columns: 1fr; gap: var(--s8); }
   /* 平板:原件放在內容下面,但不滿版(滿版的原件自己就佔掉一整屏);手機另外放寬 */
   .doc-side { position: static; max-width: 28rem; }
+  /* 更正與改類型:原件放在表單上面,邊看邊改 */
+  .doc-grid--form .doc-side { order: -1; }
+  .doc-grid--form .original img { max-height: 35vh; }
+}
+
+/* 導覽列放得下就直接排在品牌列,不收成漢堡(使用者 11/4);放不下(手機、字放大)才用「選單」。
+   v5 頂列(兩塊字標牌 + 誰在用 + 六個 4.6rem 的分頁 + 左右留白)算出來標準字 617px、大字 693px、特大字 770px,
+   切換點各多留桌機一直在的捲軸寬度(約 1rem)。萬一還是太擠,分頁換到下一行,不會藏起來 */
+@media (max-width: 63.99rem) {
+  .side__nav { flex-wrap: wrap; justify-content: flex-end; gap: 0; min-width: 0; align-self: stretch; }
+  /* 每個分頁一樣寬(放得下兩個字加兩位數):換頁、數字變多變少時,其他分頁不會跟著挪 */
+  .side__nav .side__link { width: 4.6rem; min-height: 3rem; padding: 0; }
+}
+@media (min-width: 40rem) and (max-width: 63.99rem) {
+  html[data-font="standard"] .side__nav { display: flex; }
+  html[data-font="standard"] .menu { display: none; }
+}
+@media (min-width: 45rem) and (max-width: 63.99rem) {
+  html[data-font="large"] .side__nav { display: flex; }
+  html[data-font="large"] .menu { display: none; }
+}
+@media (min-width: 50rem) and (max-width: 63.99rem) {
+  html[data-font="xlarge"] .side__nav { display: flex; }
+  html[data-font="xlarge"] .menu { display: none; }
 }
 
 @media (max-width: 47.99rem) {
   .page-head__actions .btn { flex: 1 1 100%; }
   .doc-side { max-width: none; }
-  .upload { padding: var(--s4); }
-  .drop { flex-direction: column; align-items: stretch; text-align: center; padding: var(--s4); }
-  .drop__icon { margin: 0 auto; }
+  .drop { flex-direction: column; align-items: stretch; }
   .drop__btns .btn { flex: 1; padding: 0 var(--s3); }
   .submit, .submit__btn { width: 100%; }
-  .tbl__row--head { display: none; }
-  /* 手機:第一行是事項;第二行是金額(或時間)與狀態,放不下時狀態整個換到下一行,不在字中間斷開 */
-  .tbl__row, .tbl--review .tbl__row {
-    grid-template-columns: 3.1rem minmax(0, 1fr) 1rem;
-    grid-template-areas: "icon main chev" "icon meta chev"; row-gap: var(--s1); column-gap: var(--s3);
-  }
-  .tbl__row > :first-child { grid-area: icon; }
+  /* 手機:第一行是事項;第二行是時間與狀態,放不下時狀態整個換到下一行,不在字中間斷開 */
+  .tbl__row, .tbl--review .tbl__row { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main" "meta"; row-gap: var(--s1); }
   .tbl__main { grid-area: main; }
   .tbl__meta { grid-area: meta; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s3); min-width: 0; }
-  .tbl__chev { grid-area: chev; }
-  .tbl__num { text-align: left; }
-  .tbl__num:empty { display: none; }
-  .tbl__status { max-width: 100%; }
-  .tbl__status .pill { white-space: normal; }   /* 整行都放不下的長狀態,才在膠囊裡換行 */
-  .tbl__cell-label { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; }
   .facts { grid-template-columns: 1fr; }
-  .fact { padding: var(--s4); }
-  .facts--med { padding: var(--s1) var(--s4); }
+  .fact + .fact { border-top: 1px solid var(--line); }
+  .fact--wide { border-bottom: 0; }
   .kv { grid-template-columns: 7rem minmax(0, 1fr); }
-  .confirm__head { flex-wrap: wrap; padding: var(--s4); }
+  .confirm__head { flex-wrap: wrap; }
   .confirm__link { width: 100%; }
-  .confirm__body { padding: var(--s3) var(--s4); }
   .confirm__body--photo { display: block; }
-  .confirm__photo { display: none; }
-  .confirm__actions { padding: var(--s4); }
+  .confirm__photo { margin-top: var(--s4); }          /* 手機也看得到原件,排在內容下面(家人常在外面用手機確認) */
+  .confirm__photo img { max-height: 16rem; }
   .confirm__actions .btn { flex: 1; min-width: 0; }
   .form-actions .btn, .page-head__reason .btn { flex: 1 1 100%; }
   .cats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -570,36 +653,44 @@ textarea.text-input { min-height: 7rem; padding: var(--s3) var(--s4); line-heigh
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition: none !important; }
-  .progress__bar { width: 100%; transform: none; background: repeating-linear-gradient(45deg, var(--primary) 0 12px, var(--primary-hover) 12px 24px); }
+  .progress__bar { width: 100%; transform: none; background: repeating-linear-gradient(45deg, var(--ink) 0 12px, var(--ink-3) 12px 24px); }
   .dialog[open], .dialog::backdrop { animation: none; }   /* 確認框直接出現(上面的 * 選不到 ::backdrop) */
+  /* 「說明」的 ⓘ 與小框:不放大、不移動,只留淡入淡出(使用者 11/5 要過渡動畫;減少動態是少動,不是完全不變)。
+     圓底一開始就是同樣大小、只是透明,滑過時只有顏色淡進來 */
+  .note__icon { box-shadow: 0 0 0 .3rem transparent; transition: background-color .2s ease, box-shadow .2s ease, fill .15s ease, color .15s ease !important; }
+  .note > summary:hover .note__icon, .note > summary:active .note__icon { transform: none; }
+  .note[open] > .note__body { animation: note-fade-in .18s ease-out !important; }
+  .note[data-closing] > .note__body { animation: note-fade-out .14s ease-in forwards !important; }
+  .btn:active:not([disabled]) { transform: none; }
 }
+@keyframes note-fade-in { from { opacity: 0; } }
+@keyframes note-fade-out { to { opacity: 0; } }
 
 @media (forced-colors: active) {
-  .panel, .facts, .original, .chip, .type-icon, .cal, .pill, .slot, .count, .dialog__icon { border: 1px solid CanvasText; }
+  .chip, .menu__badge, .nav-badge { border: 1px solid CanvasText; }
   .dialog { border: 2px solid CanvasText; }   /* 陰影與遮罩的顏色會被拿掉,靠粗框和後面的頁面分開 */
   .chip:has(.chip__input:checked) { outline: 2px solid Highlight; }
   .side__link[aria-current="page"], .menu__link[aria-current="page"] { outline: 2px solid Highlight; }
-  .btn { border: 1px solid ButtonText; }
-  .cat[aria-current="true"] { outline: 2px solid Highlight; }   /* 選中的大類:晨霧藍底在強制色彩下看不到 */
+  .btn { border: 2px solid ButtonText; }
+  .side, .board, .flap__d, .brandflap__d, .tile { border: 1px solid CanvasText; }   /* 底色被拿掉時,看板與牌靠框線看得出來 */
+  .cat[aria-current="true"] { outline: 2px solid Highlight; }   /* 選中的大類:月台黃底在強制色彩下看不到 */
 }
 
 /* ---- 設定頁(SET)與這台裝置的字級 ------------------------------------------ */
-/* 四塊都是 .panel 卡片;選項沿用首頁的膠囊(.kinds/.chip)、狀態用 .kv,按鈕用共用的 .btn。 */
+/* 一塊一個區段(.set-card),靠留白分開,和其他頁的段落一樣隔 2.5rem、標題一樣大;選項沿用首頁的 .kinds/.chip、
+   狀態用 .kv,按鈕用共用的 .btn。 */
 
-.settings { display: grid; gap: var(--s8); }
-.set-card { display: grid; gap: var(--s4); padding: var(--s6); }
-.set-card h2 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s2); font-size: 1.2rem; font-weight: 700; }
-.set-card .tag { color: var(--ink-3); font-size: .85rem; font-weight: 600; }
+.set-card { display: grid; gap: var(--s4); }
+.set-card + .set-card { margin-top: 2.5rem; }
+.set-card h2 { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s2); font-size: 1.5rem; font-weight: 800; }
+.set-card .section__title h2 { display: inline; }
 .set-card .kinds + .kinds { margin-top: var(--s4); }
 .set-form { display: grid; gap: var(--s4); }
 /* 停用的選項(沒有 JS 時的偏好、沒有金鑰時的雲端備援):淡一點、游標說明不能按 */
 .set-card .chip:has(.chip__input:disabled) { opacity: .55; cursor: not-allowed; }
-.lockline { display: flex; align-items: flex-start; gap: var(--s2); color: var(--ink-2); font-size: .95rem; }
-.lockline .icon { margin-top: .2em; color: var(--link); }
 .log { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
-.log li { padding: var(--s3) var(--s2); border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: .95rem; overflow-wrap: anywhere; }
+.log li { padding: var(--s3) 0; border-bottom: 1px solid var(--line); color: var(--ink-2); font-size: .95rem; overflow-wrap: anywhere; }
 .log__who { color: var(--ink-3); }
-.danger-zone { border-color: var(--red-bg); }
 /* 沒有 JS 時刪除前要先勾的那一格(有 JS 時是確認框,這格不會出現) */
 .check-line { display: flex; align-items: center; gap: var(--s2); min-height: 2.75rem; font-weight: 600; cursor: pointer; }
 .check-line input { width: 1.25rem; height: 1.25rem; margin: 0; accent-color: var(--primary); }
@@ -608,11 +699,8 @@ textarea.text-input { min-height: 7rem; padding: var(--s3) var(--s4); line-heigh
 html[data-font="large"] { font-size: 112.5%; }   /* 18px */
 html[data-font="xlarge"] { font-size: 125%; }    /* 20px */
 
-/* 「選單」兩個字不拆成兩行;特大字的手機,品牌列放不下副標,只留「看有」與標誌,
-   欄名與內容(.kv)改成上下排,內容才不會擠成一欄好幾行 */
-html:is([data-font="large"], [data-font="xlarge"]) .menu__btn { white-space: nowrap; }
+/* 特大字的手機,欄名與內容(.kv)改成上下排,內容才不會擠成一欄好幾行 */
 @media (max-width: 29.99rem) {
-  html[data-font="xlarge"] .wordmark small { display: none; }
   html[data-font="xlarge"] .kv { grid-template-columns: minmax(0, 1fr); }
   html[data-font="xlarge"] .kv dt { padding-bottom: 0; border-bottom: 0; }
 }
@@ -620,116 +708,684 @@ html:is([data-font="large"], [data-font="xlarge"]) .menu__btn { white-space: now
 /* 媒體查詢的 rem 不跟著 <html> 的字級變,斷點還是原本的寬度:放大後在 64–80rem 寬的電腦(平板橫放、小筆電)
    最擠的地方改用窄版排法——上傳區直排、結果頁的原件移到內容下面、表格的金額與狀態換到第二行(同手機版) */
 @media (min-width: 64rem) and (max-width: 79.99rem) {
-  html:is([data-font="large"], [data-font="xlarge"]) .drop { flex-direction: column; align-items: stretch; text-align: center; }
-  html:is([data-font="large"], [data-font="xlarge"]) .drop__icon { margin: 0 auto; }
+  html:is([data-font="large"], [data-font="xlarge"]) .drop { flex-direction: column; align-items: stretch; }
   html:is([data-font="large"], [data-font="xlarge"]) .drop__btns .btn { flex: 1; padding: 0 var(--s3); }
   html:is([data-font="large"], [data-font="xlarge"]) .doc-grid { grid-template-columns: minmax(0, 1fr); }
   html:is([data-font="large"], [data-font="xlarge"]) .doc-side { position: static; max-width: 28rem; }
-  html:is([data-font="large"], [data-font="xlarge"]) .tbl__row--head { display: none; }
-  html:is([data-font="large"], [data-font="xlarge"]) :is(.tbl__row, .tbl--review .tbl__row) {
-    grid-template-columns: 3.1rem minmax(0, 1fr) 1rem;
-    grid-template-areas: "icon main chev" "icon meta chev"; row-gap: var(--s1); column-gap: var(--s3);
-  }
-  html:is([data-font="large"], [data-font="xlarge"]) .tbl__row > :first-child { grid-area: icon; }
+  html:is([data-font="large"], [data-font="xlarge"]) :is(.tbl__row, .tbl--review .tbl__row) { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main" "meta"; row-gap: var(--s1); }
   html:is([data-font="large"], [data-font="xlarge"]) .tbl__main { grid-area: main; }
   html:is([data-font="large"], [data-font="xlarge"]) .tbl__meta { grid-area: meta; display: flex; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s3); min-width: 0; }
-  html:is([data-font="large"], [data-font="xlarge"]) .tbl__chev { grid-area: chev; }
-  html:is([data-font="large"], [data-font="xlarge"]) .tbl__num { text-align: left; }
-  html:is([data-font="large"], [data-font="xlarge"]) .tbl__num:empty { display: none; }
-  html:is([data-font="large"], [data-font="xlarge"]) .tbl__cell-label { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; }
 }
 
-/* ---- 「繳好了/辦好了」與「已完成」(首頁;10/28 樣稿) ---- */
-.btn--done { min-height: 2.75rem; padding: 0 var(--s4); white-space: nowrap; gap: .35rem; }
-@media (min-width: 48rem) {
-  /* 每一列都留同樣寬的位置給按鈕,狀態欄才對得齊;按鈕疊在那個位置上(連結裡不能再放按鈕) */
-  .tbl--remind .tbl__list > li { position: relative; }
-  .tbl--remind .tbl__row { padding-right: 8.5rem; }
-  .tbl--remind li.has-done > form { position: absolute; right: var(--s2); top: 50%; transform: translateY(-50%); }
-}
-@media (max-width: 47.99rem) {
-  /* 手機:按鈕整列寬,放在那一列下面;分隔線畫在整個項目外面 */
-  .tbl--remind li.has-done { border-bottom: 1px solid var(--line); }
-  .tbl--remind li.has-done > a.tbl__row { border-bottom: 0; }
-  .tbl--remind li.has-done > form { padding: 0 var(--s4) var(--s4); }
-  .btn--done { width: 100%; justify-content: center; }
-}
-.done-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); }
-.done-list li { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); flex-wrap: wrap; }
-.done-list li + li { border-top: 1px solid var(--line); }
-.done-list form { margin-left: auto; }
-.done-mark { color: var(--green); display: inline-flex; }
-.done-what { font-weight: 600; }
-.done-who { color: var(--ink-2); flex: 1 1 12rem; }
+/* ---- 「已完成」(首頁) ---- */
+/* 三欄對齊(v5,11/6):事項|誰、哪天標示|改回;不能改的人沒有「改回」,那一格空著。手機的排法在 T1 段落 */
+.done-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.done-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 15rem) 6.5rem; align-items: center; gap: var(--s1) var(--s4);
+                padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
+.done-list form { grid-column: 3; }
+.done-mark { display: none; }
+.done-what { font-weight: 600; overflow-wrap: anywhere; }
+.done-who { color: var(--ink-2); overflow-wrap: anywhere; }
 .link-btn { background: none; border: 0; color: var(--link); text-decoration: underline; font: inherit;
             min-height: 2.75rem; padding: 0 var(--s2); cursor: pointer; }
 
 /* ---- 更正頁「改成 QR/條碼上的值」(10/28 樣稿) ---- */
-.evidence-fix { margin-top: var(--s3); padding: var(--s4); border-radius: var(--radius); background: var(--mist);
-                border: 1px solid var(--line); display: grid; gap: var(--s3); }
+.evidence-fix { margin-top: var(--s3); display: grid; gap: var(--s3); }
 .evidence-fix p { margin: 0; }
 .evidence-fix__act { display: grid; gap: var(--s2); }
 .evidence-fix .btn { justify-self: start; }
-.evidence-fix .ev-num { font-size: 1.25rem; font-weight: 700; color: var(--brand-ink); white-space: nowrap; }
+.evidence-fix .ev-num { font-size: 1.25rem; font-weight: 700; white-space: nowrap; }
 
 /* ---- 上傳後的進度頁(10/28 樣稿) ---- */
-.progress-photo { margin: var(--s6) var(--s6) 0; display: flex; gap: var(--s4); align-items: center; color: var(--ink-2); }
-.progress-photo img { width: 4.5rem; height: 6rem; object-fit: cover; border-radius: 8px; border: 1px solid var(--line); }
-.progress-photo__icon { display: grid; place-items: center; width: 4.5rem; height: 6rem; flex: none; border-radius: 8px;
-                        background: var(--mist); color: var(--link); }
+/* v5(11/6):只亮目前走到的那一步:月台黃實心點加深墨框(同主要按鈕),字是深墨、寫說明;做完的是深墨框裡的勾,
+   字退成次要字;還沒到的是淡框、說明字色。綠色只留給核對通過,這裡不用 */
+.progress-photo { display: flex; gap: var(--s4); align-items: center; color: var(--ink-2); }
+.progress-photo img { width: 4.5rem; height: 6rem; object-fit: cover; border: 1px solid var(--line); }
+.progress-photo__icon { display: grid; place-items: center; width: 4.5rem; height: 6rem; flex: none; border: 1px solid var(--line); color: var(--ink-3); }
 .progress-photo__icon .icon { width: 2rem; height: 2rem; }
-.steps { list-style: none; margin: 0; padding: var(--s6); display: grid; gap: var(--s4); }
+.steps { list-style: none; margin: 0; padding: var(--s6) 0; display: grid; gap: var(--s4); }
 .step { display: grid; grid-template-columns: 2.25rem 1fr auto; gap: var(--s3); align-items: start; color: var(--ink-3); }
 .step__dot { width: 2.25rem; height: 2.25rem; border-radius: 50%; display: grid; place-items: center;
              border: 2px solid var(--control); background: var(--bg); }
 .step__icon { display: none; }
 .step__title { font-size: 1.1rem; font-weight: 700; display: block; }
-.step__hint { display: block; font-size: .95rem; }
+.step__hint { display: none; font-size: .95rem; }   /* 只有正在做的那一步寫說明 */
+.step--now .step__hint { display: block; }
 .step__time { font-variant-numeric: tabular-nums; font-size: .95rem; white-space: nowrap; }
-.step--done { color: var(--ink); }
-.step--done .step__dot { background: var(--green); border-color: var(--green); color: var(--bg); }
+.step--done { color: var(--ink-2); }
+.step--done .step__dot { border-color: var(--ink); color: var(--ink); }
 .step--done .step__icon--done { display: block; }
 .step--now { color: var(--ink); }
-.step--now .step__dot { border-color: var(--primary); color: var(--primary); box-shadow: 0 0 0 4px var(--mist); }
+.step--now .step__dot { background: var(--signal); border-color: var(--on-primary); color: #14212B; }
 .step--now .step__icon--now { display: block; }
+.step--now .step__title { font-weight: 800; }
 .step--now .step__title::after { content: "…"; }
-.progress-foot { margin: 0; padding: 0 var(--s6) var(--s6); color: var(--ink-2); }
+@media (prefers-color-scheme: dark) { .step--now .step__dot { border-color: var(--signal); } }   /* 同主要按鈕:深色頁面上黃框 */
 
 /* ---- 重複上傳的提示(結果頁標題下,10/28 樣稿) ---- */
-.dup-note { margin: 0 0 var(--s6); padding: var(--s4) var(--s6); border-radius: var(--radius); background: var(--amber-bg);
-            border: 1px solid var(--line); display: grid; gap: var(--s3); }
-.dup-note h2 { margin: 0; font-size: 1.15rem; display: flex; gap: var(--s2); align-items: center; color: var(--amber); }
+.dup-note { margin: 0 0 var(--s8); display: grid; gap: var(--s3); }
+.dup-note h2 { margin: 0; font-size: 1.15rem; color: var(--amber); }
 .dup-note p { margin: 0; }
 .dup-note .btn { justify-self: start; }
 
 /* ---- 統一發票對獎(/lottery,10/28 樣稿) ---- */
-.lot-periods { display: flex; flex-wrap: wrap; gap: var(--s2); margin: 0 0 var(--s6); }
-.lot-period { display: inline-flex; align-items: baseline; gap: var(--s2); min-height: 2.75rem; padding: .55rem var(--s4);
-              border: 1px solid var(--line); border-radius: 999px; color: var(--ink); text-decoration: none; }
-.lot-period small { color: var(--ink-3); }
-.lot-period:hover { border-color: var(--control); }
-.lot-period[aria-current="true"] { border-color: var(--primary); background: var(--mist); font-weight: 700; }
-.lot-form { display: grid; gap: var(--s4); padding: var(--s6); }
-.lot-form h2 { font-size: 1.2rem; font-weight: 700; }
-.lot-form > .btn { justify-self: start; }
+/* 期別:一期一格、一樣寬,期別與號碼的數字用窄體(使用者 11/6)。目前這一期和選中的選項(.chip)一樣,月台黃底、
+   深墨框與字(只畫黃框的話,黃框和瓷白只差 1.5:1,看不出來) */
+.lot-periods { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 var(--s6); }
+.lot-period { display: inline-flex; align-items: baseline; justify-content: center; gap: var(--s2); min-width: 14rem; min-height: 3rem;
+              padding: .625rem var(--s4); border: 1px solid var(--control); border-radius: var(--radius); color: var(--ink);
+              font-family: var(--font-num); font-size: 1.0625rem; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none;
+              transition: border-color .15s ease; }
+.lot-period small { color: var(--ink-3); font-family: var(--font); font-size: .875rem; font-weight: 500; }
+.lot-period:hover { border-color: var(--ink); }
+.lot-period[aria-current="true"] { background: var(--signal); border-color: #14212B; box-shadow: inset 0 0 0 1px #14212B; color: #14212B; }
+.lot-period[aria-current="true"] small { color: #14212B; }
+.lot-form { display: grid; gap: var(--s4); }
+.lot-form h2 { font-family: var(--font-num); font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .lot-grid { display: grid; gap: var(--s3); grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); }
-.lot-grid .text-input { font-variant-numeric: tabular-nums; letter-spacing: .08em; }
-.lot-form .text-input[readonly] { background: var(--mist); }   /* 長輩看得到號碼,不能改 */
+.lot-grid .text-input { font-family: var(--font-num); font-size: 1.25rem; font-variant-numeric: tabular-nums; letter-spacing: .06em; }
+.lot-form .text-input[readonly] { background: var(--bg-subtle); }   /* 長輩看得到號碼,不能改 */
 .lot-results { list-style: none; margin: 0; padding: 0; }
-.lot-results li { display: grid; gap: var(--s2); padding: var(--s4) var(--s6); }
+.lot-results li { display: grid; gap: var(--s2); padding: var(--s4) 0; }
 .lot-results li + li { border-top: 1px solid var(--line); }
-.lot-results .lot-no { justify-self: start; font-variant-numeric: tabular-nums; font-weight: 700; letter-spacing: .04em; }
+.lot-results .lot-no { justify-self: start; font-family: var(--font-num); font-size: 1.25rem; font-variant-numeric: tabular-nums;
+                       font-weight: 700; letter-spacing: .04em; }
 .lot-results .lot-meta { color: var(--ink-2); }
 .lot-results .btn { justify-self: start; }
-.lot-hit { display: flex; gap: var(--s2); align-items: center; font-weight: 700; color: var(--green); }
+.lot-hit { font-weight: 700; }
 .lot-miss { color: var(--ink-3); }
-.lot-done { display: flex; gap: var(--s2); align-items: flex-start; color: var(--ink-2); }
-.lot-done .icon { margin-top: .2em; flex: none; }
+.lot-done { color: var(--ink-2); }
 .section__head--tools .muted { margin-left: auto; }   /* 份數靠右、緊鄰按鈕(文件櫃「財產資產」的對獎入口) */
-.lot-skip { padding: var(--s4) var(--s6); color: var(--ink-2); border-top: 1px solid var(--line); margin: 0; }
+.lot-skip { padding: var(--s4) 0; color: var(--ink-2); border-top: 1px solid var(--line); margin: 0; }
 .lot-results:empty + .lot-skip, .panel > .lot-skip:first-child { border-top: 0; }
 .lot-foot { margin-top: var(--s4); }
 .answer__more { margin: var(--s4) 0 0; }
 .prepared { margin-top: var(--s4); }   /* 原件下方收合的「系統處理後送給 AI 的影像」 */
 .prepared .fold__head span { font-weight: 600; }
 .prepared .original { margin-top: var(--s2); }
+
+/* ---- 使用手冊:說明中心(使用者 11/5,照 Claude 說明中心) ----
+   首頁(/help):置中的標題、一句引導與搜尋框;下面是「現在的情況」與主題清單,一列一篇:編號(序列,窄體數字)、
+   標題(深墨字加底線的連結)、一句摘要。搜尋結果同一種列。文章頁(/help/<編號>):內文最寬 44rem;寬螢幕右邊是
+   「在此頁面上」,捲動時跟著;平板以下放在內文上面。最下面是上一篇與下一篇 */
+.help-hero { display: grid; justify-items: center; gap: var(--s2); margin-bottom: var(--s8); text-align: center; }
+.help-hero h1 { font-size: 2rem; font-weight: 800; line-height: 1.25; }
+.help-hero__lead { color: var(--ink-2); font-size: 1.1rem; }
+.help-search { width: 100%; max-width: 36rem; margin-top: var(--s4); margin-bottom: 0; }
+.help-now { display: grid; gap: var(--s1); max-width: 44rem; margin: 0 auto; color: var(--ink-3); font-size: .95rem; text-align: center; }
+.help-intro { max-width: 48rem; margin: var(--s12) auto 0; color: var(--ink-2); line-height: 1.75; }
+.help-list { max-width: 48rem; margin-inline: auto; }
+.help-rows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.help-rows li { border-bottom: 1px solid var(--line); }
+.help-topic, .help-hit { display: flex; align-items: baseline; gap: var(--s4); min-height: 3.5rem; padding: var(--s4) 0; color: inherit; text-decoration: none; }
+.help-hit { flex-direction: column; align-items: flex-start; gap: var(--s1); }
+.help-topic__num { flex: none; min-width: 2rem; color: var(--ink-3); font-family: var(--font-num); font-size: 1.25rem; font-weight: 700;
+                   font-variant-numeric: tabular-nums; }
+.help-topic__main { display: grid; gap: var(--s1); flex: 1 1 auto; min-width: 0; }
+.help-topic b, .help-hit b { color: var(--link); font-size: 1.125rem; font-weight: 800; overflow-wrap: anywhere;
+                             text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .2em; }
+.help-topic:hover b, .help-hit:hover b { text-decoration-thickness: 2px; }
+.help-row__text { color: var(--ink-2); overflow-wrap: anywhere; }
+.help-row__where { color: var(--ink-3); font-size: .9rem; }
+.help-row__text mark { background: none; color: var(--ink); font-weight: 700; }   /* 搜尋的字:加粗,不用底色塊 */
+.help-head__summary { max-width: 44rem; margin-top: var(--s2); color: var(--ink-2); font-size: 1.1rem; }
+.help-article { display: grid; grid-template-columns: minmax(0, 44rem) 15rem; gap: var(--s12); align-items: start; }
+.help-toc { order: 2; position: sticky; top: calc(var(--bar-h) + 1.5rem); padding-left: var(--s4); border-left: 1px solid var(--line); }   /* 讓出頂列 */
+.help-toc h2 { margin-bottom: var(--s1); color: var(--ink-2); font-size: .9375rem; font-weight: 800; }
+.help-toc ul { list-style: none; margin: 0; padding: 0; }
+.help-toc a { display: flex; align-items: center; min-height: 2.75rem; color: var(--ink-2); font-size: .9375rem; line-height: 1.4; text-decoration: none; }
+.help-toc a:hover { color: var(--ink); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: .2em; }
+.help-article__body h2 { margin-top: var(--s12); font-size: 1.25rem; }   /* 一篇裡的小節(第二層) */
+.help-article__body > h2:first-child { margin-top: 0; }
+/* 「在此頁面上」:電腦上摘要只是標題;手機與平板收起來,寫幾個小節、有展開箭頭(app.js 的 data-collapse-narrow) */
+.help-toc__fold > summary { display: flex; align-items: center; gap: var(--s2); list-style: none; cursor: default; }
+.help-toc__fold > summary::-webkit-details-marker { display: none; }
+.help-toc__count, .help-toc__chev { display: none; }
+.help-pager { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--s4); max-width: 44rem; margin-top: var(--s16); }
+/* 上一篇與下一篇:一樣大的兩格,框和選項一樣(--control,3.8:1);標題是深墨字加底線的連結,滑過時框變深墨、底線變粗 */
+.help-pager__link { display: grid; gap: var(--s1); padding: var(--s4); border: 1px solid var(--control); border-radius: var(--radius); color: inherit; text-decoration: none;
+                    transition: border-color .15s ease; }
+.help-pager__link small { color: var(--ink-3); font-size: .9375rem; }
+.help-pager__link b { color: var(--link); font-size: 1.125rem; font-weight: 800; overflow-wrap: anywhere;
+                      text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .2em; }
+.help-pager__link:hover { border-color: var(--ink); }
+.help-pager__link:hover b { text-decoration-thickness: 2px; }
+.help-pager__link--next { grid-column: 2; text-align: right; }
+@media (max-width: 63.99rem) {
+  .help-article { grid-template-columns: minmax(0, 1fr); gap: var(--s6); }
+  .help-toc { order: 0; position: static; padding-left: 0; border-left: 0; border-block: 1px solid var(--line); }
+  .help-toc__fold > summary { min-height: 3rem; cursor: pointer; }
+  .help-toc__fold h2 { margin: 0; }
+  .help-toc__count { display: inline; margin-left: auto; color: var(--ink-3); font-size: .9rem; }
+  .help-toc__chev { display: block; flex: none; color: var(--ink-3); transition: transform .15s ease; }
+  .help-toc__fold[open] .help-toc__chev { transform: rotate(90deg); }
+  .help-toc__fold > ul { padding-bottom: var(--s2); }
+}
+@media (max-width: 47.99rem) {
+  .help-pager { grid-template-columns: minmax(0, 1fr); }
+  .help-pager__link--next { grid-column: auto; text-align: left; }
+}
+.manual { max-width: 44rem; line-height: 1.75; }
+.manual h2 { margin-top: var(--s16); font-size: 1.4rem; font-weight: 800; }
+.manual h3 { margin-top: var(--s8); font-size: 1.1rem; font-weight: 800; }   /* 跳到小節時讓出頂列:html 的 scroll-padding-top */
+.manual p, .manual ul, .manual ol, .manual blockquote, .manual__table { margin: var(--s3) 0 0; }
+.manual ul, .manual ol { padding-left: 1.4em; }
+.manual li + li { margin-top: var(--s1); }
+.manual blockquote { margin-inline: 0; color: var(--ink-2); }
+.manual code { font-size: .9em; overflow-wrap: anywhere; }
+.manual__table { overflow-x: auto; }
+.manual table { width: 100%; border-collapse: collapse; }
+.manual th, .manual td { padding: var(--s2) var(--s3) var(--s2) 0; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.manual th { font-weight: 700; }
+/* 第一欄多半是短的名稱(帳單、發票、收據):別被旁邊的長句擠成一字一行 */
+.manual th:first-child, .manual td:first-child { min-width: 7em; }
+
+/* ---- 參考產品的優化(11/4) ---- */
+.note__line { display: block; }
+.note__line + .note__line { margin-top: var(--s2); }
+/* 期限後面的「還有 N 天」v5 改成狀態牌(.tile,T2 段落),原本的 .fact__note 字色規則拿掉了 */
+.field-was { display: block; margin-top: var(--s1); color: var(--ink-3); font-size: .9rem; }
+.search { display: flex; gap: var(--s3); max-width: 32rem; margin-bottom: var(--s8); }
+.search .text-input { flex: 1 1 auto; min-width: 0; }
+
+/* ==== 11/4 第二批(參考 Rossum 等產品):三段由不同人負責,各自只在自己的段落裡加規則,合併時才不會互相覆蓋 ==== */
+
+/* ---- 更正頁:原件與欄位並排對照 ---- */
+/* 參考 Rossum 的人工核對畫面(11/4):電腦左邊原件、右邊欄位,原件跟著捲動固定在左邊;有問題的欄位排前面、寫出原因。
+   平板與手機是一欄:原件在表單上面,每個有問題的欄位下面可以展開同一張原件(.peek,<details>),不換頁,已經填的字不會不見。
+   用自己的類別,不用結果頁的 .doc-grid:兩頁分開改不會互相影響 */
+.compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s8); align-items: start; }
+.compare__original { position: sticky; top: calc(var(--bar-h) + 1.5rem); display: grid; gap: var(--s3); min-width: 0; }   /* 讓出頂列 */
+.compare__original h2 { font-size: 1.05rem; font-weight: 700; }
+.compare__main { min-width: 0; }
+/* 放大:勾選框藏起來,「放大/縮回」是它的標籤(同首頁的選項膠囊),沒有 JS 也能按;勾起來時圖片放大到 2.5 倍,
+   框裡可以上下左右捲動。有 JS 時按圖片本身也能放大或縮回(.zoom--js 才換游標) */
+.zoom { display: grid; gap: var(--s2); min-width: 0; }
+.zoom__check { position: absolute; opacity: 0; width: 1px; height: 1px; margin: 0; }
+.zoom__bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); }
+.zoom__btn { min-height: 2.75rem; }
+.zoom__out, .zoom__check:checked ~ .zoom__bar .zoom__in { display: none; }
+.zoom__check:checked ~ .zoom__bar .zoom__out { display: inline; }
+.zoom__check:focus-visible ~ .zoom__bar .zoom__btn { outline: 3px solid var(--focus); outline-offset: 2px; }
+.zoom__open { display: inline-flex; align-items: center; min-height: 2.75rem; font-weight: 600; }
+.zoom__frame { overflow: hidden; border: 1px solid var(--line); }
+.zoom__frame img { width: 100%; height: auto; object-fit: contain; }
+/* 沒放大時整張放得下(限高只套在沒勾的時候,各種版面的限高才不會蓋掉放大) */
+.zoom__check:not(:checked) ~ .zoom__frame img { max-height: calc(100vh - 10rem); }
+.zoom__check:checked ~ .zoom__frame { max-height: calc(100vh - 10rem); overflow: auto; overscroll-behavior: contain; }
+.zoom__check:checked ~ .zoom__frame img { width: 250%; max-width: none; }
+.zoom--js .zoom__frame img { cursor: zoom-in; }
+.zoom--js .zoom__check:checked ~ .zoom__frame img { cursor: zoom-out; }
+/* 有問題的欄位,一次一個(使用者 11/5):分組標題、一欄一段(上面一條細線);摘要一行寫欄位名稱加原因,紅是和機讀碼不符、
+   檢查沒通過,琥珀是讀不清楚、沒有讀到(顏色是第二重提示,原因一律寫成字)。收起來時擠成一行,按了才展開看完整的原因 */
+.issue-group { margin-top: var(--s4); font-size: 1.05rem; font-weight: 700; }
+.issue-fold { min-width: 0; border-top: 1px solid var(--line); }
+.issue-fold:last-of-type { border-bottom: 1px solid var(--line); }
+.issue-fold__head { display: flex; align-items: center; gap: var(--s2); min-height: 2.75rem; padding: var(--s2) 0; cursor: pointer; list-style: none; }
+.issue-fold__head::-webkit-details-marker { display: none; }
+.issue-fold__line { flex: 1 1 auto; min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
+.issue-fold:not([open]) .issue-fold__line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.issue-fold__state { flex: none; color: var(--ink-2); font-size: .9rem; font-weight: 600; }
+.issue-fold__state--bad { color: var(--red); }
+.issue-fold[open] .issue-fold__state { display: none; }
+.issue-fold__chev { flex: none; color: var(--ink-3); transition: transform .2s ease-out; }
+.issue-fold[open] .issue-fold__chev { transform: rotate(90deg); }
+.issue-fold__body { display: grid; gap: var(--s3); min-width: 0; padding-bottom: var(--s4); }
+.issue-fold__body > .subhead { margin: 0; }
+.issue--fail { color: var(--red); }
+.issue--wait { color: var(--amber); }
+.issue-none { color: var(--ink-2); }
+.next-issue { justify-self: start; display: inline-flex; align-items: center; min-height: 2.75rem; font-weight: 600; }
+.med-group { display: grid; gap: var(--s3); min-width: 0; }
+.med-group > .subhead { margin: 0; }
+.subhead h4 { display: inline; margin-right: var(--s3); font: inherit; }
+/* 「看原件」(手機與平板):深墨字加底線(連結的樣子),打開時同一行改寫「收起原件」 */
+.peek > summary { display: inline-flex; align-items: center; min-height: 2.75rem; color: var(--link); font-weight: 600;
+                  text-decoration: underline; text-underline-offset: .18em; cursor: pointer; list-style: none; }
+.peek > summary::-webkit-details-marker { display: none; }
+.peek__hide, .peek[open] .peek__show { display: none; }
+.peek[open] .peek__hide { display: inline; }
+.peek .zoom { margin-top: var(--s2); }
+.peek .zoom__check:not(:checked) ~ .zoom__frame img { max-height: 60vh; }
+.peek .zoom__check:checked ~ .zoom__frame { max-height: 70vh; }
+.peek__pdf { display: inline-flex; align-items: center; min-height: 2.75rem; font-weight: 600; }
+/* 結果頁上方「改了什麼」(更正存好之後,接在「已更正」下面) */
+.msg-change { margin-bottom: var(--s6); color: var(--ink-2); }
+.msg + .msg-change { margin-top: calc(var(--s2) - var(--s6)); }
+/* 按鈕把結果寫出來,字比較長:窄的手機或字級放大時換行,不撐破畫面 */
+.compare__main .form-actions .btn, .compare__main .reject-form .btn { min-width: 0; padding-block: var(--s2); white-space: normal; }
+@media (min-width: 64rem) {
+  .peek { display: none; }   /* 電腦上原件就在左邊 */
+}
+@media (max-width: 63.99rem) {
+  .compare { grid-template-columns: minmax(0, 1fr); gap: var(--s6); }
+  .compare__original { position: static; }
+  .compare__original .zoom__check:not(:checked) ~ .zoom__frame img { max-height: 35vh; }
+  .compare__original .zoom__check:checked ~ .zoom__frame { max-height: 60vh; }
+}
+/* 字級放大的 64–80rem 寬電腦:同全站,改成一欄(原件在表單上面),「看原件」也出現 */
+@media (min-width: 64rem) and (max-width: 79.99rem) {
+  html:is([data-font="large"], [data-font="xlarge"]) .compare { grid-template-columns: minmax(0, 1fr); }
+  html:is([data-font="large"], [data-font="xlarge"]) .compare__original { position: static; }
+  html:is([data-font="large"], [data-font="xlarge"]) .compare__original .zoom__check:not(:checked) ~ .zoom__frame img { max-height: 35vh; }
+  html:is([data-font="large"], [data-font="xlarge"]) .compare__original .zoom__check:checked ~ .zoom__frame { max-height: 60vh; }
+  html:is([data-font="large"], [data-font="xlarge"]) .peek { display: block; }
+}
+/* (更正頁的規則寫在這一行上面) */
+
+/* ---- 結果頁:先回答三個問題 ---- */
+/* 第一屏(使用者 11/4):這是什麼 → 多少錢或要做什麼 → 什麼時候前 → 核對那一句 → 聽重點、查看原件。
+   v5(11/6):前三個問題排在一塊深墨看板上(.board--answer,規則在最後的「T2 結果頁」),這裡的字色是看板上的淺色;
+   放大的只有金額(窄體大字)與期限(翻牌),不靠字級分其他輕重;一頁一個黃色主要按鈕 */
+.first { display: grid; gap: 1rem; min-width: 0; }
+.first h1 { color: var(--board-ink); font-size: 1.5rem; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; text-wrap: balance; }
+.first .page-head__reason { margin-top: 0; }
+.first__reason { flex: 1 1 16rem; color: var(--board-ink); font-weight: 600; overflow-wrap: anywhere; }
+.first__wait { color: var(--signal); font-weight: 700; }
+.first__link { display: inline-flex; align-items: center; min-height: 2.75rem; font-weight: 600; }
+.first__answers { display: grid; gap: .875rem; min-width: 0; }
+.first__line { display: flex; flex-wrap: wrap; align-items: center; gap: .625rem 1rem; color: var(--board-ink); font-size: 1.15rem; font-weight: 600; overflow-wrap: anywhere; }
+.first__line > span:not(.tile) { min-width: 0; }   /* 狀態牌照共用的寬度(--tile-w),不跟著縮 */
+.first__line--big { font-size: 1.5rem; font-weight: 800; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.first__label { color: var(--board-ink-3); font-size: 1rem; font-weight: 600; }
+.first__missing { color: var(--board-ink-2); font-size: 1.1rem; font-weight: 600; }
+.first__todos { min-width: 0; overflow-wrap: anywhere; }
+.first__med { display: grid; gap: .625rem; min-width: 0; }
+.first__state { margin: 0; }   /* 藥袋的狀態牌(.tile)放在重點看板裡,標題下面 */
+/* 核對那一句:看板下面的深墨字,與獨立證據矛盾、規則沒通過是紅字;「說明」接在句尾,打開的內容往下推 */
+.first__check { color: var(--ink); font-size: 1.0625rem; font-weight: 500; }
+.first__check p { display: inline; margin-right: var(--s3); }
+.first__check--manual p { color: var(--red); font-weight: 700; }
+.first__acts { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: .25rem; }
+.first .speak-msgs { margin: 0; }
+.first + .dup-note { margin: var(--s8) 0 0; }
+/* 處理狀態與操作:「已存檔」和「已繳費」各佔一列,靠細線分開;按鈕只在這一列旁邊 */
+.status-list { border-top: 1px solid var(--line); container-type: inline-size; }   /* 量得到放不放得下一行(T2 段落) */
+.status-row { display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: var(--s4); padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
+.status-row dt { color: var(--ink-3); font-weight: 700; }
+.status-row dd { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--s1) var(--s4); min-width: 0; }
+.status-row__main { flex: 1 1 13rem; min-width: 0; overflow-wrap: anywhere; }
+.status-row__text { font-weight: 700; }
+.status-row__text--wait { color: var(--amber); }
+.status-row__sub { color: var(--ink-3); font-size: .95rem; }
+/* 按鈕比字高:上下各縮回一點,按鈕的中線才會對齊這一列的第一行字(手機上按鈕換到下一行,不用)。
+   每一列的動作排在兩個固定格子(按鈕 7.5rem|小字連結 6.5rem,格子的規則在最後的「T2 結果頁」),
+   每一列的格子一樣寬,整塊靠右,上下列的按鈕與連結對得齊 */
+.status-row__acts { display: grid; grid-template-columns: 7.5rem 6.5rem; gap: .5rem 1rem; align-items: center; justify-items: start;
+                    margin-block: calc((1.6em - 2.75rem) / 2); }
+.status-row__acts a:not(.btn) { display: inline-flex; align-items: center; min-height: 2.75rem; font-size: .95rem; font-weight: 600; }
+.status-row__acts .btn { width: 100%; min-height: 2.75rem; padding: 0 .5rem; border-width: 1.5px; }
+.status-row__acts .link-btn { padding: 0; color: var(--ink); font-size: .95rem; font-weight: 600; }
+/* 收合的區塊排在一起,不必每個都隔一大段;打開後的內容和標題留一點距離 */
+.doc-main > .fold + .fold { margin-top: 0; }
+.doc-main > .fold > .section__note { margin: var(--s1) 0 var(--s3); }
+.doc-main > .fold > .more { margin-top: 0; }
+.doc-main > .fold[open] { padding-bottom: var(--s4); }
+.first__next { margin-top: var(--s8); }
+@media (max-width: 47.99rem) {
+  .first h1 { font-size: 1.375rem; }
+  .first__line--big { font-size: 1.375rem; }
+  /* 手機:「聽重點」佔一整行(待複核時它是次要按鈕,照樣一整行),另外兩顆對半,第一屏才放得下 */
+  .first__acts .btn { flex: 1 1 0; padding-inline: var(--s3); font-size: 1.0625rem; }
+  .first__acts [data-speak] { flex: 1 1 100%; }
+  .first .page-head__reason .btn { flex: 0 1 auto; }   /* 「更正讀值」和「類型不對?」同一行 */
+  .status-row { grid-template-columns: 5.25rem minmax(0, 1fr); gap: var(--s3); }
+  .status-row__acts { margin-block: 0; }
+}
+/* (結果頁的規則寫在這一行上面) */
+
+/* ---- 表單元件(使用者 11/4 貼的表單互動規範;所有表單共用,樣板在 _field.html) ---- */
+/* 浮動標籤:框內沒字時標籤在框裡,點進去或有內容後縮小移到框的上緣並一直顯示;日期、下拉、多行文字(ff--fixed)一直在上緣。
+   框比一般輸入框高一點,上緣留給縮小的標籤;縮小的標籤不小於 .85rem,長輩看得清楚 */
+.ff { display: grid; gap: var(--s1); min-width: 0; }
+.ff__box { position: relative; min-width: 0; }
+.ff__input.text-input { min-height: 3.6rem; padding: 1.45rem var(--s4) .35rem; }
+textarea.ff__input.text-input { padding-top: 1.9rem; }
+.ff__input::placeholder { color: transparent; }
+.ff__label {
+  position: absolute; left: calc(var(--s4) + 1px); top: 1.8rem; transform: translateY(-50%);
+  max-width: calc(100% - 2 * var(--s4)); overflow: hidden; color: var(--ink-2); font-weight: 600;
+  white-space: nowrap; text-overflow: ellipsis; pointer-events: none; transition: top .15s ease, font-size .15s ease;
+}
+.ff__input:focus ~ .ff__label, .ff__input:not(:placeholder-shown) ~ .ff__label, .ff--fixed .ff__label { top: .85rem; font-size: .85rem; }
+.ff__input:focus ~ .ff__label { color: var(--link); }
+.ff__req { margin-left: .15em; color: var(--red); }
+.ff__opt { margin-left: .2em; color: var(--ink-3); font-weight: 500; }
+.ff__help { color: var(--ink-3); font-size: .9rem; }
+.ff__error { display: flex; align-items: flex-start; gap: var(--s1); color: var(--red); font-size: .95rem; font-weight: 600; }
+.ff__error .icon { margin-top: .2em; flex: none; }
+.ff--error .ff__input, .ff__input[aria-invalid="true"] { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
+/* 框內右邊的按鈕(密碼的眼睛):輸入的字不壓到它 */
+.ff__box:has(.ff__eye) .ff__input { padding-right: 3.6rem; }
+.ff__eye {
+  position: absolute; right: .3rem; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center;
+  justify-content: center; width: 3rem; height: 3rem; padding: 0; border: 0; border-radius: var(--radius);
+  background: none; color: var(--ink-2); cursor: pointer;
+}
+.ff__eye .icon { display: inline-block; width: 1.5rem; height: 1.5rem; }
+.ff__eye[aria-pressed="true"] { color: var(--link); }
+.ff__eye:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .ff__label { transition: none; } }
+/* (表單元件的規則寫在這一行上面) */
+
+/* ---- 上傳與拍照檢查 ---- */
+/* 虛線框(表單規範第 3 點;v5 11/6 改成 2px):框住標題、灰字與按鈕,選好照片後是縮圖。拖著檔案進框時 app.js 加 data-drag:
+   框改成深墨實線(看起來更粗)、底色加深一點 */
+.dropzone {
+  padding: 1.5rem; border: 2px dashed var(--control); border-radius: 10px;
+  transition: background-color .15s ease, border-color .15s ease;
+}
+.dropzone[data-drag="true"] { border-style: solid; border-color: var(--ink); background: var(--bg-subtle); box-shadow: inset 0 0 0 1px var(--ink); }
+.drop__text .ff__help { margin-top: .125rem; font-size: .9375rem; }
+/* 拍照檢查的提示:琥珀色是要注意;沒有字就不佔位置 */
+.photo-hint { margin-top: var(--s3); color: var(--amber); font-weight: 600; }
+.photo-hint:empty { display: none; }
+/* 上傳的進度條照實際傳了多少長(app.js 設寬度),不是來回跑的動畫 */
+.upload .progress__bar { width: 0; background: var(--primary); animation: none; transform: none; transition: width .2s linear; }
+@media (max-width: 47.99rem) { .dropzone { padding: 1.125rem 1rem 1.25rem; } }
+@media (forced-colors: active) { .dropzone[data-drag="true"] { outline: 2px solid Highlight; } }
+/* (上傳與拍照檢查的規則寫在這一行上面) */
+
+/* ---- 確認頁與家人用的小表單 ---- */
+/* 確認頁一次一件:主要按鈕(月台黃)只有「確認」,看下一件是安靜的文字連結 */
+.confirm__gone { margin-bottom: var(--s4); font-weight: 600; }
+.confirm__wait { display: block; margin-bottom: var(--s3); }
+.confirm__next { display: inline-flex; align-items: center; min-height: 2.75rem; margin-top: var(--s2); font-weight: 600; }
+.confirm__done { display: grid; gap: var(--s4); justify-items: start; }
+.confirm__done p { font-size: 1.25rem; font-weight: 700; }
+/* 家庭成員:一位成員一張表單(不用 roles.css 的 .member-form:它會蓋掉浮動標籤和單選的樣式) */
+.family-form { display: grid; gap: var(--s4); max-width: 32rem; min-width: 0; }
+.family-form > .btn { justify-self: start; }
+.kinds > .ff__error { margin-top: var(--s2); }
+/* 對獎:浮動標籤比較長,欄寬放大才不會被截斷 */
+.lot-grid { grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); }
+/* 找文件:框和按鈕一樣高;框佔滿剩下的寬度。按鈕是正方形的放大鏡(使用者 11/5),
+   圖示要蓋過開頭那條「裝飾圖示都不顯示」:這裡只有圖示,沒有字 */
+.search { align-items: flex-start; }
+.search .ff { flex: 1 1 auto; }
+.search .btn { min-height: 3.6rem; }
+.search__btn { width: 3.6rem; padding: 0; }
+.search__btn .icon { display: block; width: 1.5rem; height: 1.5rem; stroke-width: 2; }
+/* (確認頁與小表單的規則寫在這一行上面) */
+
+/* ---- 首頁、角色與上傳 ---- */
+/* 上傳一次一個主要按鈕(有 JS 時,app.js 的 data-ready):還沒選照片只留「拍照讀文件」「選照片」;
+   選好後收起這兩顆,換成縮圖、「換一張」、類型與「開始辨識」。沒有 JS 時全部都看得到 */
+[data-ready="false"] .upload__row, [data-ready="false"] .upload__note { display: none; }
+[data-ready="true"] .drop__btns { display: none; }
+.chosen__photo:empty { display: none; }
+.chosen__again { margin-top: var(--s1); padding: 0; font-weight: 600; }
+/* (首頁的規則寫在這一行上面) */
+
+/* ---- 置中(使用者 11/5:「搜尋框元件置中 不要靠左」「確認 退回也是置中 還有其他類似的元件也改成置中」) ----
+   置中的是一塊內容最後的動作與獨立的輸入框:文件櫃的搜尋框、家人確認的「確認」「退回」、表單底部的按鈕、
+   結果頁的按鈕列、首頁上傳框(使用者選的範圍)。清單每一列的按鈕跟著那一列,照舊靠右;段落、清單與表單欄位的字
+   照舊靠左,方便一行一行往下看 */
+.search { margin-inline: auto; }
+.confirm__actions, .form-actions, .first__acts { justify-content: center; }
+.confirm__wait, .confirm__more, .more--center, .first__next, .member-remove, .end-action { text-align: center; }
+.confirm__done { justify-items: center; text-align: center; }
+.lot-form > .btn, .family-form > .btn { justify-self: center; }
+/* 首頁上傳框:標題、灰字與兩顆按鈕上下排、置中;選好照片後的縮圖、「換一張」、類型與「開始辨識」也置中。
+   手機上兩顆按鈕照舊撐滿(上面「平板以下」那段的 align-items: stretch) */
+.drop { flex-direction: column; gap: var(--s4); text-align: center; }
+.drop__text { flex: none; }
+.drop__btns { flex-wrap: wrap; justify-content: center; }
+.chosen, .photo-hint, .upload .field-error, .status-line, .wait { text-align: center; }
+.chosen__preview { margin-inline: auto; }
+.upload__row { flex-direction: column; align-items: center; }
+.upload .kinds legend { margin-inline: auto; }
+.upload .chips { justify-content: center; }
+.submit { margin-left: 0; }
+.upload__note { justify-content: center; text-align: center; }
+/* (置中的規則寫在這一行上面) */
+
+/* ==== v5 車站時刻表的共用元件(11/6) ==== */
+/* 看板:一整塊深墨。用在要記得的事、結果頁的重點、服藥時間表、確認頁的期限;看板上的字、按鈕、連結與 ⓘ 換成淺色 */
+.board { background: var(--board); color: var(--board-ink); border-radius: 12px; box-shadow: inset 0 0 0 1px var(--board-edge); --focus: var(--signal); }
+.board a:not(.btn) { color: var(--board-ink); }
+.board .btn--secondary { border-color: var(--board-control); border-width: 1.5px; color: var(--board-ink); background: transparent; }
+.board .btn--secondary:hover { border-color: var(--board-ink); background: rgba(255, 255, 255, .08); }
+.board .link-btn { color: var(--board-ink-2); }
+.board .note > summary { color: var(--board-ink-2); }
+.board .note { --note-halo: rgba(255, 255, 255, .14); }
+.board .note[open] > summary .note__icon { fill: var(--board-ink); color: var(--board); }
+/* 翻牌數字(_flap.html):一位一塊,每一塊一樣大;接縫畫在牌面上、字的後面,不切過數字(8 不會被切成 0)。
+   牌只給眼睛看(aria-hidden),用的地方旁邊一定留讀屏與朗讀念的原文 */
+.flap { display: inline-flex; align-items: center; gap: 3px; font-family: var(--font-num); font-weight: 700; line-height: 1; }
+.flap__d {
+  display: grid; place-items: center; width: 2rem; height: 3.125rem; border-radius: 4px;
+  background: linear-gradient(to bottom, var(--flap) calc(50% - 1px), var(--flap-seam) calc(50% - 1px) calc(50% + 1px), var(--flap) calc(50% + 1px));
+  color: #FFFFFF; font-size: 2.25rem; font-variant-numeric: tabular-nums;
+}
+.flap__sep { width: 1rem; color: var(--board-ink-3); font-size: 1.5rem; text-align: center; }
+.flap--blank { opacity: .55; }                       /* 沒有日期:空白的暗牌,看板的節奏不斷 */
+.flap--blank .flap__sep { visibility: hidden; }
+/* 狀態牌:一律一樣寬、字置中。實心是要處理(紅:逾期、不符;黃:快到期、等待),外框是還沒到;字永遠寫清楚 */
+.tile {
+  display: inline-flex; align-items: center; justify-content: center; min-width: var(--tile-w); min-height: 2.375rem; margin: 0;
+  padding: 0 .625rem; border-radius: 5px; border: 2px solid transparent;
+  font-size: 1.125rem; font-weight: 800; line-height: 1.2; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.tile--manual { background: var(--red-solid); color: #FFFFFF; }
+.tile--wait { background: var(--signal); color: #14212B; }
+.tile--plain { border-color: currentColor; }
+.tile--auto { border-color: var(--control); color: var(--ink-2); font-weight: 700; }
+.board .tile--plain { border-color: var(--board-ink-2); color: var(--board-ink); }
+.board .tile--auto { border-color: var(--board-control); color: var(--board-ink-2); }
+/* 打開頁面時日期牌翻一下:全站唯一不是人按出來的動態(使用者 11/6 決定留著);從看得到的角度開始,減少動態時不翻 */
+@media (prefers-reduced-motion: no-preference) {
+  .flap__d { animation: flap-in .55s cubic-bezier(.16, 1, .3, 1) backwards; }
+  .flap__d:nth-child(2) { animation-delay: .05s; }
+  .flap__d:nth-child(4) { animation-delay: .1s; }
+  .flap__d:nth-child(5) { animation-delay: .15s; }
+}
+@keyframes flap-in { from { transform: perspective(10rem) rotateX(-60deg); } }
+/* 手機:翻牌與狀態牌縮一點,「11/05 前」和狀態牌放得進同一行(全站同一個大小) */
+@media (max-width: 47.99rem) {
+  :root { --tile-w: 8.25rem; }
+  .tile { padding: 0 .5rem; font-size: 1rem; }
+  .flap__d { width: 1.625rem; height: 2.625rem; font-size: 1.875rem; }
+}
+/* (共用元件的規則寫在這一行上面) */
+
+/* ==== v5 各頁(11/6 平行套用):每張票只在自己的段落加規則,合併時才不會互相覆蓋 ==== */
+
+/* ---- T1 首頁與要記得的事 ---- */
+/* 首頁(11/6 樣稿):h1 只給讀屏,第一眼是上傳框;「要記得的事」是一整塊深墨看板,排成車站時刻表。
+   同一種東西一樣大(使用者 11/6:「欄位要對齊 統一大小 不然看起來很亂」):翻牌與狀態牌照共用元件的大小,
+   列上的按鈕排在三個一樣寬的固定格子;不把最急的那一列放大。上傳的兩顆按鈕也一樣寬,主要的靠黃色分 */
+.drop__btns .btn { width: 12rem; }
+
+/* 要記得的事:各組在同一塊看板上,組名是看板裡的小標,列與列之間一條淡線。
+   用容器查詢(看清單本身的寬度):字級放大時 rem 跟著變大,版面自己換成窄的排法 */
+.board--remind { padding: .375rem 1.75rem .5rem; }
+.board .rgroup__title { display: flex; align-items: center; min-height: 2.5rem; color: var(--board-ink-2); font-size: 1rem; font-weight: 700; }
+.board .rlist { border-top: 0; }
+/* 窄的時候(手機):第一行日期與狀態牌,第二行事項,第三行按鈕 */
+.board .ritem {
+  grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "date state" "main main" "acts acts"; align-items: center;
+  gap: .75rem 1.25rem; padding: .875rem 0; border-top: 1px solid var(--board-line); border-bottom: 0;
+}
+/* 日期格:翻牌加「前」;不是今年的年份寫在牌的上面。牌只給眼睛看,讀屏念旁邊藏起來的「11/2 前」 */
+.ritem__date { grid-area: date; display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; min-width: 0; }
+.ritem__year { flex: 1 0 100%; color: var(--board-ink-3); font-size: .9375rem; font-variant-numeric: tabular-nums; }
+.ritem__before { color: var(--board-ink-2); font-weight: 700; }
+.board .ritem__main { grid-area: main; }
+.board .ritem__title { color: var(--board-ink); font-size: 1.5rem; font-weight: 800; line-height: 1.3; }
+.board .ritem__sub { color: var(--board-ink-3); font-size: .9375rem; }
+.ritem__state { grid-area: state; justify-self: end; }
+/* 列上的按鈕:三個一樣寬的固定格子(看文件、去確認|已繳費、已辦理、已讀|取消提醒),
+   不管這一列有幾顆,同一種按鈕都在同一個位置;手機三等分 */
+.board .remind-acts { grid-area: acts; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; }
+.board .remind-acts > a { grid-column: 1; }
+.remind-acts__mark { grid-column: 2; }
+.remind-acts__off { grid-column: 3; }
+.board .remind-acts > form { display: flex; min-width: 0; }
+.board .remind-acts .btn, .board .remind-acts .link-btn { width: 100%; min-width: 0; min-height: 2.75rem; padding: 0 .25rem; font-size: 1rem; }
+.board .remind-acts .link-btn { display: inline-flex; align-items: center; justify-content: center; font-weight: 600; }
+/* 看板夠寬(電腦):一列排完,對齊成時刻表(日期|事項|狀態牌|三個按鈕格) */
+@container (min-width: 62rem) {
+  .board .ritem { grid-template-columns: 12rem minmax(0, 1fr) calc(var(--tile-w) + .5rem) calc(3 * var(--slot-w) + 1rem);
+                  grid-template-areas: "date main state acts"; min-height: 5rem; padding: .625rem 0; }
+  .ritem__state { justify-self: start; }
+  .board .remind-acts { grid-template-columns: repeat(3, var(--slot-w)); }
+}
+/* 平板與字放大:狀態牌跟著事項,按鈕換到下一行靠右,格子照樣固定 */
+@container (min-width: 38rem) and (max-width: 61.99rem) {
+  .board .ritem { grid-template-columns: 12rem minmax(0, 1fr) calc(var(--tile-w) + .5rem); grid-template-areas: "date main state" "acts acts acts"; }
+  .ritem__state { justify-self: start; }
+  .board .remind-acts { grid-template-columns: repeat(3, var(--slot-w)); justify-content: end; }
+}
+/* 很窄(小手機、字放大):日期與狀態牌放不進同一行,狀態牌換到日期下面 */
+@container (max-width: 19.25rem) {
+  .board .ritem { grid-template-columns: minmax(0, 1fr); grid-template-areas: "date" "state" "main" "acts"; }
+  .ritem__state { justify-self: start; }
+}
+
+@media (max-width: 47.99rem) {
+  .drop__btns .btn { width: auto; flex: 1 1 0; min-width: 0; padding: 0 .5rem; font-size: 1.1875rem; }   /* 手機對半 */
+  .board--remind { padding: .25rem 1rem .5rem; }
+  /* 已完成:事項與誰按的上下兩行,「改回」在右邊 */
+  .done-list li { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "what undo" "who undo"; }
+  .done-what { grid-area: what; }
+  .done-who { grid-area: who; }
+  .done-list form { grid-area: undo; }
+}
+/* (T1 首頁與要記得的事的規則寫在這一行上面) */
+
+/* ---- T2 結果頁 ---- */
+/* 第一屏的重點看板(使用者 11/6 點頭的樣稿):這是什麼、多少錢、什麼時候前排在一塊深墨看板上。
+   金額用系統的窄體大字(56px,手機 48px);期限是翻牌(_flap.html)加「前繳費」,後面是一樣寬的狀態牌(.tile)。
+   核對那一句與三顆按鈕留在看板下面的瓷白頁面上 */
+.board--answer { display: grid; gap: .75rem; padding: 1.5rem 1.75rem 1.625rem; }
+.first__amount { font-family: var(--font-num); font-size: 3.5rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.first__due { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .625rem; }
+.first__verb { font-size: 1.5rem; font-weight: 800; }
+/* 三顆按鈕一樣寬(聽重點、查看原件、請家人看一下;使用者 11/6:「統一大小」),最寬 184px、整排置中;
+   原件欄旁邊比較窄時(約 1024–1060px)三顆一起縮,不會有一顆掉到下一行 */
+@media (min-width: 48rem) { .first__acts .btn { flex: 1 1 0; max-width: 11.5rem; padding-inline: .75rem; } }
+/* 處理狀態的兩個固定格子:按鈕都在左格、小字連結(status-row__link)都在右格;一列只有連結時左格空著,
+   連結不往左挪。沒有任何動作的列不留空白的格子 */
+.status-row__acts > * { grid-column: 1; }
+.status-row__acts > .status-row__link { grid-column: 2; }
+.status-row__acts > form { display: flex; width: 100%; }
+.status-row__acts:not(:has(*)) { display: none; }
+/* 一列放不下(欄名 6rem + 字 13rem + 格子 15rem,約 35.8rem;原件欄旁邊比較窄、字放大時):格子換到字的下面,
+   不再上下縮回,才不會蓋到上一行的字 */
+@container (max-width: 35.8rem) { .status-row__acts { margin-block: 0; } }
+/* 院所、日期、電話(與藥袋上其他印出來的欄位):欄名一欄淡字,內容一欄深字 */
+.med-info dt { color: var(--ink-3); }
+.med-info dd { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.med-more { display: grid; gap: var(--s1); padding-top: .75rem; color: var(--ink-2); }
+.med-more .med-info { padding: 0; }
+/* 白話解說與樣稿同一個字級;退回重拍、刪除和上面的按鈕隔開一大段,不會順手按到 */
+.doc-main .prose { font-size: 1.0625rem; line-height: 1.75; }
+.doc-grid ~ .end-action { margin-top: 3.5rem; }
+/* 原件在右邊一欄時,退回重拍與刪除也以左邊那一欄置中,和「拍下一張」在同一條中線上(收尾審查 11/6);
+   右邊讓出原件欄(21rem)加欄距(2.25rem)。原件排到下面時(平板以下、64–80rem 寬又放大字)照整頁置中 */
+@media (min-width: 64rem) { .doc-grid ~ .end-action { padding-right: calc(21rem + 2.25rem); } }
+@media (min-width: 64rem) and (max-width: 79.99rem) {
+  html:is([data-font="large"], [data-font="xlarge"]) .doc-grid ~ .end-action { padding-right: 0; }
+}
+@media (max-width: 47.99rem) {
+  .board--answer { padding: 1.125rem 1rem 1.25rem; }
+  .first__amount { font-size: 3rem; }
+  .first__verb { font-size: 1.375rem; }
+  .slots { padding: .25rem 1rem; }
+  .slots__row { gap: .75rem; }
+  .slots dd { font-size: 1.25rem; }
+}
+@media (forced-colors: active) {
+  .slot { border: 1px solid CanvasText; }   /* 底色被拿掉時,時段牌靠框線看得出來 */
+}
+/* (T2 結果頁的規則寫在這一行上面) */
+
+/* ---- T3 家人確認、待複核、更正 ---- */
+/* 家人確認(樣稿 confirm、confirm2):期限類是看板上的一列,翻牌在左、事項與日期全文在右,逾期是紅色狀態牌;
+   窄的時候換行,翻牌在上面。看板、翻牌與狀態牌的樣子是共用元件(.board、.flap、.tile),這裡只排版面 */
+.confirm__event.board { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.75rem; padding: 1.25rem 1.75rem; }
+.confirm__event.board > div { display: grid; gap: .375rem; min-width: 0; }
+.confirm__event .confirm__what { color: var(--board-ink); font-size: 1.5rem; font-weight: 800; line-height: 1.3; }
+.confirm__event .confirm__date { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .75rem; color: var(--board-ink-2); font-size: 1.0625rem; }
+/* 「確認」「退回」一樣寬(使用者 11/6:「欄位要對齊 統一大小」);退回在系統內沒有復原,和確認隔開 3rem。
+   長輩只有「退回」時也是同樣大,置中 */
+.confirm__actions { display: flex; flex-wrap: wrap; gap: 3rem; }
+.confirm__actions .btn { width: 10.5rem; min-width: 0; }
+/* 原件照片的細外框:白底的照片放在瓷白頁面上,邊緣才看得出來(深色頁面上照片本身就分得開,框幾乎看不到,同樣稿) */
+.confirm__photo img { outline: 1px solid rgba(20, 33, 43, .16); outline-offset: -1px; border-radius: 4px; }
+
+/* 待複核清單:字一欄、狀態牌一欄,每一列對齊;狀態牌一樣寬,寫驗證信心(紅:低於五成,黃:五到八成,外框:沒有數字)。
+   「沒有可核對的項目」字比較多,左右留白縮一點才放得進同一個寬度 */
+@media (min-width: 48rem) {
+  .tbl--review .tbl__row { grid-template-columns: minmax(0, 1fr) var(--tile-w); }
+}
+.tbl--review .tile { padding-inline: .25rem; }
+
+/* 更正頁、改類型、PDF 密碼:表單底部的按鈕一樣寬(最寬那顆的寬度,至少同「確認」10.5rem)、整組置中。
+   只套在這幾張表單,設定頁等別的表單照舊;手機上下排、撐滿 */
+.review-form .form-actions, .pw-form .form-actions {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: .75rem;
+  width: fit-content; max-width: 100%; margin-inline: auto;
+}
+.review-form .form-actions .btn, .pw-form .form-actions .btn { min-width: 10.5rem; }
+/* 更正頁的退回沒有復原:和上面那組按鈕隔開一段距離(同結果頁的 .end-action)。字長,手機上換行時兩行一樣長 */
+.compare__main .reject-form { margin-top: 3rem; }
+.compare__main .reject-form .btn { text-wrap: balance; }
+/* 加密 PDF 的密碼框是獨立的輸入框:和按鈕一起置中;框裡的字照舊靠左 */
+.pw-form { display: grid; gap: var(--s4); }
+.pw-form .field-row--short { width: 100%; margin-inline: auto; }
+
+@media (max-width: 47.99rem) {
+  .confirm__actions { gap: 1.5rem; }
+  .confirm__actions .btn { flex: 0 1 calc(50% - .75rem); width: auto; }   /* 兩顆各佔一半;只剩一顆也一樣大 */
+  .review-form .form-actions, .pw-form .form-actions { grid-auto-flow: row; width: 100%; }
+}
+/* (T3 家人確認、待複核、更正的規則寫在這一行上面) */
+
+/* ---- T4 文件櫃、設定、成員、對獎、說明中心與其他頁 ---- */
+/* 文件表格(_doc_table.html:首頁「最近看過的文件」與文件櫃共用):標題、時間、狀態三欄,每一列上下對齊。
+   狀態一樣寬、字置中:要注意的是撐滿那一格的實心小牌(黃:等待複核、處理中;紅:讀不出來),沒事的「已存檔」是淡字。
+   待複核清單(.tbl--review)沒有這個類別,不受影響 */
+.tbl--docs .tbl__status { display: block; text-align: center; }
+.tbl--docs .tbl__status .pill--wait, .tbl--docs .tbl__status .pill--manual { display: block; }
+/* 手機與字放大的窄版:時間一欄固定寬(放得下「12月28日 15:51」),狀態接在後面、一樣寬,每一列照樣對齊 */
+@media (max-width: 47.99rem) {
+  .tbl--docs .tbl__meta { display: grid; grid-template-columns: 7.5rem 6.5rem; gap: var(--s3); align-items: center; }
+}
+@media (min-width: 64rem) and (max-width: 79.99rem) {
+  html:is([data-font="large"], [data-font="xlarge"]) .tbl--docs .tbl__meta {
+    display: grid; grid-template-columns: 7.5rem 6.5rem; gap: var(--s3); align-items: center;
+  }
+}
+
+/* 設定與家庭成員的選項:同一種一樣寬、字置中(「大」和「80%（預設）」一樣大);手機一行兩個 */
+.set-card .chip { justify-content: center; width: 8.5rem; padding: 0 .5rem; }
+/* 表單底部的按鈕一樣寬、置中(置中寫在上面「置中」那一段):設定、確認頁、對獎、錯誤頁的下一步;字比較長的照字撐開 */
+.settings .form-actions .btn, .ask-form .form-actions .btn, .lot-form > .btn, .error-next .btn { min-width: 12rem; }
+/* 刪除和其他按鈕隔開一段距離(同家人確認的「確認」與「退回」) */
+.danger-zone .form-actions { gap: 3rem; }
+
+/* 家庭成員:一位一段,上面一條細線,名字和電子郵件排在一起。「儲存變更」「移除成員」「加入成員」一樣寬、置中,
+   移除和儲存隔開一段距離 */
+.member-card { padding-top: 1.25rem; border-top: 1px solid var(--line); }
+.member-card + .member-card { margin-top: 2rem; }
+.member-card h3 { font-size: 1.25rem; font-weight: 800; line-height: 1.35; overflow-wrap: anywhere; }
+.member-email { color: var(--ink-3); }
+.family-form > .btn, .member-remove .btn { min-width: 10.5rem; }
+/* 和上面的表單一樣寬(.family-form 最寬 32rem):兩顆按鈕置中在同一條中線上 */
+.member-card .member-remove { max-width: 32rem; margin-top: 1.5rem; }
+/* 角色的兩個選項對半撐滿表單寬(每種寬度都一樣):輸入框、選項、置中的按鈕排成同一塊,
+   按鈕不會浮在靠左的選項旁邊(收尾審查 11/6;表單底部的按鈕照使用者 11/5 的決定置中) */
+.family-form .chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.family-form .chips .chip { width: auto; }
+
+@media (max-width: 47.99rem) {
+  .set-card .chip { width: calc(50% - .25rem); }   /* 手機:選項對半,一行兩個 */
+  .danger-zone .form-actions { gap: 1.5rem; }
+  .lot-period { flex: 1 1 100%; min-width: 0; }   /* 手機:期別一行一個,一樣寬 */
+}
+@media (forced-colors: active) {
+  .lot-period[aria-current="true"] { outline: 2px solid Highlight; }   /* 月台黃底在強制色彩下看不到 */
+}
+/* (T4 文件櫃、設定、成員、對獎、說明中心與其他頁的規則寫在這一行上面) */

@@ -293,7 +293,7 @@ def test_archived_file_name_follows_the_corrected_fields(cfg, store):
     assert "1268" in target.name and target.exists() and not path.exists()
 
 
-# ---- 連按兩下「存檔並重新核對」:第二個請求手上的原件位置是過期的 ----------------------
+# ---- 連按兩下「儲存更正並重新核對」:第二個請求手上的原件位置是過期的 ----------------------
 
 def _files(folder: Path) -> list[str]:
     return sorted(p.name for p in folder.rglob("*") if p.is_file())

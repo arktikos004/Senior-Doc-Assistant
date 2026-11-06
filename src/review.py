@@ -1,7 +1,8 @@
 """家人更正讀值與退回:人工的決定一律更新 SQLite 裡原本那筆文件(原則 8)。
 
 Web 層(web/app.py)只負責 HTTP 與表單;這裡做「以原讀值為底套上家人填的值 → 重新核對(一律讀原檔)
-→ 決策 → 重算行動 → 搬原檔 → 更新同一筆文件、換掉舊行動 → 寫更正紀錄 → records.jsonl 加一行」。
+→ 決策 → 重算行動 → 搬原檔 → 更新同一筆文件、換掉舊行動、寫更正紀錄(同一個交易,寫不進去就把原件搬回原位)
+→ records.jsonl 加一行(交易成功之後;寫不進去只記 log)」。
 核對、決策與規劃和上傳走同一條(src.pipeline.verify_decide_plan),只有決策規則不同:
 家人已對照原件更正,不再比驗證信心與門檻,程式核對沒有任何不通過就存檔(decide_corrected)。
 表單值和模型讀到的文字一樣只是資料:行動種類與分級只看 doc_type 與決策結果(原則 3)。
@@ -13,17 +14,19 @@ import logging
 import re
 import threading
 import unicodedata
+from contextlib import contextmanager
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator
 
 from . import archiver
 from .archiver import SIDECAR_SUFFIX
 from .config import AppConfig
-from .models import COMMON_FIELDS, FIELD_LABELS, REQUIRED_FIELDS, Decision, ExtractionResult
-from .pipeline import error_kind, verify_decide_plan
+from .models import COMMON_FIELDS, DOC_TYPES, FIELD_LABELS, REQUIRED_FIELDS, Decision, ExtractionResult, category_for
+from .parsing import with_doc_type
+from .pipeline import STAGE_CHECKED, STAGE_READ, append_record_safely, error_kind, put_back, verify_decide_plan
 from .prompts import TYPE_FIELDS
-from .record_log import append_record, remove_records, timestamp
+from .record_log import remove_records, timestamp
 from .store import Store
 from .verify import VERIFY_ERROR_SUMMARY, waive_check
 from .verify.checks import CHECK_MEDICATION_TIMING
@@ -34,13 +37,17 @@ CORRECTED_REASON = "家人更正後存檔"
 REJECT_REASON = "影像品質不足"
 SOURCE_CORRECT = "web_correct"   # records.jsonl 與 corrections 表上的來源
 SOURCE_REJECT = "web_review"
+SOURCE_RETYPE = "web_retype"
+RETYPE_EVENT = "retype"          # 家人改文件類型記在操作紀錄的種類(src.models.AUDIT_EVENTS)
 
 # 家人能改的共通欄位;doc_type 不在內(類型決定行動種類,更正頁不改類型)。類型專屬欄位依 prompts.TYPE_FIELDS,
 # 公文的 fields.deadline 不在其中:期限一律由程式從期限原文重算(原則 2)
 _COMMON_CHANGES = tuple(name for name in COMMON_FIELDS if name != "doc_type")
 # 更正紀錄只存讀值層(原件 → 讀值 → 衍生資料,原則 8);核對、白話解說與行動是衍生的
 _READING_KEYS = ("doc_type", "date", "vendor", "amount", "currency", "invoice_number", "unreadable", "fields")
-_DERIVED_FIELDS = ("deadline",)
+_DERIVED_FIELDS = ("deadline", "deadline_basis")
+# 只有家人知道、模型不讀的欄位(不在 prompts.TYPE_FIELDS,所以模型填了也會被濾掉):收到公文的日期
+_FAMILY_FIELDS = {"公文": ("fields.received_date",)}
 # 原件不見時給核對用的檔名(本系統不會產生這種檔):讀不到影像,QR 一律「無法核對」
 _NO_ORIGINAL = "（原件不存在）"
 # 更正與退回都是「讀文件 → 核對 → 搬原檔 → 寫回」一整段,同一個行程裡一次只做一份:連按兩下時
@@ -68,7 +75,8 @@ def apply_changes(original: ExtractionResult, changes: dict[str, Any]) -> Extrac
     AI 的白話解說不保留(可能和更正後的期限不一致,畫面改用程式依欄位組的句子)、
     家人看過的欄位不再算「讀不清」。
     """
-    allowed = {*_COMMON_CHANGES, *(f"fields.{name}" for name in TYPE_FIELDS.get(original.doc_type, ()))}
+    allowed = {*_COMMON_CHANGES, *(f"fields.{name}" for name in TYPE_FIELDS.get(original.doc_type, ())),
+               *_FAMILY_FIELDS.get(original.doc_type, ())}
     unknown = sorted(set(changes) - allowed)
     if unknown:
         raise ValueError(f"不能更正的欄位：{'、'.join(unknown)}")
@@ -217,7 +225,7 @@ def _recorded_original(cfg: AppConfig, doc: dict[str, Any]) -> Path | None:
 
 
 def _original_now(cfg: AppConfig, doc: dict[str, Any], original: Path | None) -> Path | None:
-    """原件現在的位置。original 是 web 層稍早讀文件時算的,可能已經過期(連按兩下「存檔並重新核對」時,
+    """原件現在的位置。original 是 web 層稍早讀文件時算的,可能已經過期(連按兩下「儲存更正並重新核對」時,
     前一個請求剛把原件改名搬走;那個檔名之後還可能被另一份文件用掉):資料庫現在記的是別的位置就以它為準。
     資料庫記的位置不能用,才看 original 還有沒有檔;也沒有就回 None(當作原件不存在)——不拿過期的位置
     去核對,也不把它寫回資料庫。web 層說原件不存在(None)就照樣是 None,這裡不自己去找。
@@ -269,6 +277,18 @@ def _relocate(cfg: AppConfig, doc_id: int, original: Path | None, result: Extrac
     return original if original.exists() else None
 
 
+@contextmanager
+def _saving(store: Store, doc_id: int, moved: Path | None, original: Path | None) -> Iterator[None]:
+    """這一次的資料庫寫入包成一個交易:讀值、行動、更正與操作紀錄一起成功或一起撤回,不會讀值改了、提醒還是舊的。
+    寫不進去時把剛搬好的原件(moved)搬回原位(original,資料庫記的還是那裡),再丟例外。"""
+    try:
+        with store.transaction():
+            yield
+    except Exception:
+        put_back(moved, original, name=f"文件 {doc_id}")
+        raise
+
+
 def _record(doc: dict[str, Any], action: str, reason: str, target: Path | None,
             result: dict[str, Any] | None, source: str) -> dict[str, Any]:
     """人工決定的處理紀錄:records.jsonl 加一行、SQLite 更新同一筆文件,兩邊用同一份(時間只取一次)。"""
@@ -310,15 +330,59 @@ def correct_document(cfg: AppConfig, store: Store, doc_id: int, changes: dict[st
                                       decide_fn=decide_corrected, log_name=f"文件 {doc_id}")
         target = _relocate(cfg, doc_id, original, result, decision)
         record = _record(doc, decision.action, decision.reason, target, result.to_dict(), SOURCE_CORRECT)
-        store.update_document(doc_id, record)
-        store.replace_actions(doc_id, result.actions)
-        # 驗證閘門(更正紀錄的 verified):沒有任何檢查不通過、核對有完成、必要欄位齊全,也就是能存檔
-        store.add_correction(reading(before), reading(result), document_id=doc_id, doc_type=result.doc_type,
-                             vendor_key=vendor_key(result), verified=decision.action == "archive",
-                             source=SOURCE_CORRECT, actor=actor, role=role)
-        append_record(cfg.paths.logs, record)
+        with _saving(store, doc_id, target, original):
+            store.update_document(doc_id, record)
+            store.replace_actions(doc_id, result.actions)
+            # 驗證閘門(更正紀錄的 verified):沒有任何檢查不通過、核對有完成、必要欄位齊全,也就是能存檔
+            store.add_correction(reading(before), reading(result), document_id=doc_id, doc_type=result.doc_type,
+                                 vendor_key=vendor_key(result), verified=decision.action == "archive",
+                                 source=SOURCE_CORRECT, actor=actor, role=role)
+        append_record_safely(cfg, record, f"文件 {doc_id}")
         # log 不記文件內容(藥袋的院所與藥名屬健康資料),內容以 SQLite 為準
         log.info("家人更正:文件 %s → [%s]", doc_id, decision.action)
+        return decision
+
+
+def retype_document(cfg: AppConfig, store: Store, analyzer: Any, doc_id: int, doc_type: str, original: Path, *,
+                    actor: str | None = None, role: str | None = None,
+                    on_stage: Callable[[str], None] | None = None) -> Decision | None:
+    """家人改文件類型:照新類型在本機重讀原件 → 核對 → 決策 → 重算行動,更新同一筆文件,舊行動標成已取代。
+
+    這條路和更正讀值分開(更正表單一律不收類型):類型只從固定清單選,模型判成什麼都照家人選的;家人沒看過新讀值,
+    所以決策照一般規則(decision.decide),行動的種類與分級也照舊只看類型與決策,藥袋一律等家人確認。
+    一律在本機讀(原則 6:敏感文件可能一開始就選錯類型)。模型沒回應時例外往外丟,文件與提醒都還沒動,等一下再按就好;
+    所以先讀完才進鎖:模型要讀幾十秒,不能擋住其他更正。連按兩下時第二次已經是這個類型,什麼都不改,回 None。
+    original 是 web 層確認過在本系統資料夾內的原檔。找不到文件丟 LookupError,不能更正的文件或不認得的類型丟 ValueError。
+    """
+    if doc_type not in DOC_TYPES:
+        raise ValueError(f"未知的文件類型:{doc_type!r}")
+    read = with_doc_type(analyzer.analyze(original, doc_type_hint=doc_type, local_only=True), doc_type)
+    if on_stage:
+        on_stage(STAGE_READ)
+    with _LOCK:
+        doc = store.get_document(doc_id)
+        if doc is None:
+            raise LookupError(f"找不到文件 {doc_id}")
+        if not correctable(doc):
+            raise ValueError("這份文件沒有可以改類型的讀值")
+        before = doc["result"].get("doc_type")
+        if before == doc_type:
+            return None
+        current = _original_now(cfg, doc, original)
+        check_path = current if current is not None else cfg.paths.review / _NO_ORIGINAL
+        decision = verify_decide_plan(read, check_path, cfg, received_on=_received_on(doc), log_name=f"文件 {doc_id}")
+        if on_stage:
+            on_stage(STAGE_CHECKED)
+        target = _relocate(cfg, doc_id, current, read, decision)
+        record = _record(doc, decision.action, decision.reason, target, read.to_dict(), SOURCE_RETYPE)
+        with _saving(store, doc_id, target, current):
+            store.update_document(doc_id, record)
+            store.set_document_category(doc_id, category_for(doc_type))
+            store.replace_actions(doc_id, read.actions)
+            store.add_audit_event(RETYPE_EVENT, document_id=doc_id, actor=actor, role=role,
+                                  detail={"from": before, "to": doc_type})
+        append_record_safely(cfg, record, f"文件 {doc_id}")
+        log.info("家人改類型:文件 %s → [%s]", doc_id, decision.action)
         return decision
 
 
@@ -349,7 +413,8 @@ def reject_document(cfg: AppConfig, store: Store, doc_id: int, original: Path | 
             else:
                 _drop_sidecar(original, doc_id)
         record = _record(doc, "failed", f"人工複核判定退回：{reason}", target, doc.get("result"), SOURCE_REJECT)
-        store.update_document(doc_id, record, event="reject_document", actor=actor, role=role)
-        store.replace_actions(doc_id, [])
-        append_record(cfg.paths.logs, record)
+        with _saving(store, doc_id, target, original):
+            store.update_document(doc_id, record, event="reject_document", actor=actor, role=role)
+            store.replace_actions(doc_id, [])
+        append_record_safely(cfg, record, f"文件 {doc_id}")
         log.info("人工退回:文件 %s → [failed]", doc_id)

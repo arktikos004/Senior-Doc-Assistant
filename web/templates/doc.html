@@ -1,11 +1,31 @@
 {% extends "base.html" %}
+{% from "_flap.html" import flap %}
 {% from "_medication.html" import medication %}
 {% from "_original.html" import original %}
+{% from "_note.html" import note %}
 {% block title %}{{ v.title }} - {{ BRAND_FULL }}{% endblock %}
-{% block head %}<script src="/static/speech.js" defer></script>{% endblock %}
+{% block head %}<script src="/static/speech.js" defer></script>{% if v.processing %}<meta http-equiv="refresh" content="5">{% endif %}{% endblock %}
 {% block content %}
 {% set vv = v.verification %}
+{% if changed %}<p class="msg-change">{{ changed }}</p>{% endif %}
+{% if next_review %}<p class="more"><a href="{{ next_review.href }}">還有 {{ next_review.count }} 份待複核，看下一份</a></p>{% endif %}
 <nav class="crumbs" aria-label="位置"><a href="/">首頁</a><span aria-hidden="true">/</span><a href="{{ v.category_href }}">{{ v.category }}</a><span aria-hidden="true">/</span><span>{{ v.heading }}</span></nav>
+{# 長輩與家人看到的主要操作不同(使用者 11/4;權限見 web/roles.py):長輩是聽重點、查看待辦、標示已繳費、請家人看一下,
+   家人另外有更正讀值與類型不對?。等家人確認的事只寫在等,長輩不會被帶到他按不了的「家人確認」。
+   一頁一個主要按鈕:家人打開待複核的文件,接下來要做的是更正,主要按鈕是「更正讀值」;其他情況是「聽重點」。 #}
+{% set can_remind = permissions is not defined or permissions.can_remind %}
+{% set can_confirm = permissions is not defined or permissions.can_confirm %}
+{% set needs_correction = v.review_reason and v.correct_url %}
+{# 重複上傳:只提示、連到另一份,不自動刪(要不要刪由家人決定) #}
+{% macro dup_note(d) %}
+<section class="dup-note" role="note" aria-labelledby="dup-title">
+  <h2 id="dup-title">{{ icon("alert") }}這張可能已經上傳過</h2>
+  <p>{{ d.text }}</p>
+  <a class="btn btn--secondary" href="{{ d.href }}">{{ d.link }}</a>
+</section>
+{% endmacro %}
+{% if v.failed or v.busy %}
+{# 讀不出來、系統忙碌:沒有重點可以回答,版面照舊,主要動作是「重新拍一張」或「重新辨識」 #}
 <header class="page-head">
   <div class="page-head__text">
     <h1>{{ v.heading }}</h1>
@@ -13,117 +33,225 @@
       <span>{{ v.when }} 上傳</span>
       <span class="pill pill--{{ v.state_class }}">{{ icon(v.state_icon) }}{{ v.state_text }}</span>
       {% if v.file_url %}<a class="page-head__jump" href="#original">看原件</a>{% endif %}
+      {% if v.retype_url %}<a href="{{ v.retype_url }}">類型不對？</a>{% endif %}
     </p>
     {% if v.review_reason %}
-    {# 待複核:原因旁就是主要動作「更正讀值」 #}
     <div class="page-head__reason">
       <p class="hint">{{ v.review_reason }}</p>
-      {% if v.correct_url %}<a class="btn btn--primary" href="{{ v.correct_url }}">{{ icon("pencil") }}更正讀值</a>{% endif %}
+      {% if v.correct_url %}<a class="btn btn--secondary" href="{{ v.correct_url }}">{{ icon("pencil") }}更正讀值</a>{% endif %}
     </div>
     {% endif %}
   </div>
-  {% if not v.failed %}
-  <div class="page-head__actions">
-    <button class="btn btn--primary btn--lg" type="button" data-speak hidden>
-      {{ icon("speaker") }}<span data-speak-label>唸給我聽</span>
-    </button>
-  </div>
-  {% endif %}
 </header>
-{% if v.duplicate %}
-{# 重複上傳:只提示、連到另一份,不自動刪(要不要刪由家人決定) #}
-<section class="dup-note" role="note" aria-labelledby="dup-title">
-  <h2 id="dup-title">{{ icon("alert") }}這張可能已經上傳過</h2>
-  <p>{{ v.duplicate.text }}</p>
-  <a class="btn btn--secondary" href="{{ v.duplicate.href }}">{{ v.duplicate.link }}</a>
-  <p class="field-hint">系統不會自動刪除。確定是同一張的話，家人可以在其中一份的頁面把它刪掉。</p>
-</section>
-{% endif %}
-{% if not v.failed %}
-<div class="speak-msgs">
-  <p class="speak__status" role="status" aria-live="polite" data-speak-status></p>
-  <p class="hint" data-speak-unsupported hidden>這個瀏覽器不能朗讀。請改用手機或電腦上的 Chrome、Safari 或 Edge。</p>
-  <noscript><p class="hint">要開啟 JavaScript 才能朗讀。</p></noscript>
-</div>
-{% endif %}
-
+{% if v.duplicate %}{{ dup_note(v.duplicate) }}{% endif %}
 <div class="doc-grid">
   <div class="doc-main">
-    {% if v.busy %}
+    {% if v.processing %}
+    {# 收件了還在讀(排隊或正在讀):照片收好了,讀好這一頁就換成結果;還不能重新辨識 #}
+    <section class="panel retry" aria-labelledby="retry-title">
+      <h2 id="retry-title">正在讀這張</h2>
+      <p>照片已經收好了，不用重拍。讀好就會出現在這裡。</p>
+    </section>
+    {% elif v.busy %}
     {# 模型沒回應(服務沒開、逾時、忙碌):照片沒問題,不叫長輩重拍 #}
     <section class="panel retry" aria-labelledby="retry-title">
       <h2 id="retry-title">系統暫時忙碌，這張還沒讀</h2>
       <p>照片已經收好了，不用重拍。{% if v.retry_url %}請等一下再按「重新辨識」；{% endif %}一直不行的話，請家人看一下這台電腦。</p>
       {% if v.retry_url %}
-      <form method="post" action="{{ v.retry_url }}">{{ csrf_input() }}
+      <form class="end-action" method="post" action="{{ v.retry_url }}">{{ csrf_input() }}
         <button class="btn btn--primary btn--lg" type="submit">{{ icon("refresh") }}重新辨識</button>
       </form>
       {% endif %}
     </section>
-    {% elif v.failed %}
+    {% else %}
     <section class="panel retry" aria-labelledby="retry-title">
       <h2 id="retry-title">這張讀不出來</h2>
       <p>請在光線充足的地方，把文件放平、整張拍進畫面，再試一次。</p>
       <a class="btn btn--primary btn--lg" href="/">{{ icon("camera") }}重新拍一張</a>
     </section>
-    {% else %}
-    {% set a = v.answer %}
-    {# 重點格子:要做什麼、什麼時候前、多少錢;朗讀從這裡開始 #}
-    <section class="answer answer--{{ a.tone }}" aria-labelledby="answer-title">
-      <div class="section__head"><h2 id="answer-title">{{ a.header }}</h2></div>
-      {% if a.alert %}<p class="alert" data-speak-part>{{ icon("alert") }}<span>{{ a.alert }}</span></p>{% endif %}
-      {% if a.rows %}
-      <div class="facts">
-        {% for r in a.rows %}
-        {% if r.kind == "task" %}
-        <div class="fact fact--wide" data-speak-part><span class="fact__label">{{ r.label }}</span><span class="fact__value">{{ r.value }}</span></div>
-        {% elif r.kind == "fact" %}
-        <div class="fact{% if r.wide %} fact--wide{% endif %}" data-speak-part><span class="fact__label">{{ r.label }}</span><span class="fact__value{% if r.tone %} fact__value--{{ r.tone }}{% else %} fact__value--text{% endif %}">{{ r.value }}</span></div>
-        {% elif r.kind == "todos" %}
-        <div class="fact fact--wide" data-speak-part><span class="fact__label">{{ r.label }}</span>
-          <ul class="todo-checks">{% for t in r.entries %}<li>{{ icon("circle") }}<span>{{ t }}</span></li>{% endfor %}</ul></div>
-        {% else %}
-        <div class="fact fact--wide" data-speak-part><span class="fact__label">{{ r.label }}</span><span class="fact__text">{{ r.text }}</span></div>
+    {% endif %}
+  </div>
+
+  {{ original(v.file_url, v.is_pdf, v.file_size, "您上傳的" ~ v.title ~ "原件", v.prepared_url) }}
+</div>
+{% else %}
+{% set a = v.answer %}
+<div class="doc-grid">
+  <div class="doc-main">
+    {# 第一屏先回答三個問題:這是什麼、多少錢或要做什麼、什麼時候前,再一句核對結果(使用者 11/4)。
+       「聽重點」唸這一區標了 data-speak-part 的字(含收在「說明」裡的藥袋聲明),略過 aria-hidden 的翻牌 #}
+    <section class="first" aria-labelledby="answer-title">
+      {# v5 重點看板(使用者 11/6 點頭的樣稿):標題、待複核的原因與「更正讀值」、重點三行包進一塊深墨看板。
+         金額用窄體大字;期限畫成翻牌加「前繳費」,牌只給眼睛看,原本的字藏起來給讀屏與朗讀;狀態是一樣寬的牌 #}
+      <div class="board board--answer">
+        <h1 id="answer-title" data-speak-part>{{ v.lead }}</h1>
+        {# 藥袋的狀態(等家人確認、家人已確認)是看板上的狀態牌,和帳單的「還有 13 天」同一個位置與樣子(收尾審查 11/6:
+           原本是看板外一行棕字,只靠顏色;藥袋的看板也不會只剩一行標題) #}
+        {% if a.medication and a.med_state %}
+        <p class="first__state" data-speak-part><span class="tile tile--{{ 'wait' if a.med_state.class == 'wait' else 'plain' }}">{{ a.med_state.text }}</span></p>
         {% endif %}
+        {% if v.review_reason %}
+        {# 待複核:原因與「更正讀值」照舊在最上面,家人的主要按鈕就是它;原因和下面核對那一句一樣時只寫一次 #}
+        <div class="page-head__reason">
+          <p class="first__reason" data-speak-part><b class="first__wait">等待複核</b>{% if v.review_reason != a.check.text %}：{{ v.review_reason }}{% endif %}</p>
+          {% if v.correct_url %}<a class="btn btn--primary" href="{{ v.correct_url }}">{{ icon("pencil") }}更正讀值</a>{% endif %}
+          {% if v.retype_url %}<a class="first__link" href="{{ v.retype_url }}">類型不對？</a>{% endif %}
+        </div>
+        {% endif %}
+        {% if a.lines or a.todos %}
+        <div class="first__answers">
+          {% for l in a.lines %}
+          <p class="first__line{% if l.big %} first__line--big{% endif %}{% if l.flap %} first__line--due{% endif %}" data-speak-part>
+            {%- if l.flap %}<span class="first__due" aria-hidden="true">{{ flap(l.flap.month, l.flap.day) }}<span class="first__verb">{{ l.flap.verb }}</span></span>
+            <span class="visually-hidden">{{ l.value }}</span>
+            {%- else %}<span>
+            {%- if l.label %}<span class="first__label">{{ l.label }}：</span>{% endif %}
+            {%- if l.missing %}<span class="first__missing">{{ l.missing }}</span>
+            {%- elif l.key == "amount" and l.big %}<span class="first__amount">{{ l.value }}</span>
+            {%- else %}{{ l.value }}{% endif -%}
+            </span>{% endif %}{% if l.note %} <span class="tile tile--{{ l.note_class or 'plain' }}">{{ l.note }}</span>{% endif %}</p>
+          {% endfor %}
+          {% if a.todos %}
+          <div class="first__todos" data-speak-part><span class="first__label">要做的事：</span>
+            <ul class="todo-checks">{% for t in a.todos %}<li>{{ icon("circle") }}<span>{{ t }}</span></li>{% endfor %}</ul></div>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+      {% if a.medication %}
+      <div class="first__med">
+        {# 「說明」:藥袋聲明收進來,聽重點照樣會唸(使用者 11/4) #}
+        <div class="section__title"><h2>服藥時間表</h2>
+          {%- call note() %}<span class="note__line">{{ a.footer }}</span><span class="note__line" data-speak-part>{{ MEDICATION_DISCLAIMER }}</span>{% endcall %}</div>
+        <div class="facts facts--med">{{ medication(a.medication) }}</div>
+      </div>
+      {% endif %}
+      {# 核對那一句:相符只給獨立證據,其他寫請對照原件;金額不符這類問題是紅字,不收起來(check_line) #}
+      <div class="first__check{% if a.check.tone %} first__check--{{ a.check.tone }}{% endif %}">
+        <p data-speak-part>{{ a.check.text }}</p>
+        {%- if vv.note or (not a.medication and (a.footer or v.is_medication)) %}{% call note() %}
+          {%- if a.footer and not a.medication %}<span class="note__line">{{ a.footer }}{% if a.set_received and v.correct_url %} <a href="{{ v.correct_url }}#f-fields-received_date">填收到日期</a>{% endif %}</span>{% endif %}
+          {%- if vv.note %}<span class="note__line">{{ vv.note }}</span>{% endif %}
+          {%- if v.is_medication and not a.medication %}<span class="note__line" data-speak-part>{{ MEDICATION_DISCLAIMER }}</span>{% endif %}
+        {%- endcall %}{% endif %}
+      </div>
+      <div class="first__acts">
+        <button class="btn {{ 'btn--secondary' if needs_correction else 'btn--primary' }} btn--lg" type="button" data-speak hidden>
+          {{ icon("speaker") }}<span data-speak-label>聽重點</span>
+        </button>
+        {% if v.file_url %}<a class="btn btn--secondary btn--lg" href="#original">查看原件</a>{% endif %}
+        {# 參考 Be My Eyes 把信任的人放在 AI 結果旁邊:用手機內建的分享選單傳這頁的網址(app.js 的 data-share;
+           只有網址與固定的一句話,不含文件內容,對方要登入才看得到)。系統不會通知家人。不能分享也不能複製就不顯示 #}
+        {% if can_remind %}
+        <button class="btn btn--secondary btn--lg" type="button" data-share data-share-text="請幫我看這份文件" hidden>請家人看一下</button>
+        {% endif %}
+      </div>
+      <div class="speak-msgs">
+        <p class="speak__status" role="status" aria-live="polite" data-speak-status></p>
+        <p class="speak__status" role="status" aria-live="polite" data-share-status></p>
+        <p class="hint" data-speak-unsupported hidden>這個瀏覽器不能朗讀。請改用手機或電腦上的 Chrome、Safari 或 Edge。</p>
+        <noscript><p class="hint">要開啟 JavaScript 才能朗讀。</p></noscript>
+      </div>
+    </section>
+    {% if v.duplicate %}{{ dup_note(v.duplicate) }}{% endif %}
+
+    {# 處理狀態與操作:文件存檔了沒和事情辦了沒分開寫(status_rows)。這裡的按鈕都是次要的;
+       取消提醒、改回未繳不跳確認框,按錯能馬上救回。
+       每一列的動作排在兩個固定格子(使用者 11/6:「欄位要對齊 統一大小」):左格是一樣寬的按鈕(更正讀值、已繳費、
+       查看待辦、去確認、恢復提醒),右格是小字連結(status-row__link:類型不對?、取消提醒、改回未繳);
+       一列只有其中一種時另一格空著,上下列照樣對齊 #}
+    <section class="section" id="status" aria-labelledby="status-title">
+      <div class="section__head"><div class="section__title"><h2 id="status-title">處理狀態</h2>{{ note(v.status_note) }}</div></div>
+      <dl class="status-list">
+        {% for r in v.status %}
+        <div class="status-row">
+          <dt>{{ r.label }}</dt>
+          <dd>
+            <div class="status-row__main">
+              <p class="status-row__text{% if r.class %} status-row__text--{{ r.class }}{% endif %}">{{ r.text }}</p>
+              {% if r.sub %}<p class="status-row__sub">{{ r.sub }}</p>{% endif %}
+            </div>
+            <div class="status-row__acts">
+              {% if r.key == "doc" and not v.review_reason %}
+              {% if v.correct_url %}<a class="btn btn--secondary" href="{{ v.correct_url }}">{{ icon("pencil") }}更正讀值</a>{% endif %}
+              {% if v.retype_url %}<a class="status-row__link" href="{{ v.retype_url }}">類型不對？</a>{% endif %}
+              {% endif %}
+              {% if r.done and can_remind %}
+              <form method="post" action="/reminder/{{ r.done.id }}/done">
+                {{ csrf_input() }}<input type="hidden" name="decision" value="complete"><input type="hidden" name="back" value="doc">
+                <button class="btn btn--secondary" type="submit">{{ r.done.label }}</button>
+              </form>
+              {% endif %}
+              {% if r.undo and can_remind %}
+              {# 首頁「已完成」只留幾天,這裡不限時間 #}
+              <form class="status-row__link" method="post" action="/reminder/{{ r.undo.id }}/done">
+                {{ csrf_input() }}<input type="hidden" name="decision" value="undo"><input type="hidden" name="back" value="doc">
+                <button class="link-btn" type="submit">{{ r.undo.label }}</button>
+              </form>
+              {% endif %}
+              {# 等家人確認的事:家人按「去確認」(和首頁一樣)直接到那一件;長輩按不了,只給「查看待辦」,不帶去那一頁 #}
+              {% if r.confirm and can_confirm %}<a class="btn btn--secondary" href="/confirm?item={{ r.confirm }}">去確認</a>
+              {% elif r.remind or r.confirm %}<a class="btn btn--secondary" href="/reminders">查看待辦</a>{% endif %}
+              {% if r.toggle and can_remind %}
+              {% set quiet = r.toggle.decision == 'cancel' %}
+              <form{% if quiet %} class="status-row__link"{% endif %} method="post" action="/reminder/{{ r.toggle.id }}">
+                {{ csrf_input() }}
+                <button class="{{ 'link-btn' if quiet else 'btn btn--secondary' }}" type="submit" name="decision" value="{{ r.toggle.decision }}">{{ r.toggle.label }}</button>
+              </form>
+              {% endif %}
+            </div>
+          </dd>
+        </div>
         {% endfor %}
-      </div>
-      {% endif %}
-      {% if a.medication %}<div class="facts facts--med">{{ medication(a.medication) }}</div>{% endif %}
-      {% if a.status %}
-      <div class="facts__status">
-        <p class="facts__note facts__note--{{ a.status.class }}" data-speak-part>{{ icon(a.status.icon) }}<span>{{ a.status.text }}{% if a.status.sub %}，{{ a.status.sub }}{% endif %}。</span></p>
-        {# 自動提醒在這裡取消/恢復:不跳確認框,按錯可以馬上恢復 #}
-        {% if a.status.toggle and (permissions is not defined or permissions.can_remind) %}{% set t = a.status.toggle %}
-        <form method="post" action="/reminder/{{ t.id }}">
-          {{ csrf_input() }}
-          <button class="btn btn--secondary" type="submit" name="decision" value="{{ t.decision }}">{{ icon(t.icon) }}{{ t.label }}</button>
-        </form>
-        {% endif %}
-      </div>
-      {% endif %}
-      {% if a.footer %}<p class="section__note">{{ a.footer }}</p>{% endif %}
+      </dl>
       {% if v.lottery_url %}<p class="answer__more"><a class="btn btn--secondary" href="{{ v.lottery_url }}">{{ icon("star") }}統一發票對獎</a></p>{% endif %}
     </section>
 
-    {% if v.is_medication %}
-    <p class="disclaimer" role="note">{{ icon("info") }}<span data-speak-part>{{ MEDICATION_DISCLAIMER }}</span></p>
+    {% if actions %}
+    <details class="section fold">
+      <summary class="fold__head"><h2>提醒與待辦</h2><span class="muted">{{ actions|length }} 項</span>{{ icon("chevron-right", "fold__chev") }}</summary>
+      <ul class="todo-list">
+        {% for act in actions %}
+        <li class="todo-item todo-item--{{ act.state_class }}">
+          <span class="type-icon">{{ icon(act.kind_icon) }}</span>
+          <div class="todo-item__main">
+            <p class="todo-item__head"><span class="todo-item__title">{{ act.title }}</span><span class="pill pill--{{ act.state_class }}">{{ icon(act.state_icon) }}{{ act.state_text }}</span></p>
+            {% for line in act.lines %}<p class="todo-item__line">{{ line }}</p>{% endfor %}
+            {% if act.medication %}<p class="todo-item__line">各時段的藥列在上面的服藥時間表。</p>{% endif %}
+            {% if permissions is defined and permissions.can_reject and act.tier == "confirm" and act.status in ("pending", "done") %}
+            <form class="action-reject" method="post" action="/confirm/{{ act.id }}">{{ csrf_input() }}
+              <input type="hidden" name="expected_status" value="{{ act.status }}">
+              <button class="btn btn--secondary" type="submit" name="decision" value="rejected"
+                data-confirm-title="{{ act.reject_ask.title }}" data-confirm="{{ act.reject_ask.message }}"
+                data-confirm-ok="{{ act.reject_ask.ok }}" data-confirm-field="{{ act.reject_ask.field }}">退回這個事項</button>
+            </form>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {# 只有能確認的人才有入口:長輩不要被帶去處理他按不了的事(等待的狀態寫在上面的處理狀態)。
+         叫「去確認」,和首頁、處理狀態那一列同一個說法(v5,11/6) #}
+      {% if can_confirm and actions|selectattr("state_class", "equalto", "wait")|list %}
+      <p class="more"><a href="/confirm?item={{ (actions|selectattr("state_class", "equalto", "wait")|first).id }}">去確認</a></p>
+      {% endif %}
+    </details>
     {% endif %}
 
     <section class="section" id="summary" aria-labelledby="summary-title">
       <div class="section__head">
-        <h2 id="summary-title">{{ "AI 白話解說" if v.summary_is_ai else "重點整理" }}</h2>
+        <div class="section__title"><h2 id="summary-title">{{ "AI 白話解說" if v.summary_is_ai else "重點整理" }}</h2>{{ note(v.summary_note) }}</div>
         {% if v.summary_is_ai %}<span class="pill pill--info">{{ icon("sparkles") }}AI 產生</span>{% endif %}
       </div>
-      <p class="prose" data-speak-part>{{ v.summary }}</p>
-      <p class="section__note">{{ v.summary_note }}</p>
+      {# 藥袋的解說照樣唸:藥袋上印的提醒可能只寫在這裡,只靠聽的長輩不能聽不到;其他類型和重點重複,不唸 #}
+      <p class="prose"{% if v.is_medication %} data-speak-part{% endif %}>{{ v.summary }}</p>
     </section>
 
-    <section class="section verify" aria-labelledby="verify-title">
-      <div class="section__head">
-        <h2 id="verify-title">核對結果</h2>
-        {% if vv.checks %}<span class="pill pill--{{ {'pass': 'auto', 'fail': 'manual'}.get(vv.overall, 'off') }}">{{ icon(vv.overall_icon) }}{{ vv.overall_text }}</span>{% endif %}
-      </div>
-      {% if vv.checks %}
+    {# 核對細項、辨識來源與完整欄位預設收合(使用者 11/4):要緊的已經寫在第一屏,想看依據再打開 #}
+    {% if vv.checks %}
+    <details class="section fold verify" id="checks">
+      <summary class="fold__head"><h2 id="verify-title">核對細項</h2><span class="pill pill--{{ {'pass': 'auto', 'fail': 'manual'}.get(vv.overall, 'off') }}">{{ icon(vv.overall_icon) }}{{ vv.overall_text }}</span>{{ icon("chevron-right", "fold__chev") }}</summary>
+      {% if vv.confidence_text %}<p class="section__note">{{ vv.confidence_text }}</p>{% endif %}
       <ul class="checks">
         {% for c in vv.checks %}
         <li class="check check--{{ c.status }}">
@@ -133,45 +261,13 @@
         </li>
         {% endfor %}
       </ul>
-      <p class="section__note">{{ vv.note }}{{ vv.confidence_text }}</p>
-      {% else %}
-      <p class="empty-line">{{ icon("dash") }}<span><b>未核對</b>：這份文件沒有能自動核對的項目，請對照原件。</span></p>
-      {% endif %}
-    </section>
-
-    {% if actions %}
-    <details class="section fold">
-      <summary class="fold__head"><h2>提醒與待辦</h2><span class="muted">{{ actions|length }} 項</span>{{ icon("chevron-right", "fold__chev") }}</summary>
-      <ul class="todo-list">
-        {% for a in actions %}
-        <li class="todo-item todo-item--{{ a.state_class }}">
-          <span class="type-icon">{{ icon(a.kind_icon) }}</span>
-          <div class="todo-item__main">
-            <p class="todo-item__head"><span class="todo-item__title">{{ a.title }}</span><span class="pill pill--{{ a.state_class }}">{{ icon(a.state_icon) }}{{ a.state_text }}</span></p>
-            {% for line in a.lines %}<p class="todo-item__line">{{ line }}</p>{% endfor %}
-            {% if a.medication %}<p class="todo-item__line">各時段的藥列在上面的服藥時間表。</p>{% endif %}
-            {% if permissions is defined and permissions.can_reject and a.tier == "confirm" and a.status in ("pending", "done") %}
-            <form class="action-reject" method="post" action="/confirm/{{ a.id }}">{{ csrf_input() }}
-              <input type="hidden" name="expected_status" value="{{ a.status }}">
-              <button class="btn btn--secondary" type="submit" name="decision" value="rejected"
-                data-confirm-title="{{ a.reject_ask.title }}" data-confirm="{{ a.reject_ask.message }}"
-                data-confirm-ok="{{ a.reject_ask.ok }}" data-confirm-field="{{ a.reject_ask.field }}">退回這個事項</button>
-            </form>
-            {% endif %}
-          </div>
-        </li>
-        {% endfor %}
-      </ul>
-      {% if actions|selectattr("state_class", "equalto", "wait")|list %}
-      <p class="section__note"><a href="/confirm">到「家人確認」處理等待中的事項</a></p>
-      {% endif %}
     </details>
     {% endif %}
 
-    <section class="section" id="fields" aria-labelledby="fields-title">
-      <div class="section__head"><h2 id="fields-title">讀到的內容</h2>
-        {%- if v.correct_url %}<a class="btn btn--secondary" href="{{ v.correct_url }}">{{ icon("pencil") }}更正讀值</a>{% endif %}
-        {%- if v.fields or v.med_items %}<span class="muted">{{ v.fields|length + v.med_items|length }} 項</span>{% endif %}</div>
+    <details class="section fold" id="fields">
+      <summary class="fold__head"><h2 id="fields-title">讀到的內容</h2>{% if v.fields or v.med_items %}<span class="muted">{{ v.fields|length + v.med_items|length }} 項</span>{% endif %}{{ icon("chevron-right", "fold__chev") }}</summary>
+      {% if v.source_model %}<p class="section__note">辨識來源：{{ v.source_model }}</p>{% endif %}
+      {% if v.correct_url %}<p class="more"><a href="{{ v.correct_url }}">更正讀值</a></p>{% endif %}
       {% if v.fields %}
       <dl class="kv">
         {% for r in v.fields %}
@@ -181,6 +277,7 @@
           {% elif r.value_list %}<ul class="plain-list">{% for x in r.value_list %}<li>{{ x }}</li>{% endfor %}</ul>
           {% else %}<span class="value">{{ r.value }}</span>{% endif %}
           {% if r.check %}<span class="field-check field-check--{{ r.check }}">{{ icon("check" if r.check == "pass" else "x") }}{{ r.check_text }}</span>{% endif %}
+          {% if r.was %}<span class="field-was">家人改過，原本讀成 {{ r.was }}</span>{% endif %}
         </dd>
         {% endfor %}
       </dl>
@@ -200,28 +297,33 @@
       </ul>
       {% endif %}
       {% if not v.fields and not v.med_items %}<p class="muted">沒有讀到任何欄位。</p>{% endif %}
-      {% if v.source_model %}<p class="section__note">辨識來源：{{ v.source_model }}</p>{% endif %}
-    </section>
+    </details>
+    {% if permissions is not defined or permissions.can_upload %}
+    <p class="answer__more first__next"><a class="btn btn--secondary" href="/">{{ icon("camera") }}拍下一張</a></p>
     {% endif %}
   </div>
 
   {{ original(v.file_url, v.is_pdf, v.file_size, "您上傳的" ~ v.title ~ "原件", v.prepared_url) }}
 </div>
+{% endif %}
+{# 退回、刪除放在最下面的次要位置,字寫清楚做了什麼;按下前先用確認框問一次。按鈕置中(使用者 11/5,.end-action) #}
 {% if permissions is defined and permissions.can_reject and reject_document_url %}
-<form class="section" method="post" action="{{ reject_document_url }}">{{ csrf_input() }}
+<form class="section end-action" method="post" action="{{ reject_document_url }}">{{ csrf_input() }}
 <button class="btn btn--secondary" type="submit" data-confirm-title="{{ reject_document_ask.title }}" data-confirm="{{ reject_document_ask.message }}" data-confirm-ok="{{ reject_document_ask.ok }}" data-confirm-field="{{ reject_document_ask.field }}">這份讀不清楚，退回重拍</button>
 </form>
 {% endif %}
 {% if permissions is defined and permissions.can_manage and delete_document_url %}
-<form class="section" method="post" action="{{ delete_document_url }}">{{ csrf_input() }}
+<form class="section end-action" method="post" action="{{ delete_document_url }}">{{ csrf_input() }}
 <button class="btn btn--danger" type="submit" data-confirm-title="{{ delete_document_ask.title }}" data-confirm="{{ delete_document_ask.message }}" data-confirm-ok="{{ delete_document_ask.ok }}" data-confirm-field="{{ delete_document_ask.field }}">{{ icon("x") }}刪除這份文件</button>
 </form>
 {% endif %}
+{# 操作紀錄大家都看得到(長輩也看得到全部),平常收著,不算主要操作 #}
 {% if audit_events is defined %}
-<section class="section" aria-labelledby="audit-title"><div class="section__head"><h2 id="audit-title">操作紀錄</h2><span class="muted">最近 50 筆</span></div>
-<ul class="audit-list">{% for event in audit_events %}
-<li><p><b>{{ event.event_label }}</b> · {{ event.actor }}{% if event.role_label %}（{{ event.role_label }}）{% endif %}</p><p class="muted">{{ event.when }}</p>{% if event.detail %}<p>{{ event.detail }}</p>{% endif %}</li>
-{% else %}<li class="muted">還沒有操作紀錄。舊版未記錄的操作者不會補填。</li>{% endfor %}</ul>
-</section>
+<details class="section fold" id="audit">
+  <summary class="fold__head"><h2 id="audit-title">操作紀錄</h2><span class="muted">最近 50 筆</span>{{ icon("chevron-right", "fold__chev") }}</summary>
+  <ul class="audit-list">{% for event in audit_events %}
+  <li><p><b>{{ event.event_label }}</b>，{{ event.actor }}{% if event.role_label %}（{{ event.role_label }}）{% endif %}</p><p class="muted">{{ event.when }}</p>{% if event.detail %}<p>{{ event.detail }}</p>{% endif %}</li>
+  {% else %}<li class="muted">還沒有操作紀錄。舊版未記錄的操作者不會補填。</li>{% endfor %}</ul>
+</details>
 {% endif %}
 {% endblock %}

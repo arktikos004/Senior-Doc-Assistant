@@ -299,6 +299,15 @@ def _times_per_day(text: str) -> int | None:
     return _LATIN_COUNTS[m.group(1).upper()] if m else None
 
 
+def guessed_timing(item: dict[str, Any]) -> bool:
+    """這一項藥的用法只印次數(每日三次、TID)、沒印任何時段字:標出的時段一定是推測的(不把次數換算成時段)。
+
+    src.parsing 清洗模型讀值時用它清掉推測的時段,和下面的核對是同一套判斷。
+    """
+    printed = f"{item.get('frequency_text') or ''} {item.get('dose_text') or ''}"
+    return not any(p.search(printed) for p in _SLOT_WORDS.values()) and _times_per_day(printed) is not None
+
+
 def check_medication_timing(items: Any) -> dict[str, Any]:
     """標出的服用時段,不能和同一項藥照抄的用法、用量矛盾(原則 2:時段要有原文依據)。
 
